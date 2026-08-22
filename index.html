@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111217" />
-  <meta name="description" content="The Discordians private cinematic archive and watch-party companion." />
+  <meta name="description" content="The Discordians shared movie list and watch-night decision room." />
   <title>The Discordians · Cine-Cord</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,26 +15,23 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="Primary navigation">
       <div class="brand-block">
-        <a class="brand" href="#home" data-nav="home" aria-label="The Discordians home">The Discordians</a>
+        <a class="brand" href="#list" data-nav="list" aria-label="Open The Discordians movie list">The Discordians</a>
         <span class="brand-rule"></span>
         <span class="section-label">Cine-Cord</span>
       </div>
 
       <nav class="primary-nav">
-        <button class="nav-item is-active" type="button" data-view="home">
-          <span class="material-symbols-outlined" aria-hidden="true">home</span><span>Home</span>
+        <button class="nav-item is-active" type="button" data-view="list">
+          <span class="material-symbols-outlined" aria-hidden="true">format_list_bulleted</span><span>The List</span>
         </button>
-        <button class="nav-item" type="button" data-view="journal">
-          <span class="material-symbols-outlined" aria-hidden="true">menu_book</span><span>Journal</span>
+        <button class="nav-item" type="button" data-view="pick">
+          <span class="material-symbols-outlined" aria-hidden="true">casino</span><span>Pick Tonight</span>
         </button>
-        <button class="nav-item" type="button" data-view="tonight">
-          <span class="material-symbols-outlined" aria-hidden="true">play_circle</span><span>Tonight</span>
+        <button class="nav-item" type="button" data-view="sessions">
+          <span class="material-symbols-outlined" aria-hidden="true">group</span><span>Sessions</span>
         </button>
-        <button class="nav-item" type="button" data-view="wrapped">
-          <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span><span>Wrapped</span>
-        </button>
-        <button class="nav-item" type="button" data-view="queue">
-          <span class="material-symbols-outlined" aria-hidden="true">format_list_bulleted</span><span>Queue</span>
+        <button class="nav-item" type="button" data-view="stats">
+          <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span><span>List Stats</span>
         </button>
         <button class="nav-item" type="button" data-view="members" data-admin-only hidden>
           <span class="material-symbols-outlined" aria-hidden="true">group</span><span>Members</span>
@@ -42,7 +39,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <span>Private archive</span>
+        <span>Private movie club</span>
         <span>for the Discordians</span>
         <div id="session-panel" class="session-panel" hidden>
           <span id="session-name" class="session-name"></span>
@@ -53,9 +50,9 @@
 
     <main id="view-root" class="main-view" tabindex="-1">
       <section class="access-view" aria-live="polite">
-        <span class="eyebrow">Private archive</span>
+        <span class="eyebrow">Shared movie list</span>
         <h1>Opening Cine-Cord…</h1>
-        <p>Checking your invite and loading the Journal.</p>
+        <p>Checking your invite and loading The List.</p>
       </section>
     </main>
   </div>
@@ -77,9 +74,9 @@
         <fieldset>
           <legend>How are we deciding?</legend>
           <div class="mode-picker">
-            <label class="choice-row"><input type="radio" name="mode" value="Quick Vote" checked /><span><strong>Quick Vote</strong><small>Swipe through a shared shortlist.</small></span></label>
-            <label class="choice-row"><input type="radio" name="mode" value="Mini-Games" /><span><strong>Mini-Games</strong><small>Consensus, roulette or Journal trivia.</small></span></label>
-            <label class="choice-row"><input type="radio" name="mode" value="Already Decided" /><span><strong>Already Decided</strong><small>Skip straight to the watch.</small></span></label>
+            <label class="choice-row"><input type="radio" name="mode" value="Consensus Sprint" checked /><span><strong>Consensus Sprint</strong><small>Private yes, maybe or no votes.</small></span></label>
+            <label class="choice-row"><input type="radio" name="mode" value="Queue Roulette" /><span><strong>Queue Roulette</strong><small>Weighted chaos with optional vetoes.</small></span></label>
+            <label class="choice-row"><input type="radio" name="mode" value="Reel Bracket" /><span><strong>Reel Bracket</strong><small>Head-to-head voting until one film remains.</small></span></label>
           </div>
         </fieldset>
         <button class="primary-button full-width" type="submit">Create Watch Party <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
@@ -87,26 +84,19 @@
     </section>
   </div>
 
-  <div id="journal-modal" class="modal-layer" hidden>
-    <section class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="journal-form-title">
-      <button class="icon-button modal-close" type="button" data-close-journal aria-label="Close Journal form">
+  <div id="film-modal" class="modal-layer" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="film-form-title">
+      <button class="icon-button modal-close" type="button" data-close-film aria-label="Close Add Film form">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
-      <p class="eyebrow">Finish the night</p>
-      <h2 id="journal-form-title">Record the Journal entry</h2>
-      <p class="modal-intro">The Discord version will keep the same familiar entry format.</p>
+      <p class="eyebrow">Shared list</p>
+      <h2 id="film-form-title">Add a film</h2>
+      <p class="modal-intro">Add something worth watching—or at least worth arguing about.</p>
 
-      <form id="journal-form" class="journal-form-grid">
-        <label><span>Title</span><input name="title" required value="" placeholder="What did you watch?" /></label>
-        <label><span>Year</span><input name="year" required inputmode="numeric" maxlength="4" placeholder="2026" /></label>
-        <label><span>Status</span><select name="status"><option>Finished</option><option>DNF</option></select></label>
-        <label class="span-two"><span>Viewers</span><input name="viewers" required /></label>
-        <label class="span-two"><span>Journal comment</span><textarea name="comment" rows="4" required placeholder="The line that deserves to survive forever..."></textarea></label>
-        <div class="discord-preview span-two" aria-live="polite">
-          <span class="eyebrow">Discord preview</span>
-          <pre id="entry-preview"></pre>
-        </div>
-        <button class="primary-button full-width span-two" type="submit">Record Entry <span class="material-symbols-outlined" aria-hidden="true">send</span></button>
+      <form id="film-form" class="access-form">
+        <label><span>Film title</span><input name="title" required maxlength="200" placeholder="What should we watch?" /></label>
+        <label><span>Release year <small>(optional)</small></span><input name="year" inputmode="numeric" maxlength="4" placeholder="e.g. 1982" /></label>
+        <button class="primary-button full-width" type="submit">Add to The List <span class="material-symbols-outlined" aria-hidden="true">add</span></button>
       </form>
     </section>
   </div>
