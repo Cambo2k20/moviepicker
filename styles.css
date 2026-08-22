@@ -2754,6 +2754,20 @@ legend,
     gap: 19px 11px;
   }
 
+  .poster-frame {
+    display: block;
+    width: 100%;
+    min-height: 0;
+    aspect-ratio: 2 / 3;
+  }
+
+  .poster-frame > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
   .poster-copy {
     padding: 9px 2px 8px;
   }
