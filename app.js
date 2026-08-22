@@ -1,63 +1,23 @@
-const members = [
-  { name: "Cameron", avatar: "./assets/avatar-cameron.png" },
-  { name: "Dean", avatar: "./assets/avatar-dean.png" },
-  { name: "Kieran", avatar: "./assets/avatar-kieran.png" },
-  { name: "Andrew", avatar: "./assets/avatar-andrew.png" },
-  { name: "Ross", avatar: "./assets/avatar-ross.png" }
-];
+import { createClient } from "@supabase/supabase-js";
 
-let journalEntries = [
-  {
-    number: 1316,
-    title: "Spider-Man: Into the Spider-Verse",
-    year: 2018,
-    viewers: ["Dean", "Kieran"],
-    status: "Finished",
-    comment: "THAT'S WHY HE'S THE GOAT... THE GOOOAT!",
-    author: "DeanShelTxn",
-    date: "01/08/2026, 13:33"
-  },
-  {
-    number: 1315,
-    title: "Spider-Man: Brand New Day (Live)",
-    year: 2026,
-    viewers: ["Andrew", "Cory", "Dean", "Jake", "Kieran", "Luke", "Ross"],
-    status: "Finished",
-    comment: "Do you like Peter Parker? You should watch Spider-man. He's in it.",
-    author: "DeanShelTxn",
-    date: "01/08/2026, 13:33"
-  },
-  {
-    number: 1314,
-    title: "Ex-Machina",
-    year: 2015,
-    viewers: ["Cameron", "Dean"],
-    status: "Finished",
-    comment: "Did you design Ava's face based on my pornography profile? Is that why she looks like Ronnie Arthur?",
-    author: "DeanShelTxn",
-    date: "30/07/2026, 12:45"
-  },
-  {
-    number: 1313,
-    title: "It's A Trap",
-    year: 2010,
-    viewers: ["Dean", "Kieran"],
-    status: "Finished",
-    comment: "Ohhhhh, I'm afraid the shield generator will be quite operational when your friends arrive!",
-    author: "DeanShelTxn",
-    date: "26/07/2026, 14:16"
-  },
-  {
-    number: 1312,
-    title: "The Odyssey (Live)",
-    year: 2026,
-    viewers: ["Andrew", "Cameron", "Dean"],
-    status: "Finished",
-    comment: "I hate it when they try force Peter Parker's parents into the story.",
-    author: "DeanShelTxn",
-    date: "24/07/2026, 18:53"
+const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   }
-];
+});
+
+const knownAvatars = {
+  cameron: "./assets/avatar-cameron.png",
+  dean: "./assets/avatar-dean.png",
+  kieran: "./assets/avatar-kieran.png",
+  andrew: "./assets/avatar-andrew.png",
+  ross: "./assets/avatar-ross.png"
+};
 
 const queue = [
   { id: 1, title: "The Nice Guys", year: 2016, suggestedBy: "Dean", votes: 5, age: "341 days waiting", voted: false },
@@ -110,14 +70,22 @@ const partyForm = document.querySelector("#party-form");
 const journalForm = document.querySelector("#journal-form");
 const entryPreview = document.querySelector("#entry-preview");
 const toast = document.querySelector("#toast");
+const sessionPanel = document.querySelector("#session-panel");
+const sessionName = document.querySelector("#session-name");
 
 let currentView = window.location.hash.replace("#", "") || "home";
+let authUser = null;
+let currentProfile = null;
+let activeGroup = null;
+let members = [];
+let journalEntries = [];
 let activeSession = null;
 let journalQuery = "";
+let isLoading = true;
 let toastTimer;
 
 function escapeHTML(value) {
-  return String(value)
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -125,28 +93,123 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
+function avatarForName(name) {
+  return knownAvatars[String(name).trim().toLowerCase()] || "./assets/avatar-cameron.png";
+}
+
+function formatJournalDate(value) {
+  if (!value) return "Date unknown";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(new Date(`${value}T12:00:00`));
+}
+
+function localISODate() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function nextEntryNumber() {
+  return journalEntries.length ? Math.max(...journalEntries.map((entry) => entry.number)) + 1 : 1317;
+}
+
 function memberMarkup(member) {
   return `
     <div class="member">
-      <img class="member-avatar" src="${member.avatar}" alt="${member.name}'s illustrated avatar" />
-      <span class="member-name">${member.name}</span>
+      <img class="member-avatar" src="${member.avatar}" alt="${escapeHTML(member.name)}'s illustrated avatar" />
+      <span class="member-name">${escapeHTML(member.name)}</span>
     </div>
+  `;
+}
+
+function renderLoading() {
+  return `
+    <section class="access-view" aria-live="polite">
+      <span class="eyebrow">Private archive</span>
+      <h1>Opening Cine-Cord…</h1>
+      <p>Checking your invite and loading the Journal.</p>
+    </section>
+  `;
+}
+
+function renderLogin() {
+  return `
+    <section class="access-view" aria-labelledby="login-title">
+      <div class="access-card">
+        <span class="eyebrow">The Discordians · Private access</span>
+        <h1 id="login-title">Enter Cine-Cord.</h1>
+        <p>Sign in with an account invited by the group administrator. There is no Discord connection or server permission involved.</p>
+        <form id="login-form" class="access-form">
+          <label><span>Email</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+          <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required minlength="6" /></label>
+          <button class="primary-button full-width" type="submit">Sign in <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+        </form>
+        <span class="access-note">Accounts are created by invitation only.</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderPendingAccess() {
+  return `
+    <section class="access-view" aria-labelledby="pending-title">
+      <div class="access-card">
+        <span class="eyebrow">Account recognised</span>
+        <h1 id="pending-title">Waiting for approval.</h1>
+        <p>Your account is signed in, but it has not been added to The Discordians group yet. An administrator needs to approve it before private Journal data becomes visible.</p>
+        <button class="secondary-button" type="button" data-sign-out>Sign out</button>
+      </div>
+    </section>
   `;
 }
 
 function renderHome() {
   const latest = journalEntries[0];
+  const journalSpotlight = latest ? `
+    <article class="journal-spotlight">
+      <div class="journal-main">
+        <span class="eyebrow">Persistent Journal&nbsp; · &nbsp;${journalEntries.length} loaded entries</span>
+        <span class="entry-kicker">Entry #${latest.number}</span>
+        <h2>${escapeHTML(latest.title)}</h2>
+        <div class="entry-meta">
+          <span>${latest.year || "Year unknown"}</span><span>·</span>
+          <span>Viewers: ${latest.viewers.map(escapeHTML).join(", ")}</span><span>·</span>
+          <span>Status: <strong class="finished">${escapeHTML(latest.status)}</strong></span>
+        </div>
+      </div>
+      <div class="journal-comment">
+        <span class="eyebrow">Comment</span>
+        <blockquote>${escapeHTML(latest.comment || "No comment recorded.")}</blockquote>
+        <span class="comment-credit">— <strong>${escapeHTML(latest.author)}</strong>&nbsp;&nbsp; ${escapeHTML(latest.date)}</span>
+      </div>
+    </article>
+  ` : `
+    <article class="journal-spotlight journal-empty">
+      <div class="journal-main">
+        <span class="eyebrow">Persistent Journal connected</span>
+        <span class="entry-kicker">Ready for Entry #1317</span>
+        <h2>The archive is waiting.</h2>
+        <p class="page-subtitle">Record the first website entry now, or import the historical Journal in the next phase.</p>
+      </div>
+      <div class="journal-comment">
+        <span class="eyebrow">Database status</span>
+        <blockquote>Private, authenticated and completely disconnected from Discord.</blockquote>
+      </div>
+    </article>
+  `;
+
   return `
     <section class="home-view" aria-labelledby="home-title">
       <div class="home-hero">
         <div class="hero-copy">
           <h1 id="home-title" class="hero-title">Tonight,<br />we decide.</h1>
           <p class="hero-subtitle">Start a room, gather the Discordians, then choose the film.</p>
-
           <div class="party-members" aria-label="Discordians members">
-            ${members.map(memberMarkup).join("")}
+            ${members.slice(0, 5).map(memberMarkup).join("")}
           </div>
-
           <div class="hero-actions">
             <button class="primary-button" type="button" data-open-party>
               Start Watch Party
@@ -155,29 +218,10 @@ function renderHome() {
             <span class="decision-modes">Quick Vote&nbsp; · &nbsp;Mini-Games&nbsp; · &nbsp;Already Decided</span>
           </div>
         </div>
-
         <img class="hero-art" src="./assets/hero-journal-web.png" alt="Abstract violet cinematic web of light" />
       </div>
-
-      <article class="journal-spotlight">
-        <div class="journal-main">
-          <span class="eyebrow">Return of the Journal&nbsp; · &nbsp;1,316 entries</span>
-          <span class="entry-kicker">Entry #${latest.number}</span>
-          <h2>${escapeHTML(latest.title)}</h2>
-          <div class="entry-meta">
-            <span>${latest.year}</span><span>·</span>
-            <span>Viewers: ${latest.viewers.join(", ")}</span><span>·</span>
-            <span>Status: <strong class="finished">${latest.status}</strong></span>
-          </div>
-        </div>
-        <div class="journal-comment">
-          <span class="eyebrow">Comment</span>
-          <blockquote>${escapeHTML(latest.comment)}</blockquote>
-          <span class="comment-credit">— <strong>${latest.author}</strong>&nbsp;&nbsp; ${latest.date}</span>
-        </div>
-      </article>
-
-      <span class="home-date">22 August 2026</span>
+      ${journalSpotlight}
+      <span class="home-date">${new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "long", year: "numeric" }).format(new Date())}</span>
     </section>
   `;
 }
@@ -193,35 +237,33 @@ function renderJournal() {
     <section class="page-view" aria-labelledby="journal-title">
       <header class="page-header">
         <div>
-          <span class="eyebrow">The living archive</span>
+          <span class="eyebrow">The living archive · ${journalEntries.length} persistent entries</span>
           <h1 id="journal-title" class="page-title">The Journal</h1>
           <p class="page-subtitle">Every film, season, live event, DNF and comment that deserved to survive the group chat.</p>
         </div>
         <button class="secondary-button" type="button" data-open-journal>Record an entry</button>
       </header>
-
       <div class="toolbar">
         <label class="search-field">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
           <input id="journal-search" type="search" value="${escapeHTML(journalQuery)}" placeholder="Search entries, viewers or comments" aria-label="Search the Journal" />
         </label>
       </div>
-
       <div class="journal-ledger" aria-live="polite">
         ${filtered.length ? filtered.map((entry) => `
           <article class="ledger-entry">
             <div class="ledger-number">#${entry.number}</div>
             <div>
-              <h3>${escapeHTML(entry.title)} <span class="eyebrow">${entry.year}</span></h3>
-              <div class="entry-meta"><span>Viewers: ${entry.viewers.join(", ")}</span></div>
-              <p>${escapeHTML(entry.comment)}</p>
+              <h3>${escapeHTML(entry.title)} <span class="eyebrow">${entry.year || "—"}</span></h3>
+              <div class="entry-meta"><span>Viewers: ${entry.viewers.map(escapeHTML).join(", ")}</span></div>
+              <p>${escapeHTML(entry.comment || "No comment recorded.")}</p>
             </div>
             <div class="ledger-side">
-              <span class="status ${entry.status === "DNF" ? "dnf" : ""}">${entry.status}</span>
-              <span class="ledger-date">${entry.date}</span>
+              <span class="status ${entry.status === "DNF" ? "dnf" : ""}">${escapeHTML(entry.status)}</span>
+              <span class="ledger-date">${escapeHTML(entry.date)}</span>
             </div>
           </article>
-        `).join("") : '<div class="empty-state">No Journal entries match that search.</div>'}
+        `).join("") : `<div class="empty-state">${journalQuery ? "No Journal entries match that search." : "The persistent Journal is empty. Record an entry or import the archive next."}</div>`}
       </div>
     </section>
   `;
@@ -238,20 +280,18 @@ function renderTonight() {
         </div>
         <button class="primary-button" type="button" data-open-party>Start Watch Party <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
       </header>
-
       ${activeSession ? `
         <article class="active-session">
           <div class="active-session-head">
             <div>
-              <span class="eyebrow">Active session · ${activeSession.mode}</span>
+              <span class="eyebrow">Active session · ${escapeHTML(activeSession.mode)}</span>
               <h3>The room is ready.</h3>
-              <p class="session-members">${activeSession.members.join(", ")}</p>
+              <p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p>
             </div>
             <button class="secondary-button" type="button" data-record-entry>Finish &amp; Journal</button>
           </div>
         </article>
       ` : ""}
-
       <div class="mode-list">
         ${decisionModes.map((mode) => `
           <article class="mode-row">
@@ -276,13 +316,11 @@ function renderWrapped() {
         </div>
         <button class="secondary-button" type="button" data-range>Lifetime</button>
       </header>
-
       <div class="wrapped-summary" aria-label="Cine-Cord totals">
         <div class="summary-stat"><strong>696</strong><span>Total entries</span></div>
         <div class="summary-stat"><strong>683</strong><span>Finished</span></div>
         <div class="summary-stat"><strong>98.132%</strong><span>Completion rate</span></div>
       </div>
-
       <div class="award-list">
         ${awards.map((award) => `
           <article class="award-row">
@@ -301,13 +339,12 @@ function renderQueue() {
     <section class="page-view" aria-labelledby="queue-title">
       <header class="page-header">
         <div>
-          <span class="eyebrow">Future mistakes</span>
+          <span class="eyebrow">Future mistakes · prototype data</span>
           <h1 id="queue-title" class="page-title">The Queue</h1>
           <p class="page-subtitle">Shared suggestions waiting for democracy, mini-games or the Wheel of Regret.</p>
         </div>
         <button class="secondary-button" type="button" data-add-suggestion>Add a suggestion</button>
       </header>
-
       <div class="queue-list">
         ${queue.map((item) => `
           <article class="queue-row">
@@ -329,7 +366,46 @@ function renderQueue() {
   `;
 }
 
+function updateShellState() {
+  const hasWorkspace = Boolean(authUser && activeGroup);
+  document.body.classList.toggle("is-locked", !hasWorkspace);
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.disabled = !hasWorkspace;
+    button.classList.toggle("is-active", hasWorkspace && button.dataset.view === currentView);
+  });
+  if (sessionPanel) sessionPanel.hidden = !authUser;
+  if (sessionName) sessionName.textContent = currentProfile?.displayName || authUser?.email || "Signed in";
+}
+
+function bindJournalSearch() {
+  const search = document.querySelector("#journal-search");
+  search?.addEventListener("input", (event) => {
+    journalQuery = event.target.value;
+    root.innerHTML = renderJournal();
+    bindJournalSearch();
+    const refreshed = document.querySelector("#journal-search");
+    refreshed?.focus();
+    refreshed?.setSelectionRange(refreshed.value.length, refreshed.value.length);
+  });
+}
+
 function render() {
+  if (isLoading) {
+    root.innerHTML = renderLoading();
+    updateShellState();
+    return;
+  }
+  if (!authUser) {
+    root.innerHTML = renderLogin();
+    updateShellState();
+    return;
+  }
+  if (!activeGroup) {
+    root.innerHTML = renderPendingAccess();
+    updateShellState();
+    return;
+  }
+
   const renderers = {
     home: renderHome,
     journal: renderJournal,
@@ -337,31 +413,14 @@ function render() {
     wrapped: renderWrapped,
     queue: renderQueue
   };
-
   if (!renderers[currentView]) currentView = "home";
   root.innerHTML = renderers[currentView]();
-
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.view === currentView);
-  });
-
-  const journalSearch = document.querySelector("#journal-search");
-  journalSearch?.addEventListener("input", (event) => {
-    journalQuery = event.target.value;
-    root.innerHTML = renderJournal();
-    document.querySelector("#journal-search")?.focus();
-    const refreshedSearch = document.querySelector("#journal-search");
-    if (refreshedSearch) {
-      refreshedSearch.setSelectionRange(refreshedSearch.value.length, refreshedSearch.value.length);
-      refreshedSearch.addEventListener("input", (nextEvent) => {
-        journalQuery = nextEvent.target.value;
-        render();
-      }, { once: true });
-    }
-  });
+  updateShellState();
+  if (currentView === "journal") bindJournalSearch();
 }
 
 function navigate(view) {
+  if (!authUser || !activeGroup) return;
   currentView = view;
   window.location.hash = view;
   render();
@@ -372,12 +431,11 @@ function navigate(view) {
 function openPartyModal(mode = "Quick Vote") {
   partyMembers.innerHTML = members.map((member, index) => `
     <label class="member-choice">
-      <input type="checkbox" name="members" value="${member.name}" ${index < 3 ? "checked" : ""} />
+      <input type="checkbox" name="members" value="${escapeHTML(member.name)}" ${index < 3 ? "checked" : ""} />
       <img src="${member.avatar}" alt="" />
-      <span>${member.name}</span>
+      <span>${escapeHTML(member.name)}</span>
     </label>
   `).join("");
-
   const radio = partyForm.querySelector(`input[name="mode"][value="${mode}"]`);
   if (radio) radio.checked = true;
   partyModal.hidden = false;
@@ -392,9 +450,8 @@ function closePartyModal() {
 
 function updateEntryPreview() {
   const data = new FormData(journalForm);
-  const nextNumber = Math.max(...journalEntries.map((entry) => entry.number)) + 1;
   entryPreview.textContent = [
-    `• Entry #${nextNumber}`,
+    `• Entry #${nextEntryNumber()}`,
     `• ${data.get("title") || "Title"}`,
     `• ${data.get("year") || "Year"}`,
     `• Viewers: ${data.get("viewers") || "Viewers"}`,
@@ -404,9 +461,9 @@ function updateEntryPreview() {
 }
 
 function openJournalModal() {
-  const viewerNames = activeSession?.members?.join(", ") || "Cameron, Dean";
+  const viewerNames = activeSession?.members?.join(", ") || currentProfile?.displayName || "";
   journalForm.elements.viewers.value = viewerNames;
-  journalForm.elements.year.value = "2026";
+  journalForm.elements.year.value = String(new Date().getFullYear());
   journalForm.elements.status.value = "Finished";
   updateEntryPreview();
   journalModal.hidden = false;
@@ -425,48 +482,141 @@ function showToast(message) {
   toast.hidden = false;
   toastTimer = setTimeout(() => {
     toast.hidden = true;
-  }, 2600);
+  }, 3600);
 }
 
-document.addEventListener("click", (event) => {
+async function loadWorkspace() {
+  const { data: groups, error: groupError } = await supabase
+    .from("groups")
+    .select("id,name,slug")
+    .limit(1);
+  if (groupError) throw groupError;
+
+  activeGroup = groups?.[0] || null;
+  currentProfile = null;
+  members = [];
+  journalEntries = [];
+  if (!activeGroup) return;
+
+  const [profilesResult, membershipsResult, entriesResult, viewersResult] = await Promise.all([
+    supabase.from("profiles").select("id,display_name"),
+    supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
+    supabase.from("journal_entries").select("id,entry_number,title,release_year,watched_at,status,comment,created_by,created_at").eq("group_id", activeGroup.id).order("entry_number", { ascending: false }),
+    supabase.from("entry_viewers").select("entry_id,profile_id")
+  ]);
+
+  const firstError = [profilesResult.error, membershipsResult.error, entriesResult.error, viewersResult.error].find(Boolean);
+  if (firstError) throw firstError;
+
+  const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
+  currentProfile = profileMap.has(authUser.id)
+    ? { id: authUser.id, displayName: profileMap.get(authUser.id).display_name }
+    : { id: authUser.id, displayName: authUser.email?.split("@")[0] || "Discordian" };
+
+  members = (membershipsResult.data || []).map((membership) => {
+    const profile = profileMap.get(membership.user_id);
+    const name = profile?.display_name || "Discordian";
+    return { id: membership.user_id, name, role: membership.role, avatar: avatarForName(name) };
+  });
+
+  const viewerIdsByEntry = new Map();
+  for (const viewer of viewersResult.data || []) {
+    const ids = viewerIdsByEntry.get(viewer.entry_id) || [];
+    ids.push(viewer.profile_id);
+    viewerIdsByEntry.set(viewer.entry_id, ids);
+  }
+
+  journalEntries = (entriesResult.data || []).map((entry) => ({
+    id: entry.id,
+    number: Number(entry.entry_number),
+    title: entry.title,
+    year: entry.release_year,
+    viewers: (viewerIdsByEntry.get(entry.id) || []).map((id) => profileMap.get(id)?.display_name || "Former member"),
+    status: entry.status === "FINISHED" ? "Finished" : entry.status,
+    comment: entry.comment || "",
+    author: profileMap.get(entry.created_by)?.display_name || "Legacy import",
+    date: formatJournalDate(entry.watched_at)
+  }));
+}
+
+async function syncSession(session) {
+  isLoading = true;
+  authUser = session?.user || null;
+  activeGroup = null;
+  currentProfile = null;
+  members = [];
+  journalEntries = [];
+  render();
+
+  if (authUser) {
+    try {
+      await loadWorkspace();
+    } catch (error) {
+      showToast(`Could not load the private Journal: ${error.message}`);
+    }
+  }
+  isLoading = false;
+  render();
+}
+
+document.addEventListener("submit", async (event) => {
+  if (!event.target.matches("#login-form")) return;
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const submit = event.target.querySelector("button[type='submit']");
+  submit.disabled = true;
+  submit.textContent = "Signing in…";
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: String(form.get("email")).trim(),
+    password: String(form.get("password"))
+  });
+  if (error) {
+    submit.disabled = false;
+    submit.innerHTML = 'Sign in <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>';
+    showToast(error.message);
+    return;
+  }
+  await syncSession(data.session);
+});
+
+document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) {
     navigate(viewButton.dataset.view);
     return;
   }
-
   if (event.target.closest("[data-nav='home']")) {
     event.preventDefault();
     navigate("home");
     return;
   }
-
+  if (event.target.closest("[data-sign-out]")) {
+    await supabase.auth.signOut();
+    await syncSession(null);
+    showToast("Signed out of the private archive.");
+    return;
+  }
   if (event.target.closest("[data-open-party]")) {
     openPartyModal();
     return;
   }
-
   if (event.target.closest("[data-close-modal]") || event.target === partyModal) {
     closePartyModal();
     return;
   }
-
   if (event.target.closest("[data-open-journal]") || event.target.closest("[data-record-entry]")) {
     openJournalModal();
     return;
   }
-
   if (event.target.closest("[data-close-journal]") || event.target === journalModal) {
     closeJournalModal();
     return;
   }
-
   const modeButton = event.target.closest("[data-select-mode]");
   if (modeButton) {
     openPartyModal(modeButton.dataset.selectMode);
     return;
   }
-
   const voteButton = event.target.closest("[data-vote]");
   if (voteButton) {
     const item = queue.find((candidate) => candidate.id === Number(voteButton.dataset.vote));
@@ -474,18 +624,16 @@ document.addEventListener("click", (event) => {
       item.voted = !item.voted;
       item.votes += item.voted ? 1 : -1;
       render();
-      showToast(item.voted ? `Vote added for ${item.title}` : `Vote removed from ${item.title}`);
+      showToast(item.voted ? `Prototype vote added for ${item.title}` : `Prototype vote removed from ${item.title}`);
     }
     return;
   }
-
   if (event.target.closest("[data-range]")) {
-    showToast("Custom Wrapped ranges will connect to the imported Journal.");
+    showToast("Wrapped will be recalculated after the historical Journal import.");
     return;
   }
-
   if (event.target.closest("[data-add-suggestion]")) {
-    showToast("Queue suggestions will be enabled with Discord sign-in.");
+    showToast("Persistent queue suggestions are planned for the next phase.");
   }
 });
 
@@ -497,12 +645,7 @@ partyForm.addEventListener("submit", (event) => {
     showToast("Choose at least one Discordian.");
     return;
   }
-
-  activeSession = {
-    members: selectedMembers,
-    mode: form.get("mode")
-  };
-
+  activeSession = { members: selectedMembers, mode: form.get("mode") };
   closePartyModal();
   navigate("tonight");
   showToast(`${activeSession.mode} room created for ${selectedMembers.length} people.`);
@@ -511,28 +654,46 @@ partyForm.addEventListener("submit", (event) => {
 journalForm.addEventListener("input", updateEntryPreview);
 journalForm.addEventListener("change", updateEntryPreview);
 
-journalForm.addEventListener("submit", (event) => {
+journalForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!authUser || !activeGroup) {
+    showToast("Your private Journal session has expired. Sign in again.");
+    return;
+  }
+
   const data = new FormData(journalForm);
-  const nextNumber = Math.max(...journalEntries.map((entry) => entry.number)) + 1;
-  const viewers = String(data.get("viewers")).split(",").map((name) => name.trim()).filter(Boolean);
+  const viewerNames = String(data.get("viewers")).split(",").map((name) => name.trim()).filter(Boolean);
+  const memberByName = new Map(members.map((member) => [member.name.toLowerCase(), member]));
+  const unknownNames = viewerNames.filter((name) => !memberByName.has(name.toLowerCase()));
+  if (unknownNames.length) {
+    showToast(`These viewers are not approved website members yet: ${unknownNames.join(", ")}`);
+    return;
+  }
 
-  journalEntries.unshift({
-    number: nextNumber,
-    title: String(data.get("title")).trim(),
-    year: Number(data.get("year")),
-    viewers,
-    status: String(data.get("status")),
-    comment: String(data.get("comment")).trim(),
-    author: "Website recorder",
-    date: "22/08/2026"
+  const submit = journalForm.querySelector("button[type='submit']");
+  submit.disabled = true;
+  const { data: entryNumber, error } = await supabase.rpc("create_journal_entry", {
+    p_group_id: activeGroup.id,
+    p_title: String(data.get("title")).trim(),
+    p_release_year: Number(data.get("year")),
+    p_watched_at: localISODate(),
+    p_status: String(data.get("status")),
+    p_comment: String(data.get("comment")).trim(),
+    p_viewer_ids: [...new Set(viewerNames.map((name) => memberByName.get(name.toLowerCase()).id))]
   });
+  submit.disabled = false;
 
+  if (error) {
+    showToast(`Entry was not recorded: ${error.message}`);
+    return;
+  }
+
+  await loadWorkspace();
   activeSession = null;
   journalForm.reset();
   closeJournalModal();
   navigate("journal");
-  showToast(`Entry #${nextNumber} added to the website preview.`);
+  showToast(`Entry #${entryNumber} saved to the private Journal.`);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -543,10 +704,17 @@ document.addEventListener("keydown", (event) => {
 
 window.addEventListener("hashchange", () => {
   const nextView = window.location.hash.replace("#", "");
-  if (nextView && nextView !== currentView) {
+  if (nextView && nextView !== currentView && authUser && activeGroup) {
     currentView = nextView;
     render();
   }
 });
 
-render();
+supabase.auth.onAuthStateChange((_event, session) => {
+  window.setTimeout(() => {
+    if (session?.user?.id !== authUser?.id) syncSession(session);
+  }, 0);
+});
+
+const { data: sessionData } = await supabase.auth.getSession();
+await syncSession(sessionData.session);
