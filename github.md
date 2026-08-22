@@ -1,16 +1,36 @@
 repo: Cambo2k20/moviepicker
-branch: main
+branch: feature/discordians-rebrand
 
-## Last sync
-date: 2026-08-22
-note: Repository contains only a LICENSE file — no application source to build from. The prototype in this project was designed from scratch against the brief in chat.
+## Discordians companion prototype
 
-### Updated in this project
-- Built "Movie Picker.dc.html" — 9-screen working prototype (onboarding, home, swipe pick loop, filters, detail, group lobby, results, watchlist, profile)
-- Art direction: cinema dark, Space Grotesk, single warm accent (#E9693C)
-- Poster artwork is colour-field placeholder only — needs real TMDB imagery
+This branch turns the original movie picker into a broader private server companion. Cine-Cord remains the movie section, while the navigation establishes room for the Journal, watch-party decisions, Wrapped statistics and the shared queue.
 
-## Screen map
-| Screen | Built from |
-| --- | --- |
-| All screens | Designed from brief; no repo source available |
+### Included in this prototype
+
+- Rebranded purple, grey and white Discordians visual system
+- Responsive home screen based on the selected design direction
+- Watch-party setup with member selection and three decision modes
+- Mini-game concepts: Consensus Sprint, Queue Roulette and Journal Recall
+- End-of-watch Journal form with the familiar Discord bullet-format preview
+- Searchable Journal entries using realistic sample data
+- Wrapped awards and Cine-Cord totals
+- Shared queue with local prototype voting
+
+### Data boundary
+
+The prototype is front-end only. New entries, votes and room state live in the current browser session and are not yet written to Discord or a database. The next implementation phase should preserve the existing Discord Journal format and add authenticated persistence plus a Discord webhook or bot integration.
+
+### Local development
+
+```bash
+npm install
+npm run dev
+```
+
+Production check:
+
+```bash
+npm run build
+```
+
+The legacy prototype files remain in the repository for reference.
