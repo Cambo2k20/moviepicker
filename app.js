@@ -76,11 +76,15 @@ const sessionName = document.querySelector("#session-name");
 let currentView = window.location.hash.replace("#", "") || "home";
 let authUser = null;
 let currentProfile = null;
+let availableGroup = null;
 let activeGroup = null;
 let members = [];
+let accessRequest = null;
+let joinRequests = [];
 let journalEntries = [];
 let activeSession = null;
 let journalQuery = "";
+let authMode = "signin";
 let isLoading = true;
 let toastTimer;
 
@@ -112,6 +116,19 @@ function localISODate() {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
+function isCurrentAdmin() {
+  return currentProfile?.role === "admin";
+}
+
+function formatRequestDate(value) {
+  if (!value) return "Date unknown";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
 function nextEntryNumber() {
   return journalEntries.length ? Math.max(...journalEntries.map((entry) => entry.number)) + 1 : 1317;
 }
@@ -136,31 +153,48 @@ function renderLoading() {
 }
 
 function renderLogin() {
+  const isSignup = authMode === "signup";
   return `
     <section class="access-view" aria-labelledby="login-title">
       <div class="access-card">
-        <span class="eyebrow">The Discordians · Private access</span>
-        <h1 id="login-title">Enter Cine-Cord.</h1>
-        <p>Sign in with an account invited by the group administrator. There is no Discord connection or server permission involved.</p>
-        <form id="login-form" class="access-form">
+        <span class="eyebrow">The Discordians · ${isSignup ? "Request access" : "Private access"}</span>
+        <h1 id="login-title">${isSignup ? "Join the waiting list." : "Enter Cine-Cord."}</h1>
+        <p>${isSignup
+          ? "Create an account, confirm your email if asked, then request approval from a Discordians website administrator."
+          : "Sign in with your approved website account. This does not connect to Discord or request any server permissions."}</p>
+        <form id="auth-form" class="access-form" data-auth-mode="${isSignup ? "signup" : "signin"}">
+          ${isSignup ? `<label><span>Journal display name</span><input name="display_name" required maxlength="40" autocomplete="nickname" placeholder="How your name appears in entries" /></label>` : ""}
           <label><span>Email</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
-          <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required minlength="6" /></label>
-          <button class="primary-button full-width" type="submit">Sign in <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+          <label><span>Password</span><input name="password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="${isSignup ? "8" : "6"}" /></label>
+          <button class="primary-button full-width" type="submit">${isSignup ? "Create account" : "Sign in"} <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
         </form>
-        <span class="access-note">Accounts are created by invitation only.</span>
+        <button class="auth-mode-toggle" type="button" data-toggle-auth-mode>
+          ${isSignup ? "Already have an account? Sign in" : "New Discordian? Create an account"}
+        </button>
+        <span class="access-note">Approval controls private Journal access. Creating an account alone reveals no group data.</span>
       </div>
     </section>
   `;
 }
 
 function renderPendingAccess() {
+  const requestedName = accessRequest?.requested_display_name || currentProfile?.displayName || "";
   return `
     <section class="access-view" aria-labelledby="pending-title">
       <div class="access-card">
-        <span class="eyebrow">Account recognised</span>
-        <h1 id="pending-title">Waiting for approval.</h1>
-        <p>Your account is signed in, but it has not been added to The Discordians group yet. An administrator needs to approve it before private Journal data becomes visible.</p>
-        <button class="secondary-button" type="button" data-sign-out>Sign out</button>
+        <span class="eyebrow">Account recognised · Private data locked</span>
+        <h1 id="pending-title">${accessRequest ? "Waiting for approval." : "Request access."}</h1>
+        <p>${accessRequest
+          ? `Your request was sent on ${formatRequestDate(accessRequest.created_at)}. You can update the Journal name an administrator will see.`
+          : "Choose the familiar name your friends use in the Journal, then send a request to the website administrator."}</p>
+        <form id="request-access-form" class="access-form">
+          <label><span>Journal display name</span><input name="display_name" required maxlength="40" value="${escapeHTML(requestedName)}" /></label>
+          <button class="primary-button full-width" type="submit">${accessRequest ? "Update request" : "Request website access"} <span class="material-symbols-outlined" aria-hidden="true">send</span></button>
+        </form>
+        <div class="access-actions">
+          ${accessRequest ? `<button class="text-button" type="button" data-cancel-access-request>Cancel request</button>` : ""}
+          <button class="text-button" type="button" data-sign-out>Sign out</button>
+        </div>
       </div>
     </section>
   `;
@@ -366,11 +400,114 @@ function renderQueue() {
   `;
 }
 
+function renderMembers() {
+  if (!isCurrentAdmin()) return renderHome();
+  const accessUrl = `${window.location.origin}${window.location.pathname}`;
+  const sortedMembers = [...members].sort((a, b) => {
+    if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return `
+    <section class="page-view" aria-labelledby="members-title">
+      <header class="page-header">
+        <div>
+          <span class="eyebrow">Website access · Admin only</span>
+          <h1 id="members-title" class="page-title">Members</h1>
+          <p class="page-subtitle">Approve friends, keep Journal names consistent and control access to the private archive.</p>
+        </div>
+        <span class="member-count">${members.length} approved</span>
+      </header>
+
+      <article class="invite-panel">
+        <div>
+          <span class="eyebrow">Invite a friend</span>
+          <h2>Share the private entrance.</h2>
+          <p>They create an account, request access and remain locked out until you approve them here.</p>
+        </div>
+        <div class="invite-link-row">
+          <input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" />
+          <button class="secondary-button" type="button" data-copy-invite>Copy link</button>
+        </div>
+      </article>
+
+      <section class="management-section" aria-labelledby="requests-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Waiting room</span>
+            <h2 id="requests-title">Access requests</h2>
+          </div>
+          <span class="request-count">${joinRequests.length}</span>
+        </div>
+        <div class="request-list">
+          ${joinRequests.length ? joinRequests.map((request) => `
+            <article class="request-row">
+              <div class="request-identity">
+                <span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span>
+                <div>
+                  <h3>${escapeHTML(request.requested_display_name)}</h3>
+                  <p>${escapeHTML(request.requester_email)}</p>
+                  <small>Requested ${formatRequestDate(request.created_at)}</small>
+                </div>
+              </div>
+              <div class="request-actions">
+                <button class="primary-button compact-button" type="button" data-approve-request="${request.id}">Approve</button>
+                <button class="secondary-button" type="button" data-decline-request="${request.id}">Decline</button>
+              </div>
+            </article>
+          `).join("") : `<div class="empty-state compact-empty">No one is waiting for approval.</div>`}
+        </div>
+      </section>
+
+      <section class="management-section" aria-labelledby="approved-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Private archive</span>
+            <h2 id="approved-title">Approved members</h2>
+          </div>
+        </div>
+        <div class="approved-list">
+          ${sortedMembers.map((member) => {
+            const isSelf = member.id === authUser.id;
+            return `
+              <form class="approved-row" data-member-form data-user-id="${member.id}">
+                <img src="${member.avatar}" alt="" />
+                <label>
+                  <span>Journal name</span>
+                  <input name="display_name" required maxlength="40" value="${escapeHTML(member.name)}" />
+                </label>
+                <label>
+                  <span>Role</span>
+                  <select name="role" ${isSelf ? "disabled" : ""}>
+                    <option value="member" ${member.role === "member" ? "selected" : ""}>Member</option>
+                    <option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option>
+                  </select>
+                  ${isSelf ? `<input type="hidden" name="role" value="admin" />` : ""}
+                </label>
+                <div class="member-admin-actions">
+                  <button class="secondary-button" type="submit">Save</button>
+                  <button class="text-button danger-button" type="button" data-remove-member="${member.id}" ${isSelf ? "disabled" : ""}>Remove access</button>
+                </div>
+                ${isSelf ? `<span class="self-badge">You</span>` : ""}
+              </form>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function updateShellState() {
   const hasWorkspace = Boolean(authUser && activeGroup);
+  const isAdmin = hasWorkspace && isCurrentAdmin();
   document.body.classList.toggle("is-locked", !hasWorkspace);
+  document.body.classList.toggle("is-admin", isAdmin);
+  document.querySelectorAll("[data-admin-only]").forEach((element) => {
+    element.hidden = !isAdmin;
+  });
   document.querySelectorAll("[data-view]").forEach((button) => {
-    button.disabled = !hasWorkspace;
+    button.disabled = !hasWorkspace || (button.dataset.view === "members" && !isAdmin);
     button.classList.toggle("is-active", hasWorkspace && button.dataset.view === currentView);
   });
   if (sessionPanel) sessionPanel.hidden = !authUser;
@@ -411,9 +548,10 @@ function render() {
     journal: renderJournal,
     tonight: renderTonight,
     wrapped: renderWrapped,
-    queue: renderQueue
+    queue: renderQueue,
+    members: renderMembers
   };
-  if (!renderers[currentView]) currentView = "home";
+  if (!renderers[currentView] || (currentView === "members" && !isCurrentAdmin())) currentView = "home";
   root.innerHTML = renderers[currentView]();
   updateShellState();
   if (currentView === "journal") bindJournalSearch();
@@ -421,6 +559,7 @@ function render() {
 
 function navigate(view) {
   if (!authUser || !activeGroup) return;
+  if (view === "members" && !isCurrentAdmin()) return;
   currentView = view;
   window.location.hash = view;
   render();
@@ -489,35 +628,63 @@ async function loadWorkspace() {
   const { data: groups, error: groupError } = await supabase
     .from("groups")
     .select("id,name,slug")
+    .eq("slug", "the-discordians")
     .limit(1);
   if (groupError) throw groupError;
 
-  activeGroup = groups?.[0] || null;
+  availableGroup = groups?.[0] || null;
+  activeGroup = null;
   currentProfile = null;
   members = [];
+  accessRequest = null;
+  joinRequests = [];
   journalEntries = [];
-  if (!activeGroup) return;
+  if (!availableGroup) return;
 
-  const [profilesResult, membershipsResult, entriesResult, viewersResult] = await Promise.all([
+  const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
+    supabase.from("profiles").select("id,display_name").eq("id", authUser.id).maybeSingle(),
+    supabase.from("group_memberships").select("user_id,role").eq("group_id", availableGroup.id).eq("user_id", authUser.id).maybeSingle(),
+    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", availableGroup.id).eq("user_id", authUser.id).maybeSingle()
+  ]);
+
+  const accessError = [selfProfileResult.error, selfMembershipResult.error, selfRequestResult.error].find(Boolean);
+  if (accessError) throw accessError;
+
+  currentProfile = {
+    id: authUser.id,
+    displayName: selfProfileResult.data?.display_name || authUser.email?.split("@")[0] || "Discordian",
+    role: selfMembershipResult.data?.role || null
+  };
+  accessRequest = selfRequestResult.data || null;
+
+  if (!selfMembershipResult.data) return;
+
+  activeGroup = availableGroup;
+
+  const [profilesResult, membershipsResult, entriesResult, viewersResult, requestsResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("journal_entries").select("id,entry_number,title,release_year,watched_at,status,comment,created_by,created_at").eq("group_id", activeGroup.id).order("entry_number", { ascending: false }),
-    supabase.from("entry_viewers").select("entry_id,profile_id")
+    supabase.from("entry_viewers").select("entry_id,profile_id"),
+    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true })
   ]);
 
-  const firstError = [profilesResult.error, membershipsResult.error, entriesResult.error, viewersResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, entriesResult.error, viewersResult.error, requestsResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
-  currentProfile = profileMap.has(authUser.id)
-    ? { id: authUser.id, displayName: profileMap.get(authUser.id).display_name }
-    : { id: authUser.id, displayName: authUser.email?.split("@")[0] || "Discordian" };
+  currentProfile = {
+    id: authUser.id,
+    displayName: profileMap.get(authUser.id)?.display_name || currentProfile.displayName,
+    role: selfMembershipResult.data.role
+  };
 
   members = (membershipsResult.data || []).map((membership) => {
     const profile = profileMap.get(membership.user_id);
     const name = profile?.display_name || "Discordian";
     return { id: membership.user_id, name, role: membership.role, avatar: avatarForName(name) };
   });
+  joinRequests = isCurrentAdmin() ? (requestsResult.data || []) : [];
 
   const viewerIdsByEntry = new Map();
   for (const viewer of viewersResult.data || []) {
@@ -542,9 +709,12 @@ async function loadWorkspace() {
 async function syncSession(session) {
   isLoading = true;
   authUser = session?.user || null;
+  availableGroup = null;
   activeGroup = null;
   currentProfile = null;
   members = [];
+  accessRequest = null;
+  joinRequests = [];
   journalEntries = [];
   render();
 
@@ -560,29 +730,98 @@ async function syncSession(session) {
 }
 
 document.addEventListener("submit", async (event) => {
-  if (!event.target.matches("#login-form")) return;
+  if (!event.target.matches("#auth-form")) return;
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const submit = event.target.querySelector("button[type='submit']");
+  const mode = event.target.dataset.authMode;
+  submit.disabled = true;
+  submit.textContent = mode === "signup" ? "Creating account…" : "Signing in…";
+
+  const credentials = {
+    email: String(form.get("email")).trim(),
+    password: String(form.get("password"))
+  };
+  const { data, error } = mode === "signup"
+    ? await supabase.auth.signUp({
+        ...credentials,
+        options: {
+          data: { display_name: String(form.get("display_name")).trim() },
+          emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+        }
+      })
+    : await supabase.auth.signInWithPassword(credentials);
+
+  if (error) {
+    submit.disabled = false;
+    submit.innerHTML = `${mode === "signup" ? "Create account" : "Sign in"} <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>`;
+    showToast(error.message);
+    return;
+  }
+
+  if (mode === "signup" && !data.session) {
+    authMode = "signin";
+    render();
+    showToast("Account created. Check your email, then sign in to request access.");
+    return;
+  }
+
+  await syncSession(data.session);
+  if (mode === "signup") showToast("Account created. Send your website access request next.");
+});
+
+document.addEventListener("submit", async (event) => {
+  if (!event.target.matches("#request-access-form")) return;
   event.preventDefault();
   const form = new FormData(event.target);
   const submit = event.target.querySelector("button[type='submit']");
   submit.disabled = true;
-  submit.textContent = "Signing in…";
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: String(form.get("email")).trim(),
-    password: String(form.get("password"))
+  const { error } = await supabase.rpc("request_group_access", {
+    p_group_slug: "the-discordians",
+    p_display_name: String(form.get("display_name")).trim()
   });
+  submit.disabled = false;
   if (error) {
-    submit.disabled = false;
-    submit.innerHTML = 'Sign in <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>';
-    showToast(error.message);
+    showToast(`Request was not sent: ${error.message}`);
     return;
   }
-  await syncSession(data.session);
+  await loadWorkspace();
+  render();
+  showToast("Access request sent to The Discordians administrators.");
+});
+
+document.addEventListener("submit", async (event) => {
+  if (!event.target.matches("[data-member-form]")) return;
+  event.preventDefault();
+  if (!activeGroup || !isCurrentAdmin()) return;
+  const form = new FormData(event.target);
+  const submit = event.target.querySelector("button[type='submit']");
+  submit.disabled = true;
+  const { error } = await supabase.rpc("update_group_member", {
+    p_group_id: activeGroup.id,
+    p_user_id: event.target.dataset.userId,
+    p_display_name: String(form.get("display_name")).trim(),
+    p_role: String(form.get("role"))
+  });
+  submit.disabled = false;
+  if (error) {
+    showToast(`Member was not updated: ${error.message}`);
+    return;
+  }
+  await loadWorkspace();
+  render();
+  showToast("Member details saved.");
 });
 
 document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) {
     navigate(viewButton.dataset.view);
+    return;
+  }
+  if (event.target.closest("[data-toggle-auth-mode]")) {
+    authMode = authMode === "signin" ? "signup" : "signin";
+    render();
     return;
   }
   if (event.target.closest("[data-nav='home']")) {
@@ -594,6 +833,79 @@ document.addEventListener("click", async (event) => {
     await supabase.auth.signOut();
     await syncSession(null);
     showToast("Signed out of the private archive.");
+    return;
+  }
+  if (event.target.closest("[data-cancel-access-request]")) {
+    if (!accessRequest || !window.confirm("Cancel your website access request?")) return;
+    const { error } = await supabase.from("group_join_requests").delete().eq("id", accessRequest.id);
+    if (error) {
+      showToast(`Request was not cancelled: ${error.message}`);
+      return;
+    }
+    await loadWorkspace();
+    render();
+    showToast("Access request cancelled.");
+    return;
+  }
+  if (event.target.closest("[data-copy-invite]")) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}`);
+      showToast("Website access link copied.");
+    } catch {
+      showToast("Copy was blocked. Press and hold the link to copy it manually.");
+    }
+    return;
+  }
+  const approveButton = event.target.closest("[data-approve-request]");
+  if (approveButton) {
+    approveButton.disabled = true;
+    const { error } = await supabase.rpc("approve_group_join_request", {
+      p_request_id: approveButton.dataset.approveRequest
+    });
+    if (error) {
+      approveButton.disabled = false;
+      showToast(`Access was not approved: ${error.message}`);
+      return;
+    }
+    await loadWorkspace();
+    render();
+    showToast("Member approved. Their private archive access is now active.");
+    return;
+  }
+  const declineButton = event.target.closest("[data-decline-request]");
+  if (declineButton) {
+    if (!window.confirm("Decline this website access request?")) return;
+    declineButton.disabled = true;
+    const { error } = await supabase.rpc("decline_group_join_request", {
+      p_request_id: declineButton.dataset.declineRequest
+    });
+    if (error) {
+      declineButton.disabled = false;
+      showToast(`Request was not declined: ${error.message}`);
+      return;
+    }
+    await loadWorkspace();
+    render();
+    showToast("Access request declined.");
+    return;
+  }
+  const removeButton = event.target.closest("[data-remove-member]");
+  if (removeButton) {
+    const member = members.find((candidate) => candidate.id === removeButton.dataset.removeMember);
+    if (!member || !window.confirm(`Remove ${member.name}'s website access? Their account will remain, but private data will be locked.`)) return;
+    removeButton.disabled = true;
+    const { error } = await supabase.rpc("remove_group_member", {
+      p_group_id: activeGroup.id,
+      p_user_id: member.id
+    });
+    if (error) {
+      removeButton.disabled = false;
+      showToast(`Member was not removed: ${error.message}`);
+      return;
+    }
+    await loadWorkspace();
+    render();
+    showToast(`${member.name}'s website access was removed.`);
     return;
   }
   if (event.target.closest("[data-open-party]")) {
