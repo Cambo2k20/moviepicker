@@ -1,46 +1,52 @@
-# Discordians rebrand — design QA
+# Movie-list reset — design QA
 
 ## Evidence
 
-- Source visual truth: `generated_images/exec-ab11dd90-70cb-4944-8f79-07377232c97e.png`
-- Implementation screenshot: `/workspace/scratch/discordians-home-desktop.jpg`
-- Combined comparison: `/workspace/scratch/discordians-design-compare.jpg`
-- Implementation state: Home, no modal, default navigation state
-- Browser viewport: 1259 × 936 CSS pixels
+- Source visual truth: selected Option 3, “Tonight, We Decide” (`generated_images/exec-ab11dd90-70cb-4944-8f79-07377232c97e.png`)
+- Implementation capture: cloud-browser render of `http://terminal.local:4173/?design-preview=1#list`
+- Implementation state: signed-in list-first view, Ready filter, no modal
+- Browser viewport: 1363 × 936 CSS pixels at 1× density
 - Source pixels: 1487 × 1058
-- Implementation pixels: 1259 × 936 at 1× density
-- Density normalization: both images were normalized to 936 pixels high and compared side by side.
+- Normalization: the full source and implementation were fit to the available viewport and compared at the same visual scale.
 
-## Full-view findings
+## Full-view comparison
 
-- Layout hierarchy matches: fixed left rail, split hero, member row, watch-party CTA and wide Journal spotlight card.
-- Palette matches the selected charcoal, grey, white and electric-violet direction.
-- Typography preserves the condensed cinematic display face and compact monospaced metadata character.
-- The implementation uses generated production assets for the five member avatars and violet hero artwork, plus Material Symbols for interface icons.
-- The live viewport is slightly narrower than the source visual; responsive spacing contracts without overlap or clipping.
+- The selected cinematic-archive language is retained: charcoal canvas, restrained violet accents, white and muted-grey text, narrow left rail and condensed uppercase display type.
+- The product hierarchy intentionally changes from Journal-first to list-first. “The List” is now the primary destination, with Pick Tonight, Sessions and List Stats following it.
+- The hero artwork is intentionally replaced by functional list overview metrics and controls. This is an information-architecture change, not a fidelity defect.
+- Spacing, border weight, surface contrast, active navigation treatment and primary-button styling remain consistent with the selected direction.
+- At the tested desktop viewport, the list rows, filters, metrics and primary actions remain balanced without overlap or clipping.
 
 ## Focused checks
 
-- Hero headline remains the dominant element at the tested viewport.
-- All five avatars stay circular, aligned and labelled.
-- Primary CTA, secondary decision-mode copy and hero art remain visually balanced.
-- Journal spotlight keeps its two-column entry/comment structure, border treatment and readable status emphasis.
-- No visible broken assets, clipped labels, unintended scrollbars or inaccessible icon-only controls were found.
+- Navigation/header region: active violet rail, wordmark, account footer and condensed section heading remain visually consistent.
+- List toolbar: search, Ready/Watched/All filters and sort control are clear and correctly grouped.
+- Film rows: title/year, suggester, waiting time, votes and watched state remain readable at a glance.
+- Primary actions: Add Film and Pick Tonight have distinct hierarchy and visible focus/hover treatment.
+- No visible broken assets, clipped labels or unintended horizontal scrollbars were found.
 
-## Iteration history
+## Interaction verification
 
-1. Initial implementation compared against the selected source visual.
-2. Spacing, type scale, card proportions, avatar sizing and hero-art crop were verified in the combined comparison.
-3. No P0, P1 or P2 visual mismatch remained that blocked fidelity or the primary flow.
+- Ready and Watched list filters were exercised.
+- Add Film modal was opened and closed without submitting real data.
+- Pick Tonight navigation was tested.
+- Consensus Sprint was selected and a local preview session was created for Cameron, Dean and Kieran.
+- The resulting Sessions view showed the selected mode, participants and available candidate count.
+- No real Supabase list rows were inserted during QA.
+- Runtime logs contained no application-origin warnings or errors; the only reported error came from the cloud browser extension environment.
 
-## Functional verification
+## Data-boundary verification
 
-- Navigation tested: Home, Journal, Tonight, Wrapped and Queue.
-- Watch-party flow tested: open setup, select members, choose Mini-Games, create room.
-- Journal flow tested: finish session, fill title/year/comment, verify exact Discord bullet preview, record local entry.
-- Journal search tested with `Ex-Machina`.
-- Queue voting tested; The Nice Guys incremented from 5 to 6.
-- Runtime logs checked. No page-origin warnings or errors were present; the only captured errors came from the cloud browser's own extension metadata script.
-- Production bundle completed successfully with Vite 7.3.6.
+- The frontend contains no Journal table query, Journal-entry mutation, Discord API call, webhook or bot integration.
+- Existing `queue_items` and `queue_votes` remain the only movie-list persistence targets.
+- Both list tables have Row Level Security enabled.
+- No database migration or schema change was made for this reset.
+- No Discord or Journal data was read or changed during implementation or QA.
+
+## Findings and residual checks
+
+- No actionable P0, P1 or P2 visual or interaction issue remains.
+- P3 follow-up: verify the responsive layout on a physical iPhone after the branch is reviewed; mobile breakpoints were reviewed statically because the cloud-browser viewport could not be resized during this pass.
+- Supabase Security Advisor still reports the pre-existing leaked-password-protection warning; it is unrelated to this list-first change.
 
 final result: passed
