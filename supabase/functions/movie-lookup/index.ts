@@ -18,6 +18,28 @@ function releaseYear(value: unknown) {
   return /^\d{4}$/.test(year) ? Number(year) : null;
 }
 
+async function requireApprovedMember(req: Request) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const authorization = req.headers.get("Authorization");
+  if (!supabaseUrl || !anonKey || !authorization) return { ok: false, status: 401 };
+
+  const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  });
+  if (!userResponse.ok) return { ok: false, status: 401 };
+  const user = await userResponse.json();
+  if (!user?.id) return { ok: false, status: 401 };
+
+  const membershipResponse = await fetch(
+    `${supabaseUrl}/rest/v1/group_memberships?select=user_id&user_id=eq.${encodeURIComponent(user.id)}&limit=1`,
+    { headers: { apikey: anonKey, Authorization: authorization } },
+  );
+  if (!membershipResponse.ok) return { ok: false, status: 403 };
+  const memberships = await membershipResponse.json();
+  return { ok: Array.isArray(memberships) && memberships.length > 0, status: 403 };
+}
+
 async function tmdbRequest(path: string, token: string, params: Record<string, string> = {}) {
   const url = new URL(`https://api.themoviedb.org/3/${path}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -39,6 +61,9 @@ async function tmdbRequest(path: string, token: string, params: Record<string, s
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return respond({ error: "Method not allowed." }, 405);
+
+  const access = await requireApprovedMember(req);
+  if (!access.ok) return respond({ error: access.status === 401 ? "Sign in to search for movies." : "Approved Cine-Cord membership is required." }, access.status);
 
   const token = Deno.env.get("TMDB_READ_ACCESS_TOKEN");
   if (!token) return respond({ error: "TMDB lookup is not configured yet." }, 503);
