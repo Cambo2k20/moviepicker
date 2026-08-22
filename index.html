@@ -48,7 +48,13 @@
       </div>
     </aside>
 
-    <main id="view-root" class="main-view" tabindex="-1"></main>
+    <main id="view-root" class="main-view" tabindex="-1">
+      <section class="access-view" aria-live="polite">
+        <span class="eyebrow">Private archive</span>
+        <h1>Opening Cine-Cord…</h1>
+        <p>Checking your invite and loading the Journal.</p>
+      </section>
+    </main>
   </div>
 
   <div id="party-modal" class="modal-layer" hidden>
@@ -103,6 +109,13 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="importmap">
+    {
+      "imports": {
+        "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8/+esm"
+      }
+    }
+  </script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
