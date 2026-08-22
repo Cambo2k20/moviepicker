@@ -1,52 +1,50 @@
-# Movie-list reset — design QA
+# Design QA — The List poster experience
 
-## Evidence
+- Visual source: `/workspace/scratch/1eeb17f1f72e/generated_images/exec-03718190-ceed-41a6-a129-8401a537772c.png`
+- Default-grid source: `/workspace/scratch/1eeb17f1f72e/generated_images/exec-aa54d86d-4746-4ff5-9846-7c61dddbd8a2.png`
+- Implementation: `app.js`, `styles.css`
+- Browser: cloud Chrome
+- Desktop viewport checked: 1363 × 936
+- Mobile viewport checked: 390 × 844 inside an isolated responsive QA frame
 
-- Source visual truth: selected Option 3, “Tonight, We Decide” (`generated_images/exec-ab11dd90-70cb-4944-8f79-07377232c97e.png`)
-- Implementation capture: cloud-browser render of `http://terminal.local:4173/?design-preview=1#list`
-- Implementation state: signed-in list-first view, Ready filter, no modal
-- Browser viewport: 1363 × 936 CSS pixels at 1× density
-- Source pixels: 1487 × 1058
-- Normalization: the full source and implementation were fit to the available viewport and compared at the same visual scale.
+## States checked
 
-## Full-view comparison
+- Default four-column poster gallery
+- Three-column gallery with selected-film detail drawer
+- Selected-card violet outline
+- Honest artwork/metadata-pending fallback
+- iPhone two-column gallery
+- iPhone fixed bottom detail sheet with scrim and safe-area padding
+- Ready and Watched card states
+- Empty/filter-result behavior
+- Add Film finder at desktop width
+- Add Film finder inside a 390 × 844 iPhone viewport
+- Existing-film metadata matching and refreshed detail state
 
-- The selected cinematic-archive language is retained: charcoal canvas, restrained violet accents, white and muted-grey text, narrow left rail and condensed uppercase display type.
-- The product hierarchy intentionally changes from Journal-first to list-first. “The List” is now the primary destination, with Pick Tonight, Sessions and List Stats following it.
-- The hero artwork is intentionally replaced by functional list overview metrics and controls. This is an information-architecture change, not a fidelity defect.
-- Spacing, border weight, surface contrast, active navigation treatment and primary-button styling remain consistent with the selected direction.
-- At the tested desktop viewport, the list rows, filters, metrics and primary actions remain balanced without overlap or clipping.
+## Interactions checked
 
-## Focused checks
+- Open a film from its poster card
+- Close details with the close button and Escape
+- Restore the full-width grid after closing
+- Filter by genre and added-by member
+- Change list sorting
+- Add/remove a film from the session-only Tonight shortlist
+- Existing vote and watched controls remain wired to the website list only
+- Search for a film and review multiple visual matches
+- Select a match and refresh the card runtime, genres and synopsis
+- Use the manual-add fallback when external movie lookup is unavailable
 
-- Navigation/header region: active violet rail, wordmark, account footer and condensed section heading remain visually consistent.
-- List toolbar: search, Ready/Watched/All filters and sort control are clear and correctly grouped.
-- Film rows: title/year, suggester, waiting time, votes and watched state remain readable at a glance.
-- Primary actions: Add Film and Pick Tonight have distinct hierarchy and visible focus/hover treatment.
-- No visible broken assets, clipped labels or unintended horizontal scrollbars were found.
+## Visual comparison
 
-## Interaction verification
+The selected-state source and the implementation were reviewed together in one comparison input. The implementation matches the source hierarchy: fixed Cine-Cord shell, restrained purple/grey/white palette, poster-first cards, dense toolbar, three-column reflow and a right-side information panel. The responsive implementation deliberately converts that panel to a bottom sheet on iPhone.
 
-- Ready and Watched list filters were exercised.
-- Add Film modal was opened and closed without submitting real data.
-- Pick Tonight navigation was tested.
-- Consensus Sprint was selected and a local preview session was created for Cameron, Dean and Kieran.
-- The resulting Sessions view showed the selected mode, participants and available candidate count.
-- No real Supabase list rows were inserted during QA.
-- Runtime logs contained no application-origin warnings or errors; the only reported error came from the cloud browser extension environment.
+## Console and data boundary
 
-## Data-boundary verification
-
-- The frontend contains no Journal table query, Journal-entry mutation, Discord API call, webhook or bot integration.
-- Existing `queue_items` and `queue_votes` remain the only movie-list persistence targets.
-- Both list tables have Row Level Security enabled.
-- No database migration or schema change was made for this reset.
-- No Discord or Journal data was read or changed during implementation or QA.
-
-## Findings and residual checks
-
-- No actionable P0, P1 or P2 visual or interaction issue remains.
-- P3 follow-up: verify the responsive layout on a physical iPhone after the branch is reviewed; mobile breakpoints were reviewed statically because the cloud-browser viewport could not be resized during this pass.
-- Supabase Security Advisor still reports the pre-existing leaked-password-protection warning; it is unrelated to this list-first change.
+- No application console errors or warnings in desktop or mobile checks.
+- Temporary mock preview data was removed from the branch after QA.
+- The production browser receives only the publishable Supabase key; TMDB credentials stay inside the authenticated Edge Function.
+- Queue metadata fields are nullable, so the existing list row remained unchanged during the migration.
+- No Discord, bot or Journal API exists in this implementation.
+- No Discord or Journal data was read, written or changed during QA.
 
 final result: passed

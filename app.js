@@ -27,6 +27,11 @@ const filmModal = document.querySelector("#film-modal");
 const partyMembers = document.querySelector("#party-members");
 const partyForm = document.querySelector("#party-form");
 const filmForm = document.querySelector("#film-form");
+const filmFormTitle = document.querySelector("#film-form-title");
+const filmFormIntro = document.querySelector("#film-form-intro");
+const filmSearchStatus = document.querySelector("#film-search-status");
+const filmMatchResults = document.querySelector("#film-match-results");
+const filmManualAdd = document.querySelector("#film-manual-add");
 const toast = document.querySelector("#toast");
 const sessionPanel = document.querySelector("#session-panel");
 const sessionName = document.querySelector("#session-name");
@@ -45,8 +50,14 @@ let joinRequests = [];
 let movieList = [];
 let activeSession = null;
 let listQuery = "";
-let listFilter = "ready";
+let listFilter = "all";
 let listSort = "votes";
+let genreFilter = "all";
+let memberFilter = "all";
+let selectedFilmId = null;
+const shortlistedFilmIds = new Set();
+let filmEditingId = null;
+let pendingFilmDraft = null;
 let authMode = "signin";
 let isLoading = true;
 let toastTimer;
@@ -87,6 +98,114 @@ function formatWaitingTime(value) {
   if (months < 12) return `${months} ${months === 1 ? "month" : "months"} waiting`;
   const years = Math.floor(months / 12);
   return `${years} ${years === 1 ? "year" : "years"} waiting`;
+}
+
+function formatAddedDate(value) {
+  if (!value) return "Date unknown";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
+}
+
+function normaliseGenres(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (typeof value === "string") return value.split(",").map((genre) => genre.trim()).filter(Boolean);
+  return [];
+}
+
+function filmPoster(item) {
+  if (item.posterUrl) return item.posterUrl;
+  return "./assets/hero-journal-web.png";
+}
+
+function tmdbPoster(path, size = "w500") {
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : "./assets/hero-journal-web.png";
+}
+
+function runtimeLabel(item) {
+  return item.runtime ? `${item.runtime} min` : "Runtime pending";
+}
+
+function metadataLine(item) {
+  const parts = [];
+  if (item.runtime) parts.push(`${item.runtime} min`);
+  if (item.genres.length) parts.push(item.genres.slice(0, 2).join(" · "));
+  return parts.join(" · ") || "Movie details pending";
+}
+
+function setFilmSearchStatus(message = "", tone = "neutral") {
+  filmSearchStatus.textContent = message;
+  filmSearchStatus.dataset.tone = tone;
+  filmSearchStatus.hidden = !message;
+}
+
+function clearFilmMatches() {
+  filmMatchResults.innerHTML = "";
+  filmMatchResults.hidden = true;
+  filmManualAdd.disabled = false;
+  filmManualAdd.hidden = true;
+  setFilmSearchStatus();
+}
+
+function renderFilmMatches(matches) {
+  filmMatchResults.innerHTML = matches.map((match) => `
+    <button class="film-match" type="button" data-select-movie-match="${match.tmdbId}">
+      <img src="${escapeHTML(tmdbPoster(match.posterPath, "w185"))}" alt="${match.posterPath ? `${escapeHTML(match.title)} poster` : "Cine-Cord artwork placeholder"}" />
+      <span class="film-match-copy"><strong>${escapeHTML(match.title)}</strong><span>${match.year || "Year unknown"}</span><small>${escapeHTML(match.overview || "No synopsis available.")}</small></span>
+      <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+    </button>`).join("");
+  filmMatchResults.hidden = false;
+  setFilmSearchStatus(`${matches.length} ${matches.length === 1 ? "match" : "matches"} found. Choose the correct film.`, "success");
+}
+
+function metadataPayload(movie) {
+  return {
+    title: movie.title,
+    release_year: movie.year,
+    tmdb_id: movie.tmdbId,
+    poster_path: movie.posterPath,
+    runtime_minutes: movie.runtime,
+    genres: movie.genres,
+    overview: movie.overview,
+    metadata_updated_at: new Date().toISOString(),
+  };
+}
+
+async function lookupMovie(body) {
+  const { data, error } = await supabase.functions.invoke("movie-lookup", { body });
+  if (error) {
+    let message = error.message || "Movie lookup failed.";
+    try {
+      const context = await error.context?.json();
+      if (context?.error) message = context.error;
+    } catch {
+      // The generic function error is still useful if no JSON body is available.
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+async function saveMovie(movie = null) {
+  if (!authUser || !activeGroup || !pendingFilmDraft) return;
+  const payload = movie
+    ? metadataPayload(movie)
+    : { title: pendingFilmDraft.title, release_year: pendingFilmDraft.year };
+
+  if (filmEditingId) {
+    const item = movieList.find((candidate) => candidate.id === filmEditingId);
+    if (!item || !canManageFilm(item)) throw new Error("You cannot update this film.");
+    const { error } = await supabase.from("queue_items").update(payload).eq("id", item.id).eq("group_id", activeGroup.id);
+    if (error) throw error;
+    return { action: "updated", title: payload.title };
+  }
+
+  const { error } = await supabase.from("queue_items").insert({
+    group_id: activeGroup.id,
+    suggested_by: authUser.id,
+    ...payload,
+  });
+  if (error) throw error;
+  return { action: "added", title: payload.title };
 }
 
 function showToast(message) {
@@ -141,8 +260,10 @@ function getVisibleFilms() {
   const query = listQuery.trim().toLowerCase();
   return movieList.filter((item) => {
     const matchesFilter = listFilter === "all" || (listFilter === "ready" && !item.watched) || (listFilter === "watched" && item.watched);
-    const matchesQuery = !query || [item.title, item.year, item.suggestedBy].join(" ").toLowerCase().includes(query);
-    return matchesFilter && matchesQuery;
+    const matchesQuery = !query || [item.title, item.year, item.suggestedBy, ...item.genres].join(" ").toLowerCase().includes(query);
+    const matchesGenre = genreFilter === "all" || item.genres.some((genre) => genre.toLowerCase() === genreFilter);
+    const matchesMember = memberFilter === "all" || item.suggestedById === memberFilter;
+    return matchesFilter && matchesQuery && matchesGenre && matchesMember;
   }).sort((a, b) => {
     if (listSort === "oldest") return new Date(a.createdAt) - new Date(b.createdAt);
     if (listSort === "newest") return new Date(b.createdAt) - new Date(a.createdAt);
@@ -151,46 +272,67 @@ function getVisibleFilms() {
   });
 }
 
-function renderFilmRow(item, rank) {
+function renderFilmCard(item) {
+  const selected = item.id === selectedFilmId;
   return `
-    <article class="film-row ${item.watched ? "is-watched" : ""}">
-      <span class="film-rank">${String(rank).padStart(2, "0")}</span>
-      <div class="film-identity">
-        <div class="film-title-line"><h3>${escapeHTML(item.title)}</h3>${item.year ? `<span class="film-year">${item.year}</span>` : ""}<span class="status-pill ${item.watched ? "watched" : "ready"}">${item.watched ? "Watched" : "Ready"}</span></div>
-        <p>Suggested by <strong>${escapeHTML(item.suggestedBy)}</strong> <span>·</span> ${escapeHTML(formatWaitingTime(item.createdAt))}</p>
-      </div>
-      <div class="film-votes" aria-label="${item.votes} votes"><strong>${item.votes}</strong><span>${item.votes === 1 ? "vote" : "votes"}</span></div>
-      <div class="film-actions">
-        <button class="vote-button ${item.votedByMe ? "is-voted" : ""}" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""} aria-label="${item.votedByMe ? "Remove vote from" : "Vote for"} ${escapeHTML(item.title)}"><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span></button>
-        ${canManageFilm(item) ? `<button class="film-status-button" type="button" data-toggle-watched="${item.id}" aria-label="Mark ${escapeHTML(item.title)} as ${item.watched ? "ready" : "watched"}">${item.watched ? "Return to list" : "Mark watched"}</button>` : ""}
-      </div>
+    <article class="poster-card ${item.watched ? "is-watched" : ""} ${selected ? "is-selected" : ""}">
+      <button class="poster-card-open" type="button" data-select-film="${item.id}" aria-label="View details for ${escapeHTML(item.title)}" aria-pressed="${selected}">
+        <span class="poster-frame ${item.posterUrl ? "" : "is-placeholder"}">
+          <img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" loading="lazy" />
+          ${item.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}
+          <span class="status-pill ${item.watched ? "watched" : "ready"}">${item.watched ? "Watched" : "Ready"}</span>
+        </span>
+        <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
+      </button>
+      <footer class="poster-card-footer">
+        <span class="poster-suggester"><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" /><span>Added by <strong>${escapeHTML(item.suggestedBy)}</strong></span></span>
+        <button class="poster-vote ${item.votedByMe ? "is-voted" : ""}" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""} aria-label="${item.votedByMe ? "Remove vote from" : "Vote for"} ${escapeHTML(item.title)}"><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span><strong>${item.votes}</strong></button>
+      </footer>
     </article>`;
+}
+
+function renderFilmDetails(item) {
+  const isShortlisted = shortlistedFilmIds.has(item.id);
+  return `
+    <button class="detail-scrim" type="button" data-close-film-details aria-label="Close film details"></button>
+    <aside class="film-detail-drawer" aria-labelledby="film-detail-title" tabindex="-1">
+      <div class="detail-drawer-head"><span class="eyebrow">Selected film</span><button class="icon-button" type="button" data-close-film-details aria-label="Close film details"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
+      <div class="detail-poster ${item.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${item.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
+      <div class="detail-title-row"><div><h2 id="film-detail-title">${escapeHTML(item.title)}</h2><p>${item.year ? escapeHTML(item.year) : "Year pending"}</p></div><span class="status-pill ${item.watched ? "watched" : "ready"}">${item.watched ? "Watched" : "Ready"}</span></div>
+      <div class="detail-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(item))}</span>${item.genres.map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>
+      <dl class="detail-ledger"><div><dt>Added by</dt><dd><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" />${escapeHTML(item.suggestedBy)}</dd></div><div><dt>On the list</dt><dd>${escapeHTML(formatAddedDate(item.createdAt))}</dd></div><div><dt>Group votes</dt><dd>${item.votes}</dd></div></dl>
+      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote, shortlist it and use it in Pick Tonight now.")}</p>
+      <div class="detail-actions">
+        <button class="primary-button" type="button" data-shortlist-film="${item.id}"><span class="material-symbols-outlined" aria-hidden="true">${isShortlisted ? "check" : "playlist_add"}</span>${isShortlisted ? "Added to Tonight" : "Add to Tonight"}</button>
+        <button class="secondary-button" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${item.votedByMe ? "Remove vote" : "Vote"} · ${item.votes}</button>
+        ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-match-film="${item.id}">${item.tmdbId ? "Refresh movie details" : "Find poster and details"}</button><button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
+      </div>
+    </aside>`;
 }
 
 function renderList() {
   const visibleFilms = getVisibleFilms();
-  const readyFilms = movieList.filter((item) => !item.watched);
-  const watchedFilms = movieList.filter((item) => item.watched);
-  const totalVotes = movieList.reduce((sum, item) => sum + item.votes, 0);
-  const topPick = [...readyFilms].sort((a, b) => b.votes - a.votes)[0];
+  const selectedFilm = movieList.find((item) => item.id === selectedFilmId) || null;
+  if (selectedFilmId && !selectedFilm) selectedFilmId = null;
+  const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
+  const suggesters = [...new Map(movieList.map((item) => [item.suggestedById, item.suggestedBy])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   return `
     <section class="list-view" aria-labelledby="list-title">
       <header class="list-hero">
-        <div><span class="eyebrow">The Discordians · Shared backlog</span><h1 id="list-title" class="page-title">The List</h1><p class="page-subtitle">Everything the group might watch, ready whenever the bot is not.</p></div>
-        <div class="list-hero-actions"><button class="secondary-button" type="button" data-open-film><span class="material-symbols-outlined" aria-hidden="true">add</span> Add Film</button><button class="primary-button" type="button" data-open-party>Pick Tonight <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></div>
+        <div><span class="eyebrow">The Discordians · Shared watchlist</span><h1 id="list-title" class="page-title">The List</h1><p class="page-subtitle">The films we’re saving for the right time.</p></div>
+        <div class="list-hero-actions"><button class="primary-button" type="button" data-open-film><span class="material-symbols-outlined" aria-hidden="true">add</span> Add Film</button><button class="secondary-button" type="button" data-open-party>Pick Tonight <span class="material-symbols-outlined" aria-hidden="true">casino</span></button></div>
       </header>
-      <div class="list-overview" aria-label="List overview">
-        <article><strong>${readyFilms.length}</strong><span>Ready to watch</span></article>
-        <article><strong>${totalVotes}</strong><span>Group votes</span></article>
-        <article><strong>${watchedFilms.length}</strong><span>Marked watched</span></article>
-        <article class="top-pick"><span>Current favourite</span><strong>${topPick ? escapeHTML(topPick.title) : "Waiting for votes"}</strong></article>
-      </div>
       <div class="list-toolbar">
-        <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search titles, years or suggesters" aria-label="Search The List" /></label>
-        <div class="filter-tabs" aria-label="Filter The List">${["ready", "watched", "all"].map((filter) => `<button type="button" class="filter-tab ${listFilter === filter ? "is-active" : ""}" data-list-filter="${filter}">${filter[0].toUpperCase()}${filter.slice(1)}</button>`).join("")}</div>
-        <label class="sort-field"><span>Sort</span><select id="list-sort" aria-label="Sort The List"><option value="votes" ${listSort === "votes" ? "selected" : ""}>Most voted</option><option value="oldest" ${listSort === "oldest" ? "selected" : ""}>Longest waiting</option><option value="newest" ${listSort === "newest" ? "selected" : ""}>Newest</option></select></label>
+        <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search the list" aria-label="Search The List" /></label>
+        <div class="filter-tabs" aria-label="Filter The List">${["all", "ready", "watched"].map((filter) => `<button type="button" class="filter-tab ${listFilter === filter ? "is-active" : ""}" data-list-filter="${filter}">${filter[0].toUpperCase()}${filter.slice(1)}</button>`).join("")}</div>
+        <label class="compact-select"><span class="sr-only">Genre</span><select id="genre-filter" aria-label="Filter by genre"><option value="all">All genres</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${genreFilter === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
+        <label class="compact-select"><span class="sr-only">Added by</span><select id="member-filter" aria-label="Filter by who added it"><option value="all">Added by anyone</option>${suggesters.map(([id, name]) => `<option value="${escapeHTML(id)}" ${memberFilter === id ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
+        <label class="compact-select sort-field"><span class="sr-only">Sort</span><select id="list-sort" aria-label="Sort The List"><option value="votes" ${listSort === "votes" ? "selected" : ""}>Most voted</option><option value="oldest" ${listSort === "oldest" ? "selected" : ""}>Longest waiting</option><option value="newest" ${listSort === "newest" ? "selected" : ""}>Newest</option></select></label>
       </div>
-      <div class="film-list" aria-live="polite">${visibleFilms.length ? visibleFilms.map((item, index) => renderFilmRow(item, index + 1)).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">movie</span><h2>${movieList.length ? "No films match that view." : "The List is empty."}</h2><p>${movieList.length ? "Try another search or filter." : "Add the first suggestion and give the group something to argue about."}</p><button class="secondary-button" type="button" data-open-film>Add a film</button></div>`}</div>
+      <div class="library-layout ${selectedFilm ? "has-selection" : ""}">
+        <div class="poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">movie</span><h2>${movieList.length ? "No films match that view." : "The List is empty."}</h2><p>${movieList.length ? "Try another search or filter." : "Add the first suggestion and give the group something to argue about."}</p><button class="secondary-button" type="button" data-open-film>Add a film</button></div>`}</div>
+        ${selectedFilm ? renderFilmDetails(selectedFilm) : ""}
+      </div>
     </section>`;
 }
 
@@ -244,6 +386,7 @@ function updateShellState() {
   const isAdmin = hasWorkspace && isCurrentAdmin();
   document.body.classList.toggle("is-locked", !hasWorkspace);
   document.body.classList.toggle("is-admin", isAdmin);
+  document.body.classList.toggle("has-film-detail", hasWorkspace && currentView === "list" && Boolean(selectedFilmId));
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !isAdmin; });
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.disabled = !hasWorkspace || (button.dataset.view === "members" && !isAdmin);
@@ -293,6 +436,7 @@ function navigate(view) {
   if (!authUser || !activeGroup) return;
   if (view === "members" && !isCurrentAdmin()) return;
   currentView = legacyViewMap[view] || view;
+  if (currentView !== "list") selectedFilmId = null;
   window.location.hash = currentView;
   render();
   root.focus({ preventScroll: true });
@@ -317,7 +461,17 @@ function closePartyModal() {
   document.body.style.overflow = "";
 }
 
-function openFilmModal() {
+function openFilmModal(item = null) {
+  filmEditingId = item?.id || null;
+  pendingFilmDraft = null;
+  filmForm.reset();
+  clearFilmMatches();
+  filmFormTitle.textContent = item ? "Match movie details" : "Add a film";
+  filmFormIntro.textContent = item
+    ? "Search for the correct TMDB result to add or refresh its poster, runtime, genres and synopsis."
+    : "Search TMDB for the correct film, poster and details.";
+  filmForm.elements.title.value = item?.title || "";
+  filmForm.elements.year.value = item?.year || "";
   filmModal.hidden = false;
   document.body.style.overflow = "hidden";
   filmForm.elements.title.focus();
@@ -326,6 +480,10 @@ function openFilmModal() {
 function closeFilmModal() {
   filmModal.hidden = true;
   document.body.style.overflow = "";
+  filmEditingId = null;
+  pendingFilmDraft = null;
+  filmForm.reset();
+  clearFilmMatches();
 }
 
 async function loadWorkspace() {
@@ -355,7 +513,7 @@ async function loadWorkspace() {
   const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
-    supabase.from("queue_items").select("id,group_id,title,release_year,suggested_by,watched,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
+    supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true })
   ]);
@@ -377,8 +535,26 @@ async function loadWorkspace() {
   }
   movieList = (queueResult.data || []).map((item) => {
     const voters = votesByItem.get(item.id) || [];
-    return { id: item.id, title: item.title, year: item.release_year, suggestedById: item.suggested_by, suggestedBy: profileMap.get(item.suggested_by)?.display_name || "Former member", watched: item.watched, createdAt: item.created_at, votes: voters.length, votedByMe: voters.includes(authUser.id) };
+    const posterUrl = item.poster_url || (item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null);
+    return {
+      id: item.id,
+      title: item.title,
+      year: item.release_year,
+      suggestedById: item.suggested_by,
+      suggestedBy: profileMap.get(item.suggested_by)?.display_name || "Former member",
+      watched: item.watched,
+      createdAt: item.created_at,
+      votes: voters.length,
+      votedByMe: voters.includes(authUser.id),
+      posterUrl,
+      tmdbId: item.tmdb_id || null,
+      metadataUpdatedAt: item.metadata_updated_at || null,
+      runtime: Number(item.runtime_minutes) || null,
+      genres: normaliseGenres(item.genres),
+      overview: item.overview || ""
+    };
   });
+  if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
 }
 
 async function syncSession(session) {
@@ -391,6 +567,8 @@ async function syncSession(session) {
   accessRequest = null;
   joinRequests = [];
   movieList = [];
+  selectedFilmId = null;
+  shortlistedFilmIds.clear();
   render();
   if (authUser) {
     try { await loadWorkspace(); }
@@ -445,19 +623,31 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!authUser || !activeGroup) return;
     const form = new FormData(event.target);
+    const title = String(form.get("title")).trim();
     const yearValue = String(form.get("year")).trim();
     const year = yearValue ? Number(yearValue) : null;
     if (year !== null && (!Number.isInteger(year) || year < 1888 || year > 2200)) { showToast("Enter a valid four-digit release year, or leave it blank."); return; }
     const submit = event.target.querySelector("button[type='submit']");
     submit.disabled = true;
-    const { error } = await supabase.from("queue_items").insert({ group_id: activeGroup.id, title: String(form.get("title")).trim(), release_year: year, suggested_by: authUser.id });
-    submit.disabled = false;
-    if (error) { showToast(`Film was not added: ${error.message}`); return; }
-    filmForm.reset();
-    closeFilmModal();
-    await loadWorkspace();
-    render();
-    showToast("Film added to The List.");
+    submit.innerHTML = `Searching… <span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>`;
+    pendingFilmDraft = { title, year };
+    clearFilmMatches();
+    setFilmSearchStatus("Searching TMDB for the best matches…");
+    try {
+      const { matches = [] } = await lookupMovie({ action: "search", query: title, year });
+      if (matches.length) {
+        renderFilmMatches(matches);
+      } else {
+        setFilmSearchStatus("No matching films were found. Try a broader title or add it without artwork.", "warning");
+        filmManualAdd.hidden = Boolean(filmEditingId);
+      }
+    } catch (error) {
+      setFilmSearchStatus(`${error.message} You can still keep the website list usable without artwork.`, "warning");
+      filmManualAdd.hidden = Boolean(filmEditingId);
+    } finally {
+      submit.disabled = false;
+      submit.innerHTML = `Find Movie <span class="material-symbols-outlined" aria-hidden="true">search</span>`;
+    }
     return;
   }
 
@@ -528,6 +718,70 @@ document.addEventListener("click", async (event) => {
   const filterButton = event.target.closest("[data-list-filter]");
   if (filterButton) { listFilter = filterButton.dataset.listFilter; render(); return; }
 
+  const selectFilmButton = event.target.closest("[data-select-film]");
+  if (selectFilmButton) {
+    selectedFilmId = selectFilmButton.dataset.selectFilm;
+    render();
+    window.requestAnimationFrame(() => document.querySelector(".film-detail-drawer")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-close-film-details]")) { selectedFilmId = null; render(); return; }
+
+  const matchFilmButton = event.target.closest("[data-match-film]");
+  if (matchFilmButton) {
+    const item = movieList.find((candidate) => candidate.id === matchFilmButton.dataset.matchFilm);
+    if (!item || !canManageFilm(item)) return;
+    openFilmModal(item);
+    return;
+  }
+
+  const movieMatchButton = event.target.closest("[data-select-movie-match]");
+  if (movieMatchButton) {
+    movieMatchButton.disabled = true;
+    setFilmSearchStatus("Loading the full movie details…");
+    try {
+      const { movie } = await lookupMovie({ action: "details", tmdbId: Number(movieMatchButton.dataset.selectMovieMatch) });
+      if (!movie) throw new Error("The movie details could not be loaded.");
+      const result = await saveMovie(movie);
+      closeFilmModal();
+      await loadWorkspace();
+      if (result.action === "added") selectedFilmId = movieList.find((item) => item.tmdbId === movie.tmdbId)?.id || null;
+      render();
+      showToast(`${result.title} ${result.action} with its poster and movie details.`);
+    } catch (error) {
+      movieMatchButton.disabled = false;
+      setFilmSearchStatus(`Movie details were not saved: ${error.message}`, "warning");
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-add-film-manually]")) {
+    if (!pendingFilmDraft || filmEditingId) return;
+    filmManualAdd.disabled = true;
+    try {
+      const result = await saveMovie();
+      closeFilmModal();
+      await loadWorkspace();
+      render();
+      showToast(`${result.title} added without artwork. You can match it later.`);
+    } catch (error) {
+      filmManualAdd.disabled = false;
+      setFilmSearchStatus(`Film was not added: ${error.message}`, "warning");
+    }
+    return;
+  }
+
+  const shortlistButton = event.target.closest("[data-shortlist-film]");
+  if (shortlistButton) {
+    const item = movieList.find((candidate) => candidate.id === shortlistButton.dataset.shortlistFilm);
+    if (!item) return;
+    if (shortlistedFilmIds.has(item.id)) shortlistedFilmIds.delete(item.id);
+    else shortlistedFilmIds.add(item.id);
+    render();
+    showToast(shortlistedFilmIds.has(item.id) ? `${item.title} added to tonight's shortlist.` : `${item.title} removed from tonight's shortlist.`);
+    return;
+  }
+
   const voteButton = event.target.closest("[data-vote]");
   if (voteButton) {
     const item = movieList.find((candidate) => candidate.id === voteButton.dataset.vote);
@@ -549,6 +803,18 @@ document.addEventListener("click", async (event) => {
     await loadWorkspace(); render(); showToast(`${item.title} marked ${item.watched ? "ready" : "watched"}.`); return;
   }
 
+  const deleteFilmButton = event.target.closest("[data-remove-film]");
+  if (deleteFilmButton) {
+    const item = movieList.find((candidate) => candidate.id === deleteFilmButton.dataset.removeFilm);
+    if (!item || !canManageFilm(item) || !window.confirm(`Remove ${item.title} from the website list? This does not change Discord.`)) return;
+    deleteFilmButton.disabled = true;
+    const { error } = await supabase.from("queue_items").delete().eq("id", item.id).eq("group_id", activeGroup.id);
+    if (error) { deleteFilmButton.disabled = false; showToast(`Film was not removed: ${error.message}`); return; }
+    selectedFilmId = null;
+    shortlistedFilmIds.delete(item.id);
+    await loadWorkspace(); render(); showToast(`${item.title} removed from the website list. Discord was not changed.`); return;
+  }
+
   const modeButton = event.target.closest("[data-select-mode]");
   if (modeButton) { openPartyModal(modeButton.dataset.selectMode); return; }
   if (event.target.closest("[data-end-session]")) { activeSession = null; render(); showToast("Session ended. The movie list was not changed."); }
@@ -556,6 +822,8 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("change", (event) => {
   if (event.target.matches("#list-sort")) { listSort = event.target.value; render(); }
+  if (event.target.matches("#genre-filter")) { genreFilter = event.target.value; render(); }
+  if (event.target.matches("#member-filter")) { memberFilter = event.target.value; render(); }
 });
 
 partyForm.addEventListener("submit", (event) => {
@@ -571,6 +839,7 @@ partyForm.addEventListener("submit", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (selectedFilmId) { selectedFilmId = null; render(); return; }
   if (!partyModal.hidden) closePartyModal();
   if (!filmModal.hidden) closeFilmModal();
 });
