@@ -38,10 +38,6 @@ create index movie_sessions_group_started_idx
 create index movie_sessions_created_by_idx
   on public.movie_sessions (created_by, started_at desc);
 
-create index movie_sessions_selected_queue_item_idx
-  on public.movie_sessions (selected_queue_item_id)
-  where selected_queue_item_id is not null;
-
 create unique index movie_sessions_one_open_per_group_idx
   on public.movie_sessions (group_id)
   where status in ('ACTIVE', 'CONFIRMED');
@@ -246,8 +242,8 @@ using (
   )
 );
 
-revoke all on table public.movie_sessions from anon, authenticated;
-revoke all on table public.movie_session_participants from anon, authenticated;
+revoke all on table public.movie_sessions from anon;
+revoke all on table public.movie_session_participants from anon;
 
 grant select, insert, update, delete on table public.movie_sessions to authenticated;
 grant select, insert, delete on table public.movie_session_participants to authenticated;

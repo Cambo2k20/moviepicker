@@ -1,3 +1,6 @@
 node_modules/
 dist/
+playwright-report/
+test-results/
+supabase/.temp/
 .DS_Store

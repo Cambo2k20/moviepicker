@@ -1,101 +1,98 @@
 # Discordians / Cine-Cord
 
-A private companion website for the Discordians movie group. It combines the shared movie list, member voting, movie-night decision games, resumable sessions, journal records and group statistics in one responsive web application.
+A private, membership-gated movie list and movie-night companion for the Discordians. The active application is a Vite-powered vanilla JavaScript frontend backed by Supabase Auth, Postgres, Row Level Security and an authenticated movie-lookup Edge Function.
 
-## Current handoff status
+## Current product boundary
 
-The Codex handoff branch is:
-
-```text
-codex/project-handoff
-```
-
-It was created on **22 August 2026** from `feature/mobile-roulette-polish`, which contains the newest complete line of work: persistent movie-night sessions plus the later Queue Roulette and mobile presentation refinements. At handoff time, `main` does not contain all of that work.
-
-Do not merge this branch, or any other branch, unless Cameron explicitly requests it.
-
-## Current capabilities
-
-- Supabase email/password authentication and membership-gated group access.
-- Administrator approval, role management and member removal.
-- Persistent shared movie list, metadata lookup, poster gallery, details and voting.
-- Persistent Journal entries with approved viewers and Row Level Security.
-- Persistent movie-night sessions with participants, selected-film snapshots and resumable game state.
-- Queue Roulette with runtime/genre filters, age weighting, vetoes and mobile wheel presentation.
-- Editable **Copy for Discord** output for manually posting a session result.
+- Email/password authentication with administrator-approved group membership.
+- A persistent poster-led movie list with metadata lookup, voting and watched status.
+- Persistent movie-night sessions with participants, selected-film snapshots and resumable state.
+- Queue Roulette with truthful runtime/genre filters, age weighting and one veto per participant.
+- An editable **Copy for Discord** result; nothing posts to Discord automatically.
 - Responsive phone, tablet and desktop layouts.
-- Wrapped/statistics views remain non-persistent prototype calculations.
+- List-based statistics that are explicitly not Journal statistics.
 
-There is deliberately no Discord bot, webhook, OAuth connection or automatic Discord posting at this stage.
+Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. The database contains Journal tables and secure write functions, but the active frontend does not currently provide a Journal screen or Journal write flow. Wrapped/challenge calculations also remain future work.
 
-## Stack
-
-- Vite
-- Vanilla HTML, CSS and JavaScript modules
-- `@supabase/supabase-js`
-- Supabase Auth, Postgres, Row Level Security, database functions and Edge Functions
-- GitHub Pages deployment
+There is deliberately no Discord bot, webhook, OAuth connection or automatic posting.
 
 ## Local development
+
+Node.js 24 is used in CI.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Vite will print the local address. On a local host, append `?design-preview` to load the representative preview workspace without using live account data.
+Vite serves the project below its production base path. Open:
 
-Production validation:
-
-```bash
-npm run build
-npm run preview
+```text
+http://localhost:5173/moviepicker/?design-preview
 ```
 
-There is currently no automated unit or end-to-end test suite. UI changes require manual responsive and state testing in addition to a successful production build.
+The `design-preview` query loads representative local data without using a live account.
+
+## Validation
+
+```bash
+npm run test:unit
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+- `test:unit` covers Roulette filtering, weighting, duplicate display-name vetoes and state recovery.
+- `build` creates `dist/` and fails if a bundled local asset is missing or an unbundled source path remains.
+- `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`.
+
+## Deployment
+
+`vite.config.js` builds for the GitHub Pages base path `/moviepicker/`. The `Deploy GitHub Pages` workflow validates the project, uploads `dist/` and deploys it on pushes to `main` or a manual workflow dispatch.
+
+GitHub repository settings must use **Pages → Build and deployment → Source: GitHub Actions** before that workflow can replace the older raw-source Pages deployment. Adding the workflow does not change the live site by itself.
+
+Configured site:
+
+```text
+https://cambo2k20.github.io/moviepicker/
+```
 
 ## Repository map
 
 | Path | Purpose |
 | --- | --- |
 | `index.html` | Active application shell and dialogs |
-| `app.js` | Active interface, state, authentication and Supabase calls |
-| `styles.css` | Active visual system and responsive styles |
-| `assets/` | Application images and avatars |
-| `supabase/schema.sql` | Base profiles, groups and Journal schema |
-| `supabase/member_management.sql` | Access requests and secure member administration |
+| `app.js` | Active UI, authentication, state and Supabase integration |
+| `roulette-core.js` | Pure Queue Roulette rules and state compatibility |
+| `styles.css` | Active visual system and responsive behavior |
+| `assets/` | Versioned application images and avatars |
+| `tests/` | Node unit tests and Playwright responsive tests |
+| `scripts/verify-dist.mjs` | Production artifact asset verification |
+| `.github/workflows/` | Pull-request validation and GitHub Pages deployment |
+| `supabase/schema.sql` | Base profiles, groups and Journal backend schema |
+| `supabase/member_management.sql` | Access requests and member administration |
 | `supabase/movie_metadata.sql` | Persistent movie metadata additions |
 | `supabase/movie_sessions.sql` | Persistent movie-night sessions and game state |
+| `supabase/migrations/` | Additive migrations for an existing hosted project |
 | `supabase/functions/movie-lookup/` | Protected server-side movie metadata lookup |
 | `supabase/README.md` | Backend setup, access model and migration notes |
-| `design-qa.md` | Recorded responsive/design checks |
-| `Movie Picker.dc.html` | Legacy design prototype reference |
-| `support.js` | Generated legacy runtime; do not hand-edit |
-| `AGENTS.md` | Repository rules automatically loaded by Codex |
-| `docs/PROJECT_CONTEXT.md` | Product intent, current boundaries and backlog context |
+| `Movie Picker.dc.html` | Legacy generated design reference; do not edit |
+| `support.js` | Legacy generated runtime; do not edit |
 
 ## Supabase setup
 
-The existing Supabase project and security model are documented in `supabase/README.md`. For a fresh environment, review and apply the SQL in this order:
+For a fresh Supabase environment, review and apply the canonical SQL in order:
 
 1. `supabase/schema.sql`
 2. `supabase/member_management.sql`
 3. `supabase/movie_metadata.sql`
 4. `supabase/movie_sessions.sql`
 
-Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the frontend.
+The nine earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The migration baseline itself is reconciled; the privilege-hardening migration in this branch remains staged locally and is not applied to production by a build, test or GitHub Pages deployment.
 
-The configured GitHub Pages site is:
+Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the browser bundle.
 
-```text
-https://cambo2k20.github.io/moviepicker/
-```
+## Development workflow
 
-## Recommended Codex workflow
-
-1. Open `Cambo2k20/moviepicker` in Codex.
-2. Select `codex/project-handoff` as the starting branch.
-3. Ask Codex to read `AGENTS.md`, `README.md`, `docs/PROJECT_CONTEXT.md` and `supabase/README.md` before planning a change.
-4. Create a new focused branch for each feature or fix.
-5. Require `npm run build` and a concise manual-QA report before opening a pull request.
-6. Review the pull request yourself; do not ask Codex to merge it unless that is an explicit decision.
+Start from an up-to-date `main`, inspect unmerged work, then create a focused `feature/`, `fix/` or `codex/` branch. Do not commit directly to `main`, and do not merge, rebase, delete or force-update branches without Cameron's explicit instruction.

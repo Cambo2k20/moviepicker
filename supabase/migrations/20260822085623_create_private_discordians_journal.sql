@@ -5,13 +5,6 @@ create extension if not exists pgcrypto;
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 
-alter default privileges for role postgres in schema public
-  revoke all privileges on tables from anon, authenticated;
-alter default privileges for role postgres in schema public
-  revoke all privileges on sequences from anon, authenticated;
-alter default privileges for role postgres in schema public
-  revoke execute on functions from public, anon, authenticated;
-
 create table public.groups (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -75,10 +68,8 @@ create table public.queue_votes (
 
 create index group_memberships_user_id_idx on public.group_memberships(user_id);
 create index journal_entries_group_watched_idx on public.journal_entries(group_id, watched_at desc, entry_number desc);
-create index journal_entries_created_by_idx on public.journal_entries(created_by);
 create index entry_viewers_profile_id_idx on public.entry_viewers(profile_id);
 create index queue_items_group_watched_idx on public.queue_items(group_id, watched, created_at desc);
-create index queue_items_suggested_by_idx on public.queue_items(suggested_by);
 create index queue_votes_user_id_idx on public.queue_votes(user_id);
 
 insert into public.groups (name, slug)
@@ -191,74 +182,6 @@ grant usage on schema private to authenticated;
 grant execute on function private.is_group_member(uuid) to authenticated;
 grant execute on function private.is_group_admin(uuid) to authenticated;
 grant execute on function private.shares_group_with(uuid) to authenticated;
-
-create or replace function public.create_journal_entry(
-  p_group_id uuid,
-  p_title text,
-  p_release_year integer,
-  p_watched_at date,
-  p_status text,
-  p_comment text,
-  p_viewer_ids uuid[]
-)
-returns bigint
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-declare
-  new_entry public.journal_entries;
-  requested_viewers integer;
-  valid_viewers integer;
-begin
-  requested_viewers := coalesce(array_length(p_viewer_ids, 1), 0);
-  if requested_viewers = 0 then
-    raise exception 'Choose at least one viewer.';
-  end if;
-
-  select count(distinct viewer_id)
-  into valid_viewers
-  from unnest(p_viewer_ids) as viewer_id
-  where exists (
-    select 1
-    from public.group_memberships membership
-    where membership.group_id = p_group_id
-      and membership.user_id = viewer_id
-  );
-
-  if valid_viewers <> requested_viewers then
-    raise exception 'Every viewer must be an approved member of this group.';
-  end if;
-
-  insert into public.journal_entries (
-    group_id,
-    title,
-    release_year,
-    watched_at,
-    status,
-    comment,
-    created_by
-  ) values (
-    p_group_id,
-    trim(p_title),
-    p_release_year,
-    p_watched_at,
-    upper(p_status),
-    nullif(trim(p_comment), ''),
-    (select auth.uid())
-  )
-  returning * into new_entry;
-
-  insert into public.entry_viewers (entry_id, profile_id)
-  select new_entry.id, viewer_id
-  from unnest(p_viewer_ids) as viewer_id;
-
-  return new_entry.entry_number;
-end;
-$$;
-
-revoke all on function public.create_journal_entry(uuid, text, integer, date, text, text, uuid[]) from public, anon;
-grant execute on function public.create_journal_entry(uuid, text, integer, date, text, text, uuid[]) to authenticated;
 
 alter table public.groups enable row level security;
 alter table public.profiles enable row level security;
@@ -404,14 +327,13 @@ on public.queue_votes for delete
 to authenticated
 using (user_id = (select auth.uid()));
 
-revoke all on table public.groups from anon, authenticated;
-revoke all on table public.profiles from anon, authenticated;
-revoke all on table public.group_memberships from anon, authenticated;
-revoke all on table public.journal_entries from anon, authenticated;
-revoke all on table public.entry_viewers from anon, authenticated;
-revoke all on table public.queue_items from anon, authenticated;
-revoke all on table public.queue_votes from anon, authenticated;
-revoke all on sequence public.journal_entries_entry_number_seq from anon, authenticated;
+revoke all on table public.groups from anon;
+revoke all on table public.profiles from anon;
+revoke all on table public.group_memberships from anon;
+revoke all on table public.journal_entries from anon;
+revoke all on table public.entry_viewers from anon;
+revoke all on table public.queue_items from anon;
+revoke all on table public.queue_votes from anon;
 
 grant select on table public.groups to authenticated;
 grant select, update on table public.profiles to authenticated;

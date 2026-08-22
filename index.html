@@ -18,7 +18,7 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="Primary navigation">
       <div class="brand-block">
-        <a class="brand" href="#list" data-nav="list" aria-label="Open The Discordians movie list">The Discordians</a>
+        <a class="brand" href="#list" data-nav="list" aria-label="Open The Discordians movie list"><img class="brand-logo" src="./assets/discordians-logo.png" alt="" /></a>
         <span class="brand-rule"></span>
         <span class="section-label">Cine-Cord</span>
       </div>
@@ -42,8 +42,8 @@
       </nav>
 
       <div class="sidebar-footer">
-        <span>Private movie club</span>
-        <span>for the Discordians</span>
+        <span>The Discordian</span>
+        <span>Companion App</span>
         <div id="session-panel" class="session-panel" hidden>
           <span id="session-name" class="session-name"></span>
           <button class="session-sign-out" type="button" data-sign-out>Sign out</button>
@@ -77,9 +77,9 @@
         <fieldset>
           <legend>How are we deciding?</legend>
           <div class="mode-picker">
-            <label class="choice-row"><input type="radio" name="mode" value="Consensus Sprint" checked /><span><strong>Consensus Sprint</strong><small>Private yes, maybe or no votes.</small></span></label>
-            <label class="choice-row"><input type="radio" name="mode" value="Queue Roulette" /><span><strong>Queue Roulette</strong><small>Weighted chaos with optional vetoes.</small></span></label>
-            <label class="choice-row"><input type="radio" name="mode" value="Reel Bracket" /><span><strong>Reel Bracket</strong><small>Head-to-head voting until one film remains.</small></span></label>
+            <label class="choice-row is-unavailable"><input type="radio" name="mode" value="Consensus Sprint" disabled /><span><strong>Consensus Sprint · Coming soon</strong><small>Private yes, maybe or no voting is not implemented yet.</small></span></label>
+            <label class="choice-row"><input type="radio" name="mode" value="Queue Roulette" checked /><span><strong>Queue Roulette</strong><small>Weighted chaos with one optional veto per participant.</small></span></label>
+            <label class="choice-row is-unavailable"><input type="radio" name="mode" value="Reel Bracket" disabled /><span><strong>Reel Bracket · Coming soon</strong><small>Head-to-head voting is not implemented yet.</small></span></label>
           </div>
         </fieldset>
         <button class="primary-button full-width" type="submit">Create Watch Party <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
