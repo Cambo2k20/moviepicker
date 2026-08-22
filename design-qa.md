@@ -17,6 +17,9 @@
 - iPhone fixed bottom detail sheet with scrim and safe-area padding
 - Ready and Watched card states
 - Empty/filter-result behavior
+- Add Film finder at desktop width
+- Add Film finder inside a 390 × 844 iPhone viewport
+- Existing-film metadata matching and refreshed detail state
 
 ## Interactions checked
 
@@ -27,6 +30,9 @@
 - Change list sorting
 - Add/remove a film from the session-only Tonight shortlist
 - Existing vote and watched controls remain wired to the website list only
+- Search for a film and review multiple visual matches
+- Select a match and refresh the card runtime, genres and synopsis
+- Use the manual-add fallback when external movie lookup is unavailable
 
 ## Visual comparison
 
@@ -36,6 +42,8 @@ The selected-state source and the implementation were reviewed together in one c
 
 - No application console errors or warnings in desktop or mobile checks.
 - Temporary mock preview data was removed from the branch after QA.
+- The production browser receives only the publishable Supabase key; TMDB credentials stay inside the authenticated Edge Function.
+- Queue metadata fields are nullable, so the existing list row remained unchanged during the migration.
 - No Discord, bot or Journal API exists in this implementation.
 - No Discord or Journal data was read, written or changed during QA.
 

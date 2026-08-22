@@ -85,19 +85,23 @@
   </div>
 
   <div id="film-modal" class="modal-layer" hidden>
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="film-form-title">
+    <section class="modal modal-wide film-finder-modal" role="dialog" aria-modal="true" aria-labelledby="film-form-title">
       <button class="icon-button modal-close" type="button" data-close-film aria-label="Close Add Film form">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
       <p class="eyebrow">Shared list</p>
       <h2 id="film-form-title">Add a film</h2>
-      <p class="modal-intro">Add something worth watching—or at least worth arguing about.</p>
+      <p id="film-form-intro" class="modal-intro">Search TMDB for the correct film, poster and details.</p>
 
       <form id="film-form" class="access-form">
         <label><span>Film title</span><input name="title" required maxlength="200" placeholder="What should we watch?" /></label>
         <label><span>Release year <small>(optional)</small></span><input name="year" inputmode="numeric" maxlength="4" placeholder="e.g. 1982" /></label>
-        <button class="primary-button full-width" type="submit">Add to The List <span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+        <button class="primary-button full-width" type="submit">Find Movie <span class="material-symbols-outlined" aria-hidden="true">search</span></button>
       </form>
+
+      <div id="film-search-status" class="film-search-status" role="status" aria-live="polite" hidden></div>
+      <div id="film-match-results" class="film-match-results" aria-label="Movie matches" hidden></div>
+      <button id="film-manual-add" class="text-button film-manual-add" type="button" data-add-film-manually hidden>Add without artwork</button>
     </section>
   </div>
 

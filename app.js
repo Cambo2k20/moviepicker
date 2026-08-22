@@ -27,6 +27,11 @@ const filmModal = document.querySelector("#film-modal");
 const partyMembers = document.querySelector("#party-members");
 const partyForm = document.querySelector("#party-form");
 const filmForm = document.querySelector("#film-form");
+const filmFormTitle = document.querySelector("#film-form-title");
+const filmFormIntro = document.querySelector("#film-form-intro");
+const filmSearchStatus = document.querySelector("#film-search-status");
+const filmMatchResults = document.querySelector("#film-match-results");
+const filmManualAdd = document.querySelector("#film-manual-add");
 const toast = document.querySelector("#toast");
 const sessionPanel = document.querySelector("#session-panel");
 const sessionName = document.querySelector("#session-name");
@@ -51,6 +56,8 @@ let genreFilter = "all";
 let memberFilter = "all";
 let selectedFilmId = null;
 const shortlistedFilmIds = new Set();
+let filmEditingId = null;
+let pendingFilmDraft = null;
 let authMode = "signin";
 let isLoading = true;
 let toastTimer;
@@ -109,6 +116,10 @@ function filmPoster(item) {
   return "./assets/hero-journal-web.png";
 }
 
+function tmdbPoster(path, size = "w500") {
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : "./assets/hero-journal-web.png";
+}
+
 function runtimeLabel(item) {
   return item.runtime ? `${item.runtime} min` : "Runtime pending";
 }
@@ -118,6 +129,83 @@ function metadataLine(item) {
   if (item.runtime) parts.push(`${item.runtime} min`);
   if (item.genres.length) parts.push(item.genres.slice(0, 2).join(" · "));
   return parts.join(" · ") || "Movie details pending";
+}
+
+function setFilmSearchStatus(message = "", tone = "neutral") {
+  filmSearchStatus.textContent = message;
+  filmSearchStatus.dataset.tone = tone;
+  filmSearchStatus.hidden = !message;
+}
+
+function clearFilmMatches() {
+  filmMatchResults.innerHTML = "";
+  filmMatchResults.hidden = true;
+  filmManualAdd.disabled = false;
+  filmManualAdd.hidden = true;
+  setFilmSearchStatus();
+}
+
+function renderFilmMatches(matches) {
+  filmMatchResults.innerHTML = matches.map((match) => `
+    <button class="film-match" type="button" data-select-movie-match="${match.tmdbId}">
+      <img src="${escapeHTML(tmdbPoster(match.posterPath, "w185"))}" alt="${match.posterPath ? `${escapeHTML(match.title)} poster` : "Cine-Cord artwork placeholder"}" />
+      <span class="film-match-copy"><strong>${escapeHTML(match.title)}</strong><span>${match.year || "Year unknown"}</span><small>${escapeHTML(match.overview || "No synopsis available.")}</small></span>
+      <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+    </button>`).join("");
+  filmMatchResults.hidden = false;
+  setFilmSearchStatus(`${matches.length} ${matches.length === 1 ? "match" : "matches"} found. Choose the correct film.`, "success");
+}
+
+function metadataPayload(movie) {
+  return {
+    title: movie.title,
+    release_year: movie.year,
+    tmdb_id: movie.tmdbId,
+    poster_path: movie.posterPath,
+    runtime_minutes: movie.runtime,
+    genres: movie.genres,
+    overview: movie.overview,
+    metadata_updated_at: new Date().toISOString(),
+  };
+}
+
+async function lookupMovie(body) {
+  const { data, error } = await supabase.functions.invoke("movie-lookup", { body });
+  if (error) {
+    let message = error.message || "Movie lookup failed.";
+    try {
+      const context = await error.context?.json();
+      if (context?.error) message = context.error;
+    } catch {
+      // The generic function error is still useful if no JSON body is available.
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+async function saveMovie(movie = null) {
+  if (!authUser || !activeGroup || !pendingFilmDraft) return;
+  const payload = movie
+    ? metadataPayload(movie)
+    : { title: pendingFilmDraft.title, release_year: pendingFilmDraft.year };
+
+  if (filmEditingId) {
+    const item = movieList.find((candidate) => candidate.id === filmEditingId);
+    if (!item || !canManageFilm(item)) throw new Error("You cannot update this film.");
+    const { error } = await supabase.from("queue_items").update(payload).eq("id", item.id).eq("group_id", activeGroup.id);
+    if (error) throw error;
+    return { action: "updated", title: payload.title };
+  }
+
+  const { error } = await supabase.from("queue_items").insert({
+    group_id: activeGroup.id,
+    suggested_by: authUser.id,
+    ...payload,
+  });
+  if (error) throw error;
+  return { action: "added", title: payload.title };
 }
 
 function showToast(message) {
@@ -217,7 +305,7 @@ function renderFilmDetails(item) {
       <div class="detail-actions">
         <button class="primary-button" type="button" data-shortlist-film="${item.id}"><span class="material-symbols-outlined" aria-hidden="true">${isShortlisted ? "check" : "playlist_add"}</span>${isShortlisted ? "Added to Tonight" : "Add to Tonight"}</button>
         <button class="secondary-button" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${item.votedByMe ? "Remove vote" : "Vote"} · ${item.votes}</button>
-        ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
+        ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-match-film="${item.id}">${item.tmdbId ? "Refresh movie details" : "Find poster and details"}</button><button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
       </div>
     </aside>`;
 }
@@ -373,7 +461,17 @@ function closePartyModal() {
   document.body.style.overflow = "";
 }
 
-function openFilmModal() {
+function openFilmModal(item = null) {
+  filmEditingId = item?.id || null;
+  pendingFilmDraft = null;
+  filmForm.reset();
+  clearFilmMatches();
+  filmFormTitle.textContent = item ? "Match movie details" : "Add a film";
+  filmFormIntro.textContent = item
+    ? "Search for the correct TMDB result to add or refresh its poster, runtime, genres and synopsis."
+    : "Search TMDB for the correct film, poster and details.";
+  filmForm.elements.title.value = item?.title || "";
+  filmForm.elements.year.value = item?.year || "";
   filmModal.hidden = false;
   document.body.style.overflow = "hidden";
   filmForm.elements.title.focus();
@@ -382,6 +480,10 @@ function openFilmModal() {
 function closeFilmModal() {
   filmModal.hidden = true;
   document.body.style.overflow = "";
+  filmEditingId = null;
+  pendingFilmDraft = null;
+  filmForm.reset();
+  clearFilmMatches();
 }
 
 async function loadWorkspace() {
@@ -445,6 +547,8 @@ async function loadWorkspace() {
       votes: voters.length,
       votedByMe: voters.includes(authUser.id),
       posterUrl,
+      tmdbId: item.tmdb_id || null,
+      metadataUpdatedAt: item.metadata_updated_at || null,
       runtime: Number(item.runtime_minutes) || null,
       genres: normaliseGenres(item.genres),
       overview: item.overview || ""
@@ -519,19 +623,31 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!authUser || !activeGroup) return;
     const form = new FormData(event.target);
+    const title = String(form.get("title")).trim();
     const yearValue = String(form.get("year")).trim();
     const year = yearValue ? Number(yearValue) : null;
     if (year !== null && (!Number.isInteger(year) || year < 1888 || year > 2200)) { showToast("Enter a valid four-digit release year, or leave it blank."); return; }
     const submit = event.target.querySelector("button[type='submit']");
     submit.disabled = true;
-    const { error } = await supabase.from("queue_items").insert({ group_id: activeGroup.id, title: String(form.get("title")).trim(), release_year: year, suggested_by: authUser.id });
-    submit.disabled = false;
-    if (error) { showToast(`Film was not added: ${error.message}`); return; }
-    filmForm.reset();
-    closeFilmModal();
-    await loadWorkspace();
-    render();
-    showToast("Film added to The List.");
+    submit.innerHTML = `Searching… <span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>`;
+    pendingFilmDraft = { title, year };
+    clearFilmMatches();
+    setFilmSearchStatus("Searching TMDB for the best matches…");
+    try {
+      const { matches = [] } = await lookupMovie({ action: "search", query: title, year });
+      if (matches.length) {
+        renderFilmMatches(matches);
+      } else {
+        setFilmSearchStatus("No matching films were found. Try a broader title or add it without artwork.", "warning");
+        filmManualAdd.hidden = Boolean(filmEditingId);
+      }
+    } catch (error) {
+      setFilmSearchStatus(`${error.message} You can still keep the website list usable without artwork.`, "warning");
+      filmManualAdd.hidden = Boolean(filmEditingId);
+    } finally {
+      submit.disabled = false;
+      submit.innerHTML = `Find Movie <span class="material-symbols-outlined" aria-hidden="true">search</span>`;
+    }
     return;
   }
 
@@ -610,6 +726,50 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-close-film-details]")) { selectedFilmId = null; render(); return; }
+
+  const matchFilmButton = event.target.closest("[data-match-film]");
+  if (matchFilmButton) {
+    const item = movieList.find((candidate) => candidate.id === matchFilmButton.dataset.matchFilm);
+    if (!item || !canManageFilm(item)) return;
+    openFilmModal(item);
+    return;
+  }
+
+  const movieMatchButton = event.target.closest("[data-select-movie-match]");
+  if (movieMatchButton) {
+    movieMatchButton.disabled = true;
+    setFilmSearchStatus("Loading the full movie details…");
+    try {
+      const { movie } = await lookupMovie({ action: "details", tmdbId: Number(movieMatchButton.dataset.selectMovieMatch) });
+      if (!movie) throw new Error("The movie details could not be loaded.");
+      const result = await saveMovie(movie);
+      closeFilmModal();
+      await loadWorkspace();
+      if (result.action === "added") selectedFilmId = movieList.find((item) => item.tmdbId === movie.tmdbId)?.id || null;
+      render();
+      showToast(`${result.title} ${result.action} with its poster and movie details.`);
+    } catch (error) {
+      movieMatchButton.disabled = false;
+      setFilmSearchStatus(`Movie details were not saved: ${error.message}`, "warning");
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-add-film-manually]")) {
+    if (!pendingFilmDraft || filmEditingId) return;
+    filmManualAdd.disabled = true;
+    try {
+      const result = await saveMovie();
+      closeFilmModal();
+      await loadWorkspace();
+      render();
+      showToast(`${result.title} added without artwork. You can match it later.`);
+    } catch (error) {
+      filmManualAdd.disabled = false;
+      setFilmSearchStatus(`Film was not added: ${error.message}`, "warning");
+    }
+    return;
+  }
 
   const shortlistButton = event.target.closest("[data-shortlist-film]");
   if (shortlistButton) {
