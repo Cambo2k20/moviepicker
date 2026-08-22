@@ -2800,7 +2800,16 @@ legend,
   }
 
   .detail-poster {
-    max-height: 230px;
+    width: min(100%, 300px);
+    max-height: none;
+    margin-right: auto;
+    margin-left: auto;
+    aspect-ratio: 2 / 3;
+    background: #0b0c10;
+  }
+
+  .detail-poster img {
+    object-fit: contain;
   }
 }
 
