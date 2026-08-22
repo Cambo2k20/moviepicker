@@ -1,5 +1,5 @@
 repo: Cambo2k20/moviepicker
-branch: feature/discordians-rebrand
+branch: feature/persistent-journal
 
 ## Discordians companion prototype
 
@@ -16,9 +16,16 @@ This branch turns the original movie picker into a broader private server compan
 - Wrapped awards and Cine-Cord totals
 - Shared queue with local prototype voting
 
-### Data boundary
+### Persistent Journal phase
 
-The prototype is front-end only. New entries, votes and room state live in the current browser session and are not yet written to Discord or a database. The next implementation phase should preserve the existing Discord Journal format and add authenticated persistence plus a Discord webhook or bot integration.
+- Supabase email/password authentication with no public sign-up interface
+- Membership-gated private group access
+- Persistent Journal reads and atomic entry creation
+- Viewer validation against approved website members
+- Explicit database grants and Row Level Security on every exposed table
+- No Discord API, webhook, bot token, OAuth scope or server connection
+
+Queue voting, watch-party rooms and Wrapped calculations remain prototype-only until their later persistence phases.
 
 ### Local development
 

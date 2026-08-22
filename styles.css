@@ -152,6 +152,11 @@ select:focus-visible {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.nav-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
 .nav-item.is-active {
   background: linear-gradient(90deg, rgba(109, 90, 230, 0.11), rgba(255, 255, 255, 0.025));
   color: var(--text);
@@ -181,10 +186,97 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
+.session-panel {
+  display: grid;
+  gap: 7px;
+  margin-top: 13px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.session-name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-sign-out {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--purple-light);
+  cursor: pointer;
+  font: inherit;
+}
+
 .main-view {
   min-width: 0;
   min-height: 100vh;
   padding: 50px clamp(30px, 4vw, 58px) 28px;
+}
+
+.access-view {
+  min-height: calc(100vh - 100px);
+  display: grid;
+  place-items: center;
+}
+
+.access-view > p,
+.access-card > p {
+  max-width: 560px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.access-view > h1,
+.access-card h1 {
+  margin: 12px 0 0;
+  font-family: "Barlow Condensed", Impact, sans-serif;
+  font-size: clamp(54px, 7vw, 94px);
+  font-weight: 500;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.access-card {
+  width: min(620px, 100%);
+  padding: clamp(28px, 5vw, 58px);
+  border: 1px solid var(--border);
+  background: #15171e;
+}
+
+.access-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.access-form label > span {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.access-note {
+  display: block;
+  margin-top: 18px;
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.journal-empty .journal-main {
+  align-self: center;
 }
 
 .home-view {
@@ -941,8 +1033,32 @@ legend,
 
   .brand-rule,
   .section-label,
-  .sidebar-footer {
+  .sidebar-footer > span {
     display: none;
+  }
+
+  .sidebar-footer {
+    position: absolute;
+    top: 13px;
+    right: 20px;
+    width: min(46vw, 220px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .session-panel {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .session-name {
+    max-width: 120px;
   }
 
   .brand {
@@ -984,6 +1100,10 @@ legend,
   .main-view {
     min-height: auto;
     padding: 30px 20px 92px;
+  }
+
+  .access-view {
+    min-height: calc(100vh - 150px);
   }
 
   .home-hero {
