@@ -51,6 +51,8 @@ let accessRequest = null;
 let joinRequests = [];
 let movieList = [];
 let activeSession = null;
+let sessionHistory = [];
+let discordDraft = null;
 let listQuery = "";
 let listFilter = "all";
 let listSort = "votes";
@@ -66,6 +68,8 @@ let pendingFilmDraft = null;
 let authMode = "signin";
 let isLoading = true;
 let toastTimer;
+
+const DISCORD_ENTRY_DIVIDER = "————————————————————————————————————————————————————————————————————————————————————";
 
 function loadDesignPreviewWorkspace() {
   authUser = { id: "preview-cameron", email: "preview@cine-cord.local" };
@@ -110,6 +114,10 @@ function isCurrentAdmin() {
 
 function canManageFilm(item) {
   return isCurrentAdmin() || item.suggestedById === authUser?.id;
+}
+
+function canManageSession(session = activeSession) {
+  return Boolean(session && (isCurrentAdmin() || session.createdById === authUser?.id));
 }
 
 function formatRequestDate(value) {
@@ -175,6 +183,100 @@ function createRouletteState(sessionMembers) {
       weightedByAge: true,
     },
   };
+}
+
+function serialiseRouletteState() {
+  if (!rouletteState) return {};
+  return {
+    phase: rouletteState.phase,
+    usedVetoes: [...rouletteState.usedVetoes],
+    winnerId: rouletteState.winnerId,
+    poolOpen: rouletteState.poolOpen,
+    previewIds: [...rouletteState.previewIds],
+    filters: { ...rouletteState.filters },
+  };
+}
+
+function restoreRouletteState(session) {
+  const restored = createRouletteState(session.members);
+  const saved = session.gameState && typeof session.gameState === "object" ? session.gameState : {};
+  restored.phase = saved.phase === "spinning" ? "reveal" : (saved.phase || (session.status === "CONFIRMED" ? "confirmed" : "ready"));
+  restored.usedVetoes = Array.isArray(saved.usedVetoes) ? saved.usedVetoes.filter((name) => session.members.includes(name)) : [];
+  restored.winnerId = session.selectedFilmId || saved.winnerId || null;
+  restored.poolOpen = Boolean(saved.poolOpen);
+  restored.previewIds = Array.isArray(saved.previewIds) ? saved.previewIds : [];
+  restored.filters = { ...restored.filters, ...(saved.filters || {}) };
+  if (session.status === "CONFIRMED") restored.phase = "confirmed";
+  return restored;
+}
+
+function selectedFilmForSession(session) {
+  if (!session) return null;
+  return movieList.find((item) => item.id === session.selectedFilmId) || session.selectedFilm || null;
+}
+
+function createDiscordDraft(session, film) {
+  return {
+    sessionId: session.id,
+    entryNumber: "",
+    title: film?.title || "",
+    year: film?.year || "",
+    viewers: session.members.join(", "),
+    status: "Finished",
+    comment: "",
+  };
+}
+
+function ensureDiscordDraft(session, film) {
+  if (!discordDraft || discordDraft.sessionId !== session.id) discordDraft = createDiscordDraft(session, film);
+  return discordDraft;
+}
+
+function buildDiscordTemplate(draft) {
+  const lines = [
+    `- Entry #${String(draft.entryNumber || "").trim()}`,
+    `- ${String(draft.title || "").trim()}`,
+    `- ${String(draft.year || "").trim()}`,
+    `- Viewers: ${String(draft.viewers || "").trim()}`,
+    `- Status: ${draft.status === "DNF" ? "DNF" : "Finished"}`,
+  ];
+  const comment = String(draft.comment || "").trim();
+  if (comment) lines.push(`- ${comment}`);
+  lines.push(DISCORD_ENTRY_DIVIDER);
+  return lines.join("\n");
+}
+
+function renderDiscordTemplate(session, film) {
+  const draft = ensureDiscordDraft(session, film);
+  return `
+    <section class="discord-copy-card" aria-labelledby="discord-copy-title">
+      <div class="discord-copy-heading"><div><span class="eyebrow">Optional Discord handoff</span><h3 id="discord-copy-title">Prepare the Journal post</h3><p>Edit anything that differs, then copy the familiar format into Discord yourself.</p></div><span class="copy-only-badge"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy only</span></div>
+      <form id="discord-template-form" class="discord-template-form">
+        <label><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" required value="${escapeHTML(draft.entryNumber)}" placeholder="307" /></label>
+        <label><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" /></label>
+        <label><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" /></label>
+        <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" /></label>
+        <label><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
+        <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…">${escapeHTML(draft.comment)}</textarea></label>
+        <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
+        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><small>Nothing is posted automatically.</small></div>
+      </form>
+    </section>`;
+}
+
+function updateDiscordDraftPreview(form) {
+  if (!form || !activeSession) return;
+  const values = new FormData(form);
+  discordDraft = {
+    sessionId: activeSession.id,
+    entryNumber: String(values.get("entry_number") || ""),
+    title: String(values.get("title") || ""),
+    year: String(values.get("year") || ""),
+    viewers: String(values.get("viewers") || ""),
+    status: String(values.get("status")) === "DNF" ? "DNF" : "Finished",
+    comment: String(values.get("comment") || ""),
+  };
+  form.querySelector("#discord-template-preview").value = buildDiscordTemplate(discordDraft);
 }
 
 function getRouletteCandidates() {
@@ -478,6 +580,7 @@ function renderRouletteWheel(candidates) {
 
 function renderRouletteReady(candidates) {
   const isSpinning = rouletteState?.phase === "spinning";
+  const canManage = canManageSession();
   const filterLabels = rouletteFilterLabels();
   const remainingVetoes = rouletteState.members.filter((name) => !rouletteState.usedVetoes.includes(name));
   return `
@@ -490,7 +593,7 @@ function renderRouletteReady(candidates) {
       <aside class="roulette-control-column">
         ${renderRoulettePool(candidates)}
         <section class="roulette-veto-panel" aria-labelledby="roulette-veto-title"><span class="eyebrow" id="roulette-veto-title">Veto tokens</span><p>Each player can reject one result.</p><div class="roulette-veto-list">${rouletteState.members.map((name) => `<span class="roulette-veto-token ${rouletteState.usedVetoes.includes(name) ? "is-used" : ""}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><strong>${rouletteState.usedVetoes.includes(name) ? "Used" : "1"}</strong></span>`).join("")}</div><small>${remainingVetoes.length} remaining</small></section>
-        <button class="primary-button roulette-spin-button" type="button" data-spin-roulette ${!candidates.length || isSpinning ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">casino</span>${isSpinning ? "Spinning…" : "Spin the list"}</button>
+        <button class="primary-button roulette-spin-button" type="button" data-spin-roulette ${!candidates.length || isSpinning || !canManage ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">casino</span>${isSpinning ? "Spinning…" : canManage ? "Spin the list" : `Waiting for ${escapeHTML(activeSession.hostName)}`}</button>
         ${candidates.length ? "" : `<p class="roulette-empty-warning">No films match these filters. Adjust the pool to continue.</p>`}
       </aside>
     </div>`;
@@ -501,6 +604,7 @@ function renderRouletteReveal(candidates, winner) {
   const weight = weights.get(winner.id) || 1;
   const orbitFilms = [...candidates.filter((item) => item.id !== winner.id), ...movieList.filter((item) => item.id !== winner.id)].slice(0, 4);
   const confirmed = rouletteState.phase === "confirmed";
+  const canManage = canManageSession();
   return `
     <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}">
       <div class="roulette-result-stage">
@@ -515,24 +619,27 @@ function renderRouletteReveal(candidates, winner) {
         <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span><span class="material-symbols-outlined" aria-hidden="true">weight</span>${weight}× chance</span></div>
         <p class="roulette-winner-overview">${escapeHTML(winner.overview || "The wheel has made its choice. Confirm it for tonight, spin again, or let one player spend their veto.")}</p>
         ${confirmed ? `
-          <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span><div><strong>Choice confirmed</strong><p>The website list and Discord have not been changed.</p></div></div>
-          <button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>
-          <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : `
+          <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>
+          ${renderDiscordTemplate(activeSession, winner)}
+          ${canManage ? `<button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
+          <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : canManage ? `
           <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.members.map((name) => { const used = rouletteState.usedVetoes.includes(name); return `<button type="button" data-veto-member="${escapeHTML(name)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span>${escapeHTML(name)}</span><strong>${used ? "Used" : "Veto"}</strong></button>`; }).join("")}</div></section>
           <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
-          <button class="secondary-button roulette-wide-action" type="button" data-reroll-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Spin again without a veto</button>`}
+          <button class="secondary-button roulette-wide-action" type="button" data-reroll-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Spin again without a veto</button>` : `<div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
     </div>`;
 }
 
 function renderQueueRoulette() {
   const candidates = getRouletteCandidates();
-  const winner = rouletteState?.winnerId ? movieList.find((item) => item.id === rouletteState.winnerId) : null;
+  const winner = rouletteState?.winnerId
+    ? (movieList.find((item) => item.id === rouletteState.winnerId) || selectedFilmForSession(activeSession))
+    : selectedFilmForSession(activeSession);
   return `
     <section class="roulette-game" aria-labelledby="roulette-title">
       <header class="roulette-header">
         <div><span class="eyebrow">Pick Tonight · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
-        <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="End Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+        ${canManageSession() ? `<button class="icon-button roulette-close" type="button" data-close-roulette aria-label="End Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>` : ""}
       </header>
       <div class="roulette-session-strip"><div class="roulette-players">${renderRouletteParticipants()}</div><span><strong>${candidates.length}</strong> eligible</span></div>
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
@@ -551,11 +658,13 @@ function renderPick() {
 }
 
 function renderSessions() {
-  const rouletteWinner = activeSession?.confirmedFilmId ? movieList.find((item) => item.id === activeSession.confirmedFilmId) : null;
+  const rouletteWinner = selectedFilmForSession(activeSession);
+  const canManage = canManageSession();
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">The place for live film-picking rooms—not the Discord Journal.</p></div><button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button></header>
-      ${activeSession ? `<article class="active-session session-feature"><div class="active-session-head"><div><span class="eyebrow">Active session · ${escapeHTML(activeSession.mode)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This game is prepared for a future build."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available for this session.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}<button class="secondary-button" type="button" data-end-session>End Session</button></div></div></article>` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Start with Consensus Sprint, Queue Roulette or a Reel Bracket.</p><button class="secondary-button" type="button" data-open-party>Choose a game</button></div>`}
+      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Movie-night choices now survive refresh. Discord remains a separate, manual handoff.</p></div>${activeSession ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Active")} · ${escapeHTML(activeSession.mode)} · Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This game is prepared for a future build."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}${canManage ? `<button class="secondary-button" type="button" data-end-session>End Session</button>` : ""}</div></div></article>${rouletteWinner ? renderDiscordTemplate(activeSession, rouletteWinner) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Start with Consensus Sprint, Queue Roulette or a Reel Bracket.</p><button class="secondary-button" type="button" data-open-party>Choose a game</button></div>`}
+      ${sessionHistory.length ? `<section class="session-history" aria-labelledby="session-history-title"><div class="section-heading"><div><span class="eyebrow">Saved history</span><h2 id="session-history-title">Previous sessions</h2></div><span class="request-count">${sessionHistory.length}</span></div><div class="session-history-list">${sessionHistory.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.startedAt))} · ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ")}</small></div><span class="status-pill watched">Ended</span></article>`; }).join("")}</div></section>` : ""}
     </section>`;
 }
 
@@ -649,11 +758,16 @@ function navigate(view) {
 }
 
 function openPartyModal(mode = "Consensus Sprint") {
+  if (activeSession) {
+    showToast("A movie-night session is already open. End it before starting another.");
+    navigate("sessions");
+    return;
+  }
   if (!movieList.some((item) => !item.watched)) {
     showToast("Add at least one ready film before starting a session.");
     return;
   }
-  partyMembers.innerHTML = members.map((member, index) => `<label class="member-choice"><input type="checkbox" name="members" value="${escapeHTML(member.name)}" ${index < 3 ? "checked" : ""} /><img src="${member.avatar}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("");
+  partyMembers.innerHTML = members.map((member, index) => `<label class="member-choice"><input type="checkbox" name="members" value="${escapeHTML(member.id)}" ${index < 3 ? "checked" : ""} /><img src="${member.avatar}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("");
   const radio = partyForm.querySelector(`input[name="mode"][value="${mode}"]`);
   if (radio) radio.checked = true;
   partyModal.hidden = false;
@@ -672,7 +786,148 @@ function stopRouletteSpin() {
   rouletteSpinTimer = null;
 }
 
-function spinRoulette(vetoMember = null) {
+async function persistRouletteState() {
+  if (!activeSession || designPreviewMode) return;
+  const gameState = serialiseRouletteState();
+  const { error } = await supabase
+    .from("movie_sessions")
+    .update({ game_state: gameState })
+    .eq("id", activeSession.id)
+    .eq("group_id", activeGroup.id);
+  if (error) throw error;
+  activeSession.gameState = gameState;
+}
+
+async function createMovieSession(participantIds, mode) {
+  const selectedMembers = participantIds.map((id) => members.find((member) => member.id === id)).filter(Boolean);
+  const memberNames = selectedMembers.map((member) => member.name);
+  const candidateCount = movieList.filter((item) => !item.watched).length;
+  const initialRoulette = mode === "Queue Roulette" ? createRouletteState(memberNames) : null;
+  const gameState = initialRoulette ? {
+    phase: initialRoulette.phase,
+    usedVetoes: [],
+    winnerId: null,
+    poolOpen: false,
+    previewIds: [],
+    filters: { ...initialRoulette.filters },
+  } : {};
+
+  if (designPreviewMode) {
+    activeSession = {
+      id: `preview-session-${Date.now()}`,
+      groupId: activeGroup.id,
+      createdById: authUser.id,
+      hostName: currentProfile.displayName,
+      mode,
+      status: "ACTIVE",
+      candidateCount,
+      participantIds,
+      members: memberNames,
+      selectedFilmId: null,
+      selectedFilm: null,
+      gameState,
+      startedAt: new Date().toISOString(),
+    };
+    rouletteState = initialRoulette;
+    return;
+  }
+
+  const { error } = await supabase.rpc("create_movie_session", {
+    p_group_id: activeGroup.id,
+    p_mode: mode,
+    p_participant_ids: participantIds,
+    p_candidate_count: candidateCount,
+    p_game_state: gameState,
+  });
+  if (error) {
+    if (error.code === "23505") throw new Error("A movie-night session is already open. End it before starting another.");
+    throw error;
+  }
+  await loadWorkspace();
+}
+
+async function confirmMovieSession(winner) {
+  if (!activeSession || !rouletteState) return;
+  rouletteState.phase = "confirmed";
+  const gameState = serialiseRouletteState();
+  if (!designPreviewMode) {
+    const { error } = await supabase
+      .from("movie_sessions")
+      .update({
+        status: "CONFIRMED",
+        selected_queue_item_id: winner.id,
+        selected_title: winner.title,
+        selected_release_year: winner.year || null,
+        selected_tmdb_id: winner.tmdbId || null,
+        selected_poster_path: winner.posterPath || null,
+        selected_runtime_minutes: winner.runtime || null,
+        selected_genres: winner.genres || [],
+        selected_overview: winner.overview || null,
+        game_state: gameState,
+      })
+      .eq("id", activeSession.id)
+      .eq("group_id", activeGroup.id);
+    if (error) throw error;
+  }
+  activeSession.status = "CONFIRMED";
+  activeSession.selectedFilmId = winner.id;
+  activeSession.selectedFilm = { ...winner };
+  activeSession.gameState = gameState;
+  activeSession.confirmedAt = new Date().toISOString();
+  discordDraft = createDiscordDraft(activeSession, winner);
+}
+
+async function resetMovieSessionRoulette() {
+  if (!activeSession) return;
+  rouletteState = createRouletteState(activeSession.members);
+  const gameState = serialiseRouletteState();
+  if (!designPreviewMode) {
+    const { error } = await supabase
+      .from("movie_sessions")
+      .update({
+        status: "ACTIVE",
+        selected_queue_item_id: null,
+        selected_title: null,
+        selected_release_year: null,
+        selected_tmdb_id: null,
+        selected_poster_path: null,
+        selected_runtime_minutes: null,
+        selected_genres: [],
+        selected_overview: null,
+        game_state: gameState,
+      })
+      .eq("id", activeSession.id)
+      .eq("group_id", activeGroup.id);
+    if (error) throw error;
+  }
+  activeSession.status = "ACTIVE";
+  activeSession.selectedFilmId = null;
+  activeSession.selectedFilm = null;
+  activeSession.confirmedAt = null;
+  activeSession.gameState = gameState;
+  discordDraft = null;
+}
+
+async function endMovieSession() {
+  if (!activeSession) return;
+  stopRouletteSpin();
+  if (!designPreviewMode) {
+    const { error } = await supabase
+      .from("movie_sessions")
+      .update({ status: "ENDED", game_state: serialiseRouletteState() })
+      .eq("id", activeSession.id)
+      .eq("group_id", activeGroup.id);
+    if (error) throw error;
+    await loadWorkspace();
+  } else {
+    sessionHistory.unshift({ ...activeSession, status: "ENDED", endedAt: new Date().toISOString() });
+    activeSession = null;
+    rouletteState = null;
+    discordDraft = null;
+  }
+}
+
+async function spinRoulette(vetoMember = null) {
   if (!rouletteState || rouletteState.phase === "spinning") return;
   const candidates = getRouletteCandidates();
   if (!candidates.length) {
@@ -689,19 +944,17 @@ function spinRoulette(vetoMember = null) {
   rouletteState.previewIds = preview.map((item) => item.id);
   rouletteState.phase = "spinning";
   const spinToken = ++rouletteSpinToken;
+  try { await persistRouletteState(); }
+  catch (error) { showToast(`Roulette state was not saved: ${error.message}`); return; }
   render();
-  rouletteSpinTimer = window.setTimeout(() => {
+  rouletteSpinTimer = window.setTimeout(async () => {
     if (!rouletteState || rouletteSpinToken !== spinToken) return;
     rouletteState.phase = "reveal";
+    try { await persistRouletteState(); }
+    catch (error) { showToast(`Roulette result was not saved: ${error.message}`); }
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 80 : 1800);
-}
-
-function endRoulette() {
-  stopRouletteSpin();
-  rouletteState = null;
-  if (activeSession?.mode === "Queue Roulette") activeSession = null;
 }
 
 function openFilmModal(item = null) {
@@ -739,6 +992,10 @@ async function loadWorkspace() {
   accessRequest = null;
   joinRequests = [];
   movieList = [];
+  activeSession = null;
+  sessionHistory = [];
+  rouletteState = null;
+  discordDraft = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
@@ -753,14 +1010,16 @@ async function loadWorkspace() {
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult] = await Promise.all([
+  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
-    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true })
+    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
+    supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).order("started_at", { ascending: false }).limit(20),
+    supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true })
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
@@ -790,6 +1049,7 @@ async function loadWorkspace() {
       votes: voters.length,
       votedByMe: voters.includes(authUser.id),
       posterUrl,
+      posterPath: item.poster_path || null,
       tmdbId: item.tmdb_id || null,
       metadataUpdatedAt: item.metadata_updated_at || null,
       runtime: Number(item.runtime_minutes) || null,
@@ -797,6 +1057,49 @@ async function loadWorkspace() {
       overview: item.overview || ""
     };
   });
+  const participantsBySession = new Map();
+  for (const participant of participantsResult.data || []) {
+    const current = participantsBySession.get(participant.session_id) || [];
+    current.push({ id: participant.profile_id, name: participant.display_name_snapshot });
+    participantsBySession.set(participant.session_id, current);
+  }
+  const sessions = (sessionsResult.data || []).map((session) => {
+    const participants = participantsBySession.get(session.id) || [];
+    const selectedFromList = movieList.find((item) => item.id === session.selected_queue_item_id);
+    const selectedFilm = selectedFromList || (session.selected_title ? {
+      id: session.selected_queue_item_id || `session-${session.id}`,
+      title: session.selected_title,
+      year: session.selected_release_year,
+      tmdbId: session.selected_tmdb_id,
+      posterPath: session.selected_poster_path,
+      posterUrl: session.selected_poster_path ? tmdbPoster(session.selected_poster_path) : null,
+      runtime: Number(session.selected_runtime_minutes) || null,
+      genres: normaliseGenres(session.selected_genres),
+      overview: session.selected_overview || "",
+      watched: false,
+      createdAt: session.started_at,
+    } : null);
+    return {
+      id: session.id,
+      groupId: session.group_id,
+      createdById: session.created_by,
+      hostName: profileMap.get(session.created_by)?.display_name || "Former member",
+      mode: session.mode,
+      status: session.status,
+      candidateCount: session.candidate_count,
+      participantIds: participants.map((participant) => participant.id).filter(Boolean),
+      members: participants.map((participant) => participant.name),
+      selectedFilmId: session.selected_queue_item_id,
+      selectedFilm,
+      gameState: session.game_state || {},
+      startedAt: session.started_at,
+      confirmedAt: session.confirmed_at,
+      endedAt: session.ended_at,
+    };
+  });
+  activeSession = sessions.find((session) => ["ACTIVE", "CONFIRMED"].includes(session.status)) || null;
+  sessionHistory = sessions.filter((session) => session.status === "ENDED");
+  if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
   if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
 }
 
@@ -810,6 +1113,10 @@ async function syncSession(session) {
   accessRequest = null;
   joinRequests = [];
   movieList = [];
+  activeSession = null;
+  sessionHistory = [];
+  rouletteState = null;
+  discordDraft = null;
   selectedFilmId = null;
   shortlistedFilmIds.clear();
   render();
@@ -822,6 +1129,33 @@ async function syncSession(session) {
 }
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.matches("#discord-template-form")) {
+    event.preventDefault();
+    if (!event.target.reportValidity()) return;
+    const form = new FormData(event.target);
+    discordDraft = {
+      sessionId: activeSession.id,
+      entryNumber: String(form.get("entry_number")).trim(),
+      title: String(form.get("title")).trim(),
+      year: String(form.get("year")).trim(),
+      viewers: String(form.get("viewers")).trim(),
+      status: String(form.get("status")) === "DNF" ? "DNF" : "Finished",
+      comment: String(form.get("comment")).trim(),
+    };
+    const template = buildDiscordTemplate(discordDraft);
+    try {
+      await navigator.clipboard.writeText(template);
+      showToast("Discord Journal template copied. Nothing was posted automatically.");
+    } catch {
+      const preview = event.target.querySelector("#discord-template-preview");
+      preview.value = template;
+      preview.focus();
+      preview.select();
+      showToast("Automatic copy was blocked. The template is selected so you can copy it manually.");
+    }
+    return;
+  }
+
   if (event.target.matches("#auth-form")) {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -1060,63 +1394,103 @@ document.addEventListener("click", async (event) => {
 
   const modeButton = event.target.closest("[data-select-mode]");
   if (modeButton) { openPartyModal(modeButton.dataset.selectMode); return; }
-  if (event.target.closest("[data-adjust-roulette]")) { rouletteState.poolOpen = !rouletteState.poolOpen; render(); return; }
-  if (event.target.closest("[data-spin-roulette]")) { spinRoulette(); return; }
+  if (event.target.closest("[data-adjust-roulette]")) {
+    rouletteState.poolOpen = !rouletteState.poolOpen;
+    render();
+    try { await persistRouletteState(); }
+    catch (error) { showToast(`Roulette panel state was not saved: ${error.message}`); }
+    return;
+  }
+  if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
-  if (vetoButton) { spinRoulette(vetoButton.dataset.vetoMember); return; }
-  if (event.target.closest("[data-reroll-roulette]")) { spinRoulette(); return; }
+  if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-reroll-roulette]")) { await spinRoulette(); return; }
   if (event.target.closest("[data-confirm-roulette]")) {
     if (!rouletteState?.winnerId || !activeSession) return;
-    rouletteState.phase = "confirmed";
-    activeSession.confirmedFilmId = rouletteState.winnerId;
-    render();
-    showToast("Tonight's film is confirmed. The list and Discord were not changed.");
+    const winner = movieList.find((item) => item.id === rouletteState.winnerId);
+    if (!winner || !canManageSession()) return;
+    const confirmButton = event.target.closest("[data-confirm-roulette]");
+    confirmButton.disabled = true;
+    try {
+      await confirmMovieSession(winner);
+      render();
+      showToast("Tonight's film and session were saved. The list and Discord were not changed.");
+    } catch (error) {
+      confirmButton.disabled = false;
+      showToast(`The session was not confirmed: ${error.message}`);
+    }
     return;
   }
   if (event.target.closest("[data-new-roulette]")) {
-    const sessionMembers = [...rouletteState.members];
-    rouletteState = createRouletteState(sessionMembers);
-    if (activeSession) delete activeSession.confirmedFilmId;
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!canManageSession()) return;
+    try {
+      await resetMovieSessionRoulette();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      showToast("A new round is ready. The previous choice was not sent to Discord.");
+    } catch (error) { showToast(`The new round was not started: ${error.message}`); }
     return;
   }
-  if (event.target.closest("[data-continue-roulette]")) { navigate("pick"); return; }
+  if (event.target.closest("[data-continue-roulette]")) { navigate(activeSession?.mode === "Queue Roulette" ? "pick" : "sessions"); return; }
   if (event.target.closest("[data-close-roulette]")) {
-    if (!window.confirm("End this Queue Roulette session? The movie list and Discord will not change.")) return;
-    endRoulette();
-    render();
-    showToast("Queue Roulette ended. The movie list was not changed.");
+    if (!canManageSession() || !window.confirm("End this Queue Roulette session? Its saved history will remain, and the movie list and Discord will not change.")) return;
+    try {
+      await endMovieSession();
+      navigate("sessions");
+      showToast("Queue Roulette ended and was kept in session history. Discord was not changed.");
+    } catch (error) { showToast(`The session was not ended: ${error.message}`); }
     return;
   }
-  if (event.target.closest("[data-end-session]")) { endRoulette(); activeSession = null; render(); showToast("Session ended. The movie list was not changed."); }
+  if (event.target.closest("[data-end-session]")) {
+    if (!canManageSession() || !window.confirm("End this movie-night session? Its saved history will remain.")) return;
+    try { await endMovieSession(); render(); showToast("Session ended and saved to history. Discord was not changed."); }
+    catch (error) { showToast(`The session was not ended: ${error.message}`); }
+  }
 });
 
-document.addEventListener("change", (event) => {
+document.addEventListener("input", (event) => {
+  const form = event.target.closest("#discord-template-form");
+  if (form) updateDiscordDraftPreview(form);
+});
+
+document.addEventListener("change", async (event) => {
+  const discordForm = event.target.closest("#discord-template-form");
+  if (discordForm) { updateDiscordDraftPreview(discordForm); return; }
   if (event.target.matches("#list-sort")) { listSort = event.target.value; render(); }
   if (event.target.matches("#genre-filter")) { genreFilter = event.target.value; render(); }
   if (event.target.matches("#member-filter")) { memberFilter = event.target.value; render(); }
-  if (event.target.matches("#roulette-runtime")) { rouletteState.filters.runtime = event.target.value; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
-  if (event.target.matches("#roulette-genre")) { rouletteState.filters.genre = event.target.value; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
-  if (event.target.matches("#roulette-rewatches")) { rouletteState.filters.includeWatched = event.target.checked; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
-  if (event.target.matches("#roulette-age-weight")) { rouletteState.filters.weightedByAge = event.target.checked; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
+  let rouletteChanged = false;
+  if (event.target.matches("#roulette-runtime")) { rouletteState.filters.runtime = event.target.value; rouletteChanged = true; }
+  if (event.target.matches("#roulette-genre")) { rouletteState.filters.genre = event.target.value; rouletteChanged = true; }
+  if (event.target.matches("#roulette-rewatches")) { rouletteState.filters.includeWatched = event.target.checked; rouletteChanged = true; }
+  if (event.target.matches("#roulette-age-weight")) { rouletteState.filters.weightedByAge = event.target.checked; rouletteChanged = true; }
+  if (rouletteChanged) {
+    rouletteState.winnerId = null;
+    rouletteState.previewIds = [];
+    render();
+    try { await persistRouletteState(); }
+    catch (error) { showToast(`Roulette filters were not saved: ${error.message}`); }
+  }
 });
 
-partyForm.addEventListener("submit", (event) => {
+partyForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(partyForm);
-  const selectedMembers = form.getAll("members");
-  if (!selectedMembers.length) { showToast("Choose at least one Discordian."); return; }
-  activeSession = { members: selectedMembers, mode: String(form.get("mode")), candidateCount: movieList.filter((item) => !item.watched).length };
-  closePartyModal();
-  if (activeSession.mode === "Queue Roulette") {
-    rouletteState = createRouletteState(selectedMembers);
-    navigate("pick");
-  } else {
-    rouletteState = null;
-    navigate("sessions");
+  const selectedMemberIds = form.getAll("members").map(String);
+  if (!selectedMemberIds.length) { showToast("Choose at least one Discordian."); return; }
+  const mode = String(form.get("mode"));
+  const submit = partyForm.querySelector("button[type='submit']");
+  submit.disabled = true;
+  try {
+    await createMovieSession(selectedMemberIds, mode);
+    closePartyModal();
+    navigate(mode === "Queue Roulette" ? "pick" : "sessions");
+    showToast(`${mode} session created and saved for ${selectedMemberIds.length} people.`);
+  } catch (error) {
+    showToast(`The session was not created: ${error.message}`);
+  } finally {
+    submit.disabled = false;
   }
-  showToast(`${activeSession.mode} session created for ${selectedMembers.length} people.`);
 });
 
 document.addEventListener("keydown", (event) => {

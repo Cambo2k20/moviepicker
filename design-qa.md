@@ -27,6 +27,13 @@
 - Final film confirmation
 - New round and return-to-list actions
 - Active-session continuation from Sessions
+- Persistent session creation with approved participant IDs
+- Confirmed film snapshot and resumable Roulette state
+- Editable Discord template with required entry number
+- Finished and DNF status formatting
+- Optional comment omission
+- Copy-to-clipboard result
+- Mobile Discord form at 390 × 844
 
 ## Primary interactions tested
 
@@ -64,8 +71,12 @@ The option 3 poster source and the 390 × 844 result implementation were placed 
 - No `terminal.local` application console errors or warnings were recorded during the tested flow.
 - Browser-extension metadata errors were isolated to a Chrome extension URL and are unrelated to the app.
 - Production build, JavaScript syntax and whitespace checks pass.
-- Queue Roulette reads the already-loaded website list and keeps game state in the current browser session.
-- No Supabase schema, RLS policy, Edge Function or stored row was changed for this feature.
+- Queue Roulette reads the already-loaded website list and now stores its active session, participants, filters, vetoes and confirmed film in two RLS-protected Supabase tables.
+- Approved-member create/confirm/end behavior passed inside a rollback transaction; the test created no lasting session rows.
+- A signed-in non-member read zero private session rows. Anonymous roles have no session-table or session-function privileges.
+- The Supabase Security Advisor introduced no session-related warnings. The selected-film foreign key is covered by an index.
+- The exact confirmed Discord format was generated with Entry #307, Men, 2022, Adam and Dean; blank comments are omitted and DNF renders exactly as `Status: DNF`.
+- The copy button returned the exact visible template in the browser clipboard.
 - No Discord API, bot, webhook, Journal message or Discord data was read or changed.
 
 ## Follow-up polish
