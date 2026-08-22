@@ -58,6 +58,7 @@ let listFilter = "all";
 let listSort = "votes";
 let genreFilter = "all";
 let memberFilter = "all";
+let listFiltersOpen = false;
 let selectedFilmId = null;
 const shortlistedFilmIds = new Set();
 let rouletteState = null;
@@ -173,9 +174,12 @@ function createRouletteState(sessionMembers) {
     phase: "ready",
     members: [...sessionMembers],
     usedVetoes: [],
+    vetoedFilmIds: [],
     winnerId: null,
     poolOpen: false,
     previewIds: [],
+    overviewOpen: false,
+    rerollConfirmOpen: false,
     filters: {
       runtime: "120",
       genre: "all",
@@ -190,9 +194,12 @@ function serialiseRouletteState() {
   return {
     phase: rouletteState.phase,
     usedVetoes: [...rouletteState.usedVetoes],
+    vetoedFilmIds: [...rouletteState.vetoedFilmIds],
     winnerId: rouletteState.winnerId,
     poolOpen: rouletteState.poolOpen,
     previewIds: [...rouletteState.previewIds],
+    overviewOpen: Boolean(rouletteState.overviewOpen),
+    rerollConfirmOpen: false,
     filters: { ...rouletteState.filters },
   };
 }
@@ -202,9 +209,12 @@ function restoreRouletteState(session) {
   const saved = session.gameState && typeof session.gameState === "object" ? session.gameState : {};
   restored.phase = saved.phase === "spinning" ? "reveal" : (saved.phase || (session.status === "CONFIRMED" ? "confirmed" : "ready"));
   restored.usedVetoes = Array.isArray(saved.usedVetoes) ? saved.usedVetoes.filter((name) => session.members.includes(name)) : [];
+  restored.vetoedFilmIds = Array.isArray(saved.vetoedFilmIds) ? saved.vetoedFilmIds.map(String) : [];
   restored.winnerId = session.selectedFilmId || saved.winnerId || null;
   restored.poolOpen = Boolean(saved.poolOpen);
   restored.previewIds = Array.isArray(saved.previewIds) ? saved.previewIds : [];
+  restored.overviewOpen = Boolean(saved.overviewOpen);
+  restored.rerollConfirmOpen = false;
   restored.filters = { ...restored.filters, ...(saved.filters || {}) };
   if (session.status === "CONFIRMED") restored.phase = "confirmed";
   return restored;
@@ -283,6 +293,7 @@ function getRouletteCandidates() {
   if (!rouletteState) return [];
   const runtimeLimit = Number(rouletteState.filters.runtime) || null;
   return movieList.filter((item) => {
+    if (rouletteState.vetoedFilmIds.includes(item.id)) return false;
     if (!rouletteState.filters.includeWatched && item.watched) return false;
     if (runtimeLimit && item.runtime && item.runtime > runtimeLimit) return false;
     if (rouletteState.filters.genre !== "all" && !item.genres.some((genre) => genre.toLowerCase() === rouletteState.filters.genre)) return false;
@@ -299,6 +310,66 @@ function rouletteWeights(candidates) {
       : 1;
     return [item.id, Math.max(1, weight)];
   }));
+}
+
+function rouletteWaitLabel(item) {
+  const createdAt = new Date(item.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return "Waiting time unknown";
+  const days = Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 86400000));
+  if (days < 2) return "Added today";
+  if (days < 30) return `${days} days waiting`;
+  const months = Math.max(1, Math.floor(days / 30.44));
+  if (months < 12) return `${months} ${months === 1 ? "month" : "months"} waiting`;
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  return remainingMonths
+    ? `${years}y ${remainingMonths}m waiting`
+    : `${years} ${years === 1 ? "year" : "years"} waiting`;
+}
+
+function rouletteWedgePolygon(startAngle, endAngle) {
+  const points = ["50% 50%"];
+  const span = Math.max(0.01, endAngle - startAngle);
+  const steps = Math.max(2, Math.ceil(span / 8));
+  for (let index = 0; index <= steps; index += 1) {
+    const angle = startAngle + (span * index) / steps;
+    const radians = (angle * Math.PI) / 180;
+    const x = 50 + Math.cos(radians) * 50;
+    const y = 50 + Math.sin(radians) * 50;
+    points.push(`${x.toFixed(3)}% ${y.toFixed(3)}%`);
+  }
+  return `polygon(${points.join(",")})`;
+}
+
+function rouletteWheelEntries(candidates) {
+  const weights = rouletteWeights(candidates);
+  const ordered = [...candidates].sort((a, b) => {
+    const dateDifference = new Date(a.createdAt) - new Date(b.createdAt);
+    return dateDifference || a.title.localeCompare(b.title);
+  });
+  const totalChances = ordered.reduce((sum, item) => sum + (weights.get(item.id) || 1), 0);
+  let usedChances = 0;
+  const entries = ordered.map((item, index) => {
+    const weight = weights.get(item.id) || 1;
+    const startAngle = -90 + (usedChances / totalChances) * 360;
+    usedChances += weight;
+    const endAngle = -90 + (usedChances / totalChances) * 360;
+    const middleAngle = startAngle + (endAngle - startAngle) / 2;
+    const radians = (middleAngle * Math.PI) / 180;
+    return {
+      item,
+      index,
+      weight,
+      percentage: Math.round((weight / totalChances) * 100),
+      startAngle,
+      endAngle,
+      middleAngle,
+      labelX: 50 + Math.cos(radians) * 41,
+      labelY: 50 + Math.sin(radians) * 41,
+      polygon: rouletteWedgePolygon(startAngle, endAngle),
+    };
+  });
+  return { entries, totalChances };
 }
 
 function weightedRoulettePick(candidates) {
@@ -524,9 +595,12 @@ function renderList() {
       <div class="list-toolbar">
         <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search the list" aria-label="Search The List" /></label>
         <div class="filter-tabs" aria-label="Filter The List">${["all", "ready", "watched"].map((filter) => `<button type="button" class="filter-tab ${listFilter === filter ? "is-active" : ""}" data-list-filter="${filter}">${filter[0].toUpperCase()}${filter.slice(1)}</button>`).join("")}</div>
-        <label class="compact-select"><span class="sr-only">Genre</span><select id="genre-filter" aria-label="Filter by genre"><option value="all">All genres</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${genreFilter === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
-        <label class="compact-select"><span class="sr-only">Added by</span><select id="member-filter" aria-label="Filter by who added it"><option value="all">Added by anyone</option>${suggesters.map(([id, name]) => `<option value="${escapeHTML(id)}" ${memberFilter === id ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
-        <label class="compact-select sort-field"><span class="sr-only">Sort</span><select id="list-sort" aria-label="Sort The List"><option value="votes" ${listSort === "votes" ? "selected" : ""}>Most voted</option><option value="oldest" ${listSort === "oldest" ? "selected" : ""}>Longest waiting</option><option value="newest" ${listSort === "newest" ? "selected" : ""}>Newest</option></select></label>
+        <button class="mobile-filter-toggle" type="button" data-toggle-list-filters aria-expanded="${listFiltersOpen}"><span><span class="material-symbols-outlined" aria-hidden="true">tune</span>Filters &amp; sort</span><span class="material-symbols-outlined" aria-hidden="true">${listFiltersOpen ? "expand_less" : "expand_more"}</span></button>
+        <div class="list-filter-controls ${listFiltersOpen ? "is-open" : ""}">
+          <label class="compact-select"><span class="sr-only">Genre</span><select id="genre-filter" aria-label="Filter by genre"><option value="all">All genres</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${genreFilter === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
+          <label class="compact-select"><span class="sr-only">Added by</span><select id="member-filter" aria-label="Filter by who added it"><option value="all">Added by anyone</option>${suggesters.map(([id, name]) => `<option value="${escapeHTML(id)}" ${memberFilter === id ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
+          <label class="compact-select sort-field"><span class="sr-only">Sort</span><select id="list-sort" aria-label="Sort The List"><option value="votes" ${listSort === "votes" ? "selected" : ""}>Most voted</option><option value="oldest" ${listSort === "oldest" ? "selected" : ""}>Longest waiting</option><option value="newest" ${listSort === "newest" ? "selected" : ""}>Newest</option></select></label>
+        </div>
       </div>
       <div class="library-layout ${selectedFilm ? "has-selection" : ""}">
         <div class="poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">movie</span><h2>${movieList.length ? "No films match that view." : "The List is empty."}</h2><p>${movieList.length ? "Try another search or filter." : "Add the first suggestion and give the group something to argue about."}</p><button class="secondary-button" type="button" data-open-film>Add a film</button></div>`}</div>
@@ -544,9 +618,26 @@ function renderRouletteParticipants() {
     </span>`).join("");
 }
 
+function renderRouletteChanceRows(candidates, className = "roulette-pool-chances") {
+  const { entries, totalChances } = rouletteWheelEntries(candidates);
+  if (!entries.length) return "";
+  return `
+    <div class="${className}" aria-label="Current weighted chances">
+      ${entries.map(({ item, index, weight, percentage }) => `
+        <div class="roulette-chance-row">
+          <span class="roulette-chance-number">${String(index + 1).padStart(2, "0")}</span>
+          <img src="${escapeHTML(filmPoster(item))}" alt="" />
+          <span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(rouletteWaitLabel(item))}</small></span>
+          <span class="roulette-chance-value"><strong>${weight}</strong><small>${weight === 1 ? "chance" : "chances"} · ${percentage}%</small></span>
+        </div>`).join("")}
+      <p>${entries.length} ${entries.length === 1 ? "film" : "films"} share ${totalChances} weighted ${totalChances === 1 ? "chance" : "chances"}.</p>
+    </div>`;
+}
+
 function renderRoulettePool(candidates) {
   if (!rouletteState) return "";
   const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
+  const vetoedFilms = rouletteState.vetoedFilmIds.map((id) => movieList.find((item) => item.id === id)).filter(Boolean);
   return `
     <section class="roulette-pool ${rouletteState.poolOpen ? "is-open" : ""}" aria-labelledby="roulette-pool-title">
       <button class="roulette-pool-toggle" type="button" data-adjust-roulette aria-expanded="${rouletteState.poolOpen}">
@@ -558,24 +649,29 @@ function renderRoulettePool(candidates) {
         <label><span>Genre</span><select id="roulette-genre"><option value="all">Any genre</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${rouletteState.filters.genre === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
         <label class="roulette-switch"><input id="roulette-rewatches" type="checkbox" ${rouletteState.filters.includeWatched ? "checked" : ""} /><span><strong>Allow rewatches</strong><small>Include films already marked watched.</small></span></label>
         <label class="roulette-switch"><input id="roulette-age-weight" type="checkbox" ${rouletteState.filters.weightedByAge ? "checked" : ""} /><span><strong>Weight older entries</strong><small>The longest-waiting films get up to 4× chance.</small></span></label>
+        ${vetoedFilms.length ? `<div class="roulette-vetoed-films"><span class="eyebrow">Out this round</span><div>${vetoedFilms.map((item) => `<span><img src="${escapeHTML(filmPoster(item))}" alt="" /><strong>${escapeHTML(item.title)}</strong><small>Vetoed</small></span>`).join("")}</div></div>` : ""}
+        <div class="roulette-pool-odds"><span class="eyebrow">Current chances</span>${renderRouletteChanceRows(candidates)}</div>
       </div>
     </section>`;
 }
 
 function renderRouletteWheel(candidates) {
   if (!rouletteState) return "";
-  const preview = rouletteState.previewIds.length
-    ? rouletteState.previewIds.map((id) => candidates.find((item) => item.id === id) || movieList.find((item) => item.id === id)).filter(Boolean)
-    : roulettePreviewFilms(candidates);
-  const filledPreview = preview.length ? Array.from({ length: 8 }, (_, index) => preview[index % preview.length]) : [];
+  const { entries, totalChances } = rouletteWheelEntries(candidates);
+  const winnerEntry = entries.find(({ item }) => item.id === rouletteState.winnerId);
+  const winnerOffset = winnerEntry ? -90 - winnerEntry.middleAngle : 0;
+  const spinEnd = 1440 + winnerOffset;
   return `
-    <div class="roulette-wheel-stage" aria-label="Queue Roulette wheel containing ${candidates.length} eligible films">
+    <div class="roulette-wheel-stage" role="img" aria-label="Queue Roulette wheel containing ${candidates.length} films and ${totalChances} weighted chances. Wider slices have more chances.">
       <span class="roulette-pointer material-symbols-outlined" aria-hidden="true">arrow_drop_down</span>
-      <div class="roulette-wheel-track ${rouletteState.phase === "spinning" ? "is-spinning" : ""}" data-roulette-wheel>
-        ${filledPreview.map((item, index) => `<span class="roulette-segment" style="--segment-index:${index}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
-        <span class="roulette-hub"><strong>${candidates.length}</strong><small>Eligible</small></span>
+      <div class="roulette-wheel-track ${rouletteState.phase === "spinning" ? "is-spinning" : ""}" data-roulette-wheel style="--roulette-spin-end:${spinEnd.toFixed(3)}deg">
+        ${entries.map(({ item, polygon }) => `<span class="roulette-segment" style="clip-path:${polygon}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
+        ${entries.map(({ startAngle }) => `<span class="roulette-divider" aria-hidden="true" style="--divider-angle:${(startAngle + 90).toFixed(3)}deg"></span>`).join("")}
+        ${entries.map(({ item, index, weight, labelX, labelY }) => `<span class="roulette-wedge-label" aria-hidden="true" title="${escapeHTML(item.title)} · ${weight} ${weight === 1 ? "chance" : "chances"}" style="--label-x:${labelX.toFixed(3)}%;--label-y:${labelY.toFixed(3)}%"><strong>${String(index + 1).padStart(2, "0")}</strong><small>${weight}×</small></span>`).join("")}
+        <span class="roulette-hub"><strong>${candidates.length}</strong><small>${candidates.length === 1 ? "Film" : "Films"}</small><em>${totalChances} ${totalChances === 1 ? "chance" : "chances"}</em></span>
       </div>
-    </div>`;
+    </div>
+    ${renderRouletteChanceRows(candidates, "roulette-chance-strip")}`;
 }
 
 function renderRouletteReady(candidates) {
@@ -588,7 +684,7 @@ function renderRouletteReady(candidates) {
       <div class="roulette-stage-column">
         ${renderRouletteWheel(candidates)}
         <div class="roulette-filter-summary" aria-label="Current candidate filters">${filterLabels.map((label, index) => `<span><span class="material-symbols-outlined" aria-hidden="true">${["schedule", "local_offer", "check_circle"][index]}</span>${escapeHTML(label)}</span>`).join("")}</div>
-        <p class="roulette-weight-note"><span class="material-symbols-outlined" aria-hidden="true">info</span>${rouletteState.filters.weightedByAge ? "Older list entries have extra weight." : "Every eligible film has an equal chance."}</p>
+        <p class="roulette-weight-note"><span class="material-symbols-outlined" aria-hidden="true">info</span>${rouletteState.filters.weightedByAge ? "Each film has one slice. Wider slices have more chances because they have waited longer." : "Each film has one equally sized slice and one chance."}</p>
       </div>
       <aside class="roulette-control-column">
         ${renderRoulettePool(candidates)}
@@ -605,43 +701,51 @@ function renderRouletteReveal(candidates, winner) {
   const orbitFilms = [...candidates.filter((item) => item.id !== winner.id), ...movieList.filter((item) => item.id !== winner.id)].slice(0, 4);
   const confirmed = rouletteState.phase === "confirmed";
   const canManage = canManageSession();
+  const overview = winner.overview || "The wheel has made its choice. Confirm it for tonight, spin again, or let one player spend their veto.";
+  const chanceReason = rouletteState.filters.weightedByAge
+    ? `${weight} ${weight === 1 ? "chance" : "chances"} · ${rouletteWaitLabel(winner)}`
+    : "1 equal chance";
   return `
-    <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}">
+    <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}" role="status" aria-live="polite">
       <div class="roulette-result-stage">
         <div class="roulette-orbit" aria-hidden="true">
           ${orbitFilms.map((item, index) => `<span class="roulette-orbit-card orbit-${index + 1}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
-          <div class="roulette-winning-poster"><img src="${escapeHTML(filmPoster(winner))}" alt="${escapeHTML(winner.title)} poster" /><span>${weight}×</span></div>
+          <div class="roulette-winning-poster"><img src="${escapeHTML(filmPoster(winner))}" alt="${escapeHTML(winner.title)} poster" /><span title="${escapeHTML(chanceReason)}">${weight}×</span></div>
         </div>
       </div>
       <section class="roulette-result-copy" aria-labelledby="roulette-winner-title">
         <span class="eyebrow">${confirmed ? "Tonight's film" : "Roulette selected"}</span>
         <div class="roulette-winner-heading"><div><h2 id="roulette-winner-title">${escapeHTML(winner.title)}</h2><p>${winner.year ? escapeHTML(winner.year) : "Year pending"}</p></div><span class="status-pill ${winner.watched ? "watched" : "ready"}">${winner.watched ? "Rewatch" : "Ready"}</span></div>
-        <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span><span class="material-symbols-outlined" aria-hidden="true">weight</span>${weight}× chance</span></div>
-        <p class="roulette-winner-overview">${escapeHTML(winner.overview || "The wheel has made its choice. Confirm it for tonight, spin again, or let one player spend their veto.")}</p>
+        <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span title="${escapeHTML(chanceReason)}"><span class="material-symbols-outlined" aria-hidden="true">weight</span>${escapeHTML(chanceReason)}</span></div>
+        <div class="roulette-overview-block"><p class="roulette-winner-overview ${rouletteState.overviewOpen ? "is-expanded" : ""}">${escapeHTML(overview)}</p>${overview.length > 150 ? `<button class="roulette-overview-toggle" type="button" data-toggle-roulette-overview aria-expanded="${rouletteState.overviewOpen}">${rouletteState.overviewOpen ? "Show less" : "Read more"}</button>` : ""}</div>
         ${confirmed ? `
           <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>
           ${renderDiscordTemplate(activeSession, winner)}
           ${canManage ? `<button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
           <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : canManage ? `
-          <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.members.map((name) => { const used = rouletteState.usedVetoes.includes(name); return `<button type="button" data-veto-member="${escapeHTML(name)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span>${escapeHTML(name)}</span><strong>${used ? "Used" : "Veto"}</strong></button>`; }).join("")}</div></section>
-          <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
-          <button class="secondary-button roulette-wide-action" type="button" data-reroll-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Spin again without a veto</button>` : `<div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
+          <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.members.map((name) => { const used = rouletteState.usedVetoes.includes(name); return `<button type="button" data-veto-member="${escapeHTML(name)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "Use veto"}</em></button>`; }).join("")}</div></section>
+          <div class="roulette-decision-actions">
+            <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
+            <button class="secondary-button roulette-wide-action" type="button" data-request-reroll><span class="material-symbols-outlined" aria-hidden="true">refresh</span>House re-spin</button>
+            ${rouletteState.rerollConfirmOpen ? `<div class="roulette-reroll-confirm" role="alert"><p>Re-spin without spending anyone's veto?</p><div><button class="secondary-button" type="button" data-cancel-reroll>Cancel</button><button class="primary-button" type="button" data-reroll-roulette>Yes, re-spin</button></div></div>` : ""}
+          </div>` : `<div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
     </div>`;
 }
 
 function renderQueueRoulette() {
   const candidates = getRouletteCandidates();
+  const { totalChances } = rouletteWheelEntries(candidates);
   const winner = rouletteState?.winnerId
     ? (movieList.find((item) => item.id === rouletteState.winnerId) || selectedFilmForSession(activeSession))
     : selectedFilmForSession(activeSession);
   return `
-    <section class="roulette-game" aria-labelledby="roulette-title">
+    <section class="roulette-game ${rouletteState.poolOpen ? "is-pool-open" : ""} ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? "has-result" : ""}" aria-labelledby="roulette-title">
       <header class="roulette-header">
         <div><span class="eyebrow">Pick Tonight · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
         ${canManageSession() ? `<button class="icon-button roulette-close" type="button" data-close-roulette aria-label="End Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>` : ""}
       </header>
-      <div class="roulette-session-strip"><div class="roulette-players">${renderRouletteParticipants()}</div><span><strong>${candidates.length}</strong> eligible</span></div>
+      <div class="roulette-session-strip"><div class="roulette-players">${renderRouletteParticipants()}</div><span><strong>${candidates.length}</strong> ${candidates.length === 1 ? "film" : "films"} <b>${totalChances} ${totalChances === 1 ? "chance" : "chances"}</b></span></div>
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
     </section>`;
 }
@@ -806,6 +910,7 @@ async function createMovieSession(participantIds, mode) {
   const gameState = initialRoulette ? {
     phase: initialRoulette.phase,
     usedVetoes: [],
+    vetoedFilmIds: [],
     winnerId: null,
     poolOpen: false,
     previewIds: [],
@@ -929,19 +1034,27 @@ async function endMovieSession() {
 
 async function spinRoulette(vetoMember = null) {
   if (!rouletteState || rouletteState.phase === "spinning") return;
-  const candidates = getRouletteCandidates();
+  let candidates = getRouletteCandidates();
   if (!candidates.length) {
     showToast("No films match the current Roulette filters.");
     return;
   }
   if (vetoMember) {
     if (!rouletteState.members.includes(vetoMember) || rouletteState.usedVetoes.includes(vetoMember)) return;
+    if (candidates.length <= 1) {
+      showToast("The final remaining film cannot be vetoed. Confirm it or start a new round.");
+      return;
+    }
     rouletteState.usedVetoes.push(vetoMember);
+    if (rouletteState.winnerId && !rouletteState.vetoedFilmIds.includes(rouletteState.winnerId)) rouletteState.vetoedFilmIds.push(rouletteState.winnerId);
+    candidates = getRouletteCandidates();
   }
   const winner = weightedRoulettePick(candidates);
   const preview = roulettePreviewFilms(candidates, winner);
   rouletteState.winnerId = winner.id;
   rouletteState.previewIds = preview.map((item) => item.id);
+  rouletteState.overviewOpen = false;
+  rouletteState.rerollConfirmOpen = false;
   rouletteState.phase = "spinning";
   const spinToken = ++rouletteSpinToken;
   try { await persistRouletteState(); }
@@ -1294,6 +1407,12 @@ document.addEventListener("click", async (event) => {
 
   const filterButton = event.target.closest("[data-list-filter]");
   if (filterButton) { listFilter = filterButton.dataset.listFilter; render(); return; }
+  if (event.target.closest("[data-toggle-list-filters]")) {
+    listFiltersOpen = !listFiltersOpen;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-toggle-list-filters]")?.focus({ preventScroll: true }));
+    return;
+  }
 
   const selectFilmButton = event.target.closest("[data-select-film]");
   if (selectFilmButton) {
@@ -1404,6 +1523,22 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-toggle-roulette-overview]")) {
+    rouletteState.overviewOpen = !rouletteState.overviewOpen;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-request-reroll]")) {
+    rouletteState.rerollConfirmOpen = true;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-reroll-roulette]")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-cancel-reroll]")) {
+    rouletteState.rerollConfirmOpen = false;
+    render();
+    return;
+  }
   if (event.target.closest("[data-reroll-roulette]")) { await spinRoulette(); return; }
   if (event.target.closest("[data-confirm-roulette]")) {
     if (!rouletteState?.winnerId || !activeSession) return;
@@ -1467,6 +1602,8 @@ document.addEventListener("change", async (event) => {
   if (rouletteChanged) {
     rouletteState.winnerId = null;
     rouletteState.previewIds = [];
+    rouletteState.overviewOpen = false;
+    rouletteState.rerollConfirmOpen = false;
     render();
     try { await persistRouletteState(); }
     catch (error) { showToast(`Roulette filters were not saved: ${error.message}`); }
