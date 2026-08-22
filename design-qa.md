@@ -1,87 +1,95 @@
-# Design QA — Queue Roulette
+# Design QA — Mobile list and Queue Roulette polish
 
-- Wheel source visual truth: `/workspace/scratch/1eeb17f1f72e/generated_images/exec-b7998b52-9557-4e29-961e-7b796474d87b.png`
-- Poster-reveal source visual truth: `/workspace/scratch/1eeb17f1f72e/generated_images/exec-334928bd-673c-42c6-880e-e3f0eed2ff26.png`
-- Browser-rendered mobile wheel: `/workspace/scratch/1eeb17f1f72e/qa-evidence/roulette-mobile-wheel.jpg`
-- Browser-rendered mobile reveal: `/workspace/scratch/1eeb17f1f72e/qa-evidence/roulette-mobile-reveal.jpg`
-- Browser-rendered desktop wheel: `/workspace/scratch/1eeb17f1f72e/qa-evidence/roulette-desktop-wheel.jpg`
-- Combined wheel comparison: `/workspace/scratch/1eeb17f1f72e/qa-evidence/roulette-wheel-comparison.jpg`
-- Combined reveal comparison: `/workspace/scratch/1eeb17f1f72e/qa-evidence/roulette-reveal-comparison.jpg`
+- Source visual truth — list: `/workspace/scratch/1eeb17f1f72e/upload/507F1D9A-DFB6-4738-93DE-57971956EB31.png`
+- Source visual truth — wheel: `/workspace/scratch/1eeb17f1f72e/upload/139A82C2-2469-475B-8954-0BC153CD5691.jpeg`
+- Source visual truth — selected film: `/workspace/scratch/1eeb17f1f72e/upload/AA16DE6F-B610-4882-9EB3-E884CD5E29C1.png`
+- Source visual truth — decisions: `/workspace/scratch/1eeb17f1f72e/upload/071E5890-C378-4AE8-BB6E-C7B3401C52A1.png`
+- Browser-rendered mobile list: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/01-mobile-list.jpg`
+- Browser-rendered mobile wheel: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/02-mobile-wheel.jpg`
+- Browser-rendered mobile result: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/03-mobile-result.jpg`
+- Browser-rendered mobile decisions: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/04-mobile-decisions.jpg`
+- Browser-rendered desktop wheel: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/05-desktop-wheel.jpg`
+- Combined comparisons: `/workspace/scratch/1eeb17f1f72e/qa-mobile-roulette/compare-list.jpg`, `compare-wheel.jpg`, `compare-result.jpg`, `compare-decisions.jpg`
 - Browser: cloud Chrome
-- Mobile CSS viewport: 390 × 844 at device scale factor 1
-- Mobile source pixels: 853 × 1844, normalized to 390 × 844 before comparison
-- Mobile implementation pixels: 390 × 844
-- Desktop implementation viewport: 1348 × 926
+- Mobile app viewport: 390 × 844 capture; page client area 375 × 844 because the wrapper reserves a 15 px browser scrollbar
+- Mobile implementation pixels: 390 × 844 at density 1
+- Source pixels: list/result/decisions 1179 × 2556; wheel 709 × 1536
+- Density normalization: every source was proportionally normalized to 390 × 844 before being placed beside the 390 × 844 implementation. Source-only iPhone and Safari chrome was treated as external framing, not app UI.
+- Desktop implementation viewport: 1348 × 926 at density 1
 
 ## States checked
 
-- Pick Tonight mode selection
-- Five-member watch-party setup with Queue Roulette preselected
-- Ready wheel with 2 and 8 eligible-film pools
-- Runtime, genre, rewatch and age-weight controls
-- Empty filtered-pool warning and disabled spin action
-- Animated spin with reduced-motion fallback
-- Poster-led winner reveal
-- Individual participant veto and automatic re-spin
-- Host re-spin without consuming a veto
-- Final film confirmation
-- New round and return-to-list actions
-- Active-session continuation from Sessions
-- Persistent session creation with approved participant IDs
-- Confirmed film snapshot and resumable Roulette state
-- Editable Discord template with required entry number
-- Finished and DNF status formatting
-- Optional comment omission
-- Copy-to-clipboard result
-- Mobile Discord form at 390 × 844
+- Mobile list at 390 × 844 with filters collapsed and poster cards visible
+- Mobile filter drawer expanded and collapsed
+- Queue Roulette with default 2-film pool and expanded 8-film pool
+- Weighted wheel with 23 chances across eight contiguous film slices
+- Adjust Pool expanded and collapsed
+- Spin animation and poster-led result
+- Full participant veto controls
+- Veto removal followed by an automatic re-spin
+- House re-spin confirmation and cancellation
+- Confirmed result and the copy-only Discord template
+- Desktop ready wheel
+- Reduced-motion CSS fallback
 
 ## Primary interactions tested
 
-- Choose Queue Roulette from Pick Tonight
-- Select all five participants and create the session
-- Expand Adjust Pool and change the maximum runtime
-- Spin the weighted wheel
-- Spend Cameron's veto and verify that it becomes unavailable
-- Confirm the replacement result
-- Start another round
-- Verify the confirmation explicitly leaves the list and Discord unchanged
+- Open Pick Tonight from the mobile list
+- Create a three-person Queue Roulette session
+- Change Maximum runtime from Under 120 min to Any runtime
+- Collapse Adjust Pool and spin the list
+- Veto Alien as Cameron and verify Home Alone replaces it
+- Verify Cameron's veto becomes disabled and the vetoed winner is excluded from the remaining pool
+- Open and cancel the House re-spin safeguard
+- Confirm a winner and verify the saved-session screen still exposes the editable, copy-only Discord template
+- Confirm the page has no horizontal overflow at the mobile breakpoint
 
 ## Full-view comparison evidence
 
-The option 1 wheel source and the 390 × 844 ready-state implementation were placed in `roulette-wheel-comparison.jpg`. Both use the established dark Cine-Cord shell, a poster-filled circular wheel, violet pointer, central eligible count, participant avatars, three active-filter indicators, veto tokens and a dominant spin action. The implementation preserves the existing website header and makes the spin action persistent above the phone navigation so it remains reachable while pool controls scroll.
+The source and implementation were placed in the same four comparison images before judgment. The list comparison shows the intentional mobile-density improvement: filters move behind one labelled control, so real poster cards appear in the first viewport. The wheel comparison shows one contiguous slice per film, high-contrast radial dividers, numeric slice labels, weight labels, a total-chance hub and a matching odds strip. The result comparison confirms that a correctly scaled 2:3 poster, title, status and core facts fit in the first viewport. The decision comparison confirms that participant names are no longer truncated inside tiny veto tiles and that the two host actions remain full-width and unambiguous.
 
-The option 3 poster source and the 390 × 844 result implementation were placed in `roulette-reveal-comparison.jpg`. Both make a correctly proportioned 2:3 poster the dominant result, keep secondary posters behind it, retain the participant and eligibility strip, and move the title/status directly below the image. The implementation uses the actual selected list metadata rather than decorative mock copy.
+## Required fidelity surfaces
 
-## Focused fidelity review
+- Fonts and typography: existing Barlow Condensed display headings, Space Grotesk UI text and mono eyebrow labels remain consistent with the Cine-Cord system. Film and chance counts now use singular/plural copy correctly. No clipped headings or participant names remain at the tested width.
+- Spacing and layout rhythm: the list hero is shorter on phone, poster cards begin sooner, the wheel remains centred, the spin action stays above the fixed navigation, and the selected poster plus title fits above the fold. Expanded pool controls return the spin button to document flow so it does not cover settings.
+- Colors and visual tokens: the established charcoal, grey, white and restrained-purple tokens are reused. Dark radial dividers with a purple edge make adjacent wheel portions legible without introducing another palette.
+- Image quality and asset fidelity: list cards, wheel wedges, orbit cards and result art all use the real TMDB poster assets already present in the project. Result posters preserve 2:3 scaling and `object-fit: cover`; no CSS-drawn or placeholder film art was introduced.
+- Copy and content: each film has one named/numbered slice, wait time and odds are explained, veto ownership is explicit, and the House re-spin asks for confirmation. The confirmed state continues to say that neither the list nor Discord was changed automatically.
+- Icons and controls: existing Material Symbols are retained. Mobile primary actions and veto rows meet practical touch-target sizes, disabled vetoes have semantic disabled state, and the wheel has a descriptive accessible label.
+- Accessibility and resilience: the reveal region uses `role="status"` with `aria-live="polite"`; filters, pool state and confirmation state are labelled; `prefers-reduced-motion` reduces the spin animation; mobile `scrollWidth` equals `clientWidth`.
 
-- Fonts and typography: existing Barlow Condensed display headings and Space Grotesk UI copy are retained. The final 42 px mobile Roulette heading remains on one line; small mono labels retain the source's wide tracking without becoming illegible.
-- Spacing and layout rhythm: the wheel remains circular and centred at phone and desktop sizes. Mobile header, session strip and result stage were compressed after the first pass so the selected-film title appears above the fixed navigation.
-- Colors and visual tokens: existing `--bg`, `--surface`, `--border`, `--purple-light`, `--success` and muted-text tokens map directly to the selected concepts. No new unrelated palette was introduced.
-- Image quality and asset fidelity: all visible wheel segments, orbit cards and winner art use real queue poster images. Posters use cover cropping inside the wheel and correct 2:3 scaling for the selected result; no placeholder div art or handcrafted icon assets replace film artwork.
-- Copy and content: rules, weights, filters, veto ownership and confirmation consequences are explicit. The confirmation message states that neither the website list nor Discord was changed.
+## Findings
+
+- No actionable P0, P1 or P2 findings remain.
+- P3: the horizontal odds strip intentionally shows the first two entries at once; users swipe for the rest. A future pass could add a short first-use swipe hint when the real list becomes much larger.
 
 ## Comparison history
 
-1. First mobile pass — blocked by P1: the primary spin action appeared below the initial 390 × 844 viewport. Fix: make the spin action persistent directly above the existing bottom navigation and reserve content padding for it. Post-fix evidence: `roulette-mobile-wheel.jpg` shows the full button at 12 px horizontal insets without covering the wheel.
-2. Second mobile pass — blocked by P2: the two-line game title and taller result stage pushed the selected-film title below the initial viewport. Fix: keep the 42 px heading on one line, reduce the session strip, reduce the orbit stage from 450 px to 400 px and preserve a 220 px-wide 2:3 winner poster. Post-fix evidence: `roulette-mobile-reveal.jpg` shows the complete poster plus film title, year and status above navigation.
-3. Final comparison — no actionable P0/P1/P2 differences remain. The source uses a taller concept canvas than the live 390 × 844 viewport; controls below the hero intentionally continue by vertical scroll while the primary spin action remains persistent.
+1. Initial source state — blocked by P1: visually similar poster portions were repeated around the wheel for extra weight, so film boundaries and the relationship between films and chances were unclear. Fix: render one contiguous wedge per film, scale each wedge by weight, and add radial dividers plus numeric/weight labels. Post-fix evidence: `compare-wheel.jpg`.
+2. Initial mobile list — blocked by P2: permanent genre, suggester and sort controls consumed much of the first viewport. Fix: group secondary controls behind a `Filters & sort` disclosure while leaving search and All/Ready/Watched immediately available. Post-fix evidence: `compare-list.jpg`.
+3. Initial result — blocked by P2: the large selected poster pushed useful title and status information below the first mobile viewport. Fix: constrain the winner poster to `min(190px, 55%)`, preserve its 2:3 ratio and compress the orbit stage. Post-fix evidence: `compare-result.jpg`.
+4. Initial decisions — blocked by P1: compact veto cards truncated names and a host re-spin could happen without a safeguard. Fix: use full-width named veto rows, expose remaining/used state, exclude vetoed winners from future spins and require inline confirmation for a House re-spin. Post-fix evidence: `compare-decisions.jpg` and the browser-verified Alien → Home Alone veto test.
+5. Final pass — no actionable P0/P1/P2 visual, responsive, interaction or copy issues remain at the tested mobile and desktop viewports.
 
 ## Console and data boundary
 
-- No `terminal.local` application console errors or warnings were recorded during the tested flow.
-- Browser-extension metadata errors were isolated to a Chrome extension URL and are unrelated to the app.
-- Production build, JavaScript syntax and whitespace checks pass.
-- Queue Roulette reads the already-loaded website list and now stores its active session, participants, filters, vetoes and confirmed film in two RLS-protected Supabase tables.
-- Approved-member create/confirm/end behavior passed inside a rollback transaction; the test created no lasting session rows.
-- A signed-in non-member read zero private session rows. Anonymous roles have no session-table or session-function privileges.
-- The Supabase Security Advisor introduced no session-related warnings. The selected-film foreign key is covered by an index.
-- The exact confirmed Discord format was generated with Entry #307, Men, 2022, Adam and Dean; blank comments are omitted and DNF renders exactly as `Status: DNF`.
-- The copy button returned the exact visible template in the browser clipboard.
-- No Discord API, bot, webhook, Journal message or Discord data was read or changed.
+- No application-origin browser console errors or warnings were recorded on mobile or desktop.
+- Repeated browser-extension metadata errors came only from a `chrome-extension://` URL and are unrelated to the app.
+- Browser confirmation still states: `The movie list and Discord have not been changed.`
+- This branch changes frontend rendering and client-side Roulette state only. It adds no Discord API, bot, webhook, OAuth or Journal write path and performs no Discord operation.
+- No Supabase schema, policy or production data changes were made for this polish pass. The new vetoed-film list is stored inside the session's existing `game_state` JSON.
 
-## Follow-up polish
+## Implementation checklist
 
-- P3: a later motion pass could vary wheel deceleration and add a restrained poster-snap sound setting.
-- P3: when the real list grows, a compact candidate-preview drawer could explain every film's current weight before spinning.
+- [x] Separate every film into one visibly bounded weighted wedge
+- [x] Explain current odds outside the wheel
+- [x] Compact mobile list filters without hiding core status tabs
+- [x] Keep poster-led list and result states on phone
+- [x] Scale the selected poster correctly on phone
+- [x] Show full veto ownership and used state
+- [x] Remove vetoed winners from subsequent spins
+- [x] Add a House re-spin confirmation
+- [x] Preserve persistent session confirmation and copy-only Discord handoff
+- [x] Verify mobile/desktop layout, primary interactions and app-origin console logs
 
 final result: passed
