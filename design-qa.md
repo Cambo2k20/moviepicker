@@ -6,6 +6,7 @@
 - Browser: cloud Chrome
 - Desktop viewport checked: 1363 × 936
 - Mobile viewport checked: 390 × 844 inside an isolated responsive QA frame
+- Mobile regression reference: `/workspace/scratch/1eeb17f1f72e/upload/C0300AED-02B7-471B-8A8C-0522CF545085.png`
 
 ## States checked
 
@@ -14,6 +15,7 @@
 - Selected-card violet outline
 - Honest artwork/metadata-pending fallback
 - iPhone two-column gallery
+- Three visible 157 × 237 poster images measured inside the 390 × 844 iPhone frame
 - iPhone fixed bottom detail sheet with scrim and safe-area padding
 - Ready and Watched card states
 - Empty/filter-result behavior
@@ -41,6 +43,8 @@ The selected-state source and the implementation were reviewed together in one c
 ## Console and data boundary
 
 - No application console errors or warnings in desktop or mobile checks.
+- `styles.css` and `app.js` now use the `20260822-mobile-posters` asset version so iPhone browsers do not retain the earlier text-list bundle after deployment.
+- The mobile poster image rules explicitly preserve the 2:3 artwork crop at the phone breakpoint.
 - Temporary mock preview data was removed from the branch after QA.
 - The production browser receives only the publishable Supabase key; TMDB credentials stay inside the authenticated Edge Function.
 - Queue metadata fields are nullable, so the existing list row remained unchanged during the migration.
