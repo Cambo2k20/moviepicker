@@ -6,6 +6,8 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 });
+const designPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
+  && new URLSearchParams(window.location.search).has("design-preview");
 
 const knownAvatars = {
   cameron: "./assets/avatar-cameron.png",
@@ -56,11 +58,38 @@ let genreFilter = "all";
 let memberFilter = "all";
 let selectedFilmId = null;
 const shortlistedFilmIds = new Set();
+let rouletteState = null;
+let rouletteSpinTimer = null;
+let rouletteSpinToken = 0;
 let filmEditingId = null;
 let pendingFilmDraft = null;
 let authMode = "signin";
 let isLoading = true;
 let toastTimer;
+
+function loadDesignPreviewWorkspace() {
+  authUser = { id: "preview-cameron", email: "preview@cine-cord.local" };
+  currentProfile = { id: "preview-cameron", displayName: "Cameron", role: "admin" };
+  activeGroup = { id: "preview-group", name: "The Discordians", slug: "discordians" };
+  members = [
+    { id: "preview-cameron", name: "Cameron", role: "admin", avatar: knownAvatars.cameron },
+    { id: "preview-dean", name: "Dean", role: "member", avatar: knownAvatars.dean },
+    { id: "preview-kieran", name: "Kieran", role: "member", avatar: knownAvatars.kieran },
+    { id: "preview-andrew", name: "Andrew", role: "member", avatar: knownAvatars.andrew },
+    { id: "preview-ross", name: "Ross", role: "member", avatar: knownAvatars.ross },
+  ];
+  movieList = [
+    { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "During its return to Earth, the crew of the commercial spacecraft Nostromo encounters a deadly lifeform.", createdAt: "2025-11-02T20:00:00Z", suggestedBy: "Dean", suggestedById: "preview-dean", votes: 3, votedByMe: false, watched: false, tmdbId: 348 },
+    { id: "preview-matrix", title: "The Matrix", year: 1999, posterUrl: "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", runtime: 136, genres: ["Action", "Science Fiction"], overview: "A computer hacker discovers that the world he knows is a simulated reality and joins a rebellion to break free.", createdAt: "2026-01-14T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 2, votedByMe: true, watched: false, tmdbId: 603 },
+    { id: "preview-home-alone", title: "Home Alone", year: 1990, posterUrl: "https://image.tmdb.org/t/p/w500/onTSipZ8R3bliBdKfPtsDuHTdlL.jpg", runtime: 103, genres: ["Comedy", "Family"], overview: "An eight-year-old is accidentally left home alone and must defend the house from two determined burglars.", createdAt: "2026-03-18T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 771 },
+    { id: "preview-interstellar", title: "Interstellar", year: 2014, posterUrl: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", runtime: 169, genres: ["Adventure", "Drama", "Science Fiction"], overview: "Explorers travel through a wormhole in space in an attempt to ensure humanity's survival.", createdAt: "2026-05-10T20:00:00Z", suggestedBy: "Andrew", suggestedById: "preview-andrew", votes: 4, votedByMe: false, watched: false, tmdbId: 157336 },
+    { id: "preview-fight-club", title: "Fight Club", year: 1999, posterUrl: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", runtime: 139, genres: ["Drama"], overview: "A disillusioned office worker and a soap maker form an underground club that evolves into something far larger.", createdAt: "2026-06-07T20:00:00Z", suggestedBy: "Ross", suggestedById: "preview-ross", votes: 2, votedByMe: false, watched: false, tmdbId: 550 },
+    { id: "preview-spirited-away", title: "Spirited Away", year: 2001, posterUrl: "https://image.tmdb.org/t/p/w500/39wmItIWsg5sZMyRUHLkWBcuVCM.jpg", runtime: 125, genres: ["Animation", "Family", "Fantasy"], overview: "A young girl enters a world ruled by gods, witches and spirits where humans are changed into beasts.", createdAt: "2026-07-01T20:00:00Z", suggestedBy: "Dean", suggestedById: "preview-dean", votes: 1, votedByMe: false, watched: false, tmdbId: 129 },
+    { id: "preview-inception", title: "Inception", year: 2010, posterUrl: "https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", runtime: 148, genres: ["Action", "Science Fiction", "Thriller"], overview: "A skilled extractor is offered a chance to erase his past crimes by planting an idea in another person's mind.", createdAt: "2026-07-24T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 3, votedByMe: false, watched: false, tmdbId: 27205 },
+    { id: "preview-martian", title: "The Martian", year: 2015, posterUrl: "https://image.tmdb.org/t/p/w500/5BHuvQ6p9kfc091Z8RiFNhCwL4b.jpg", runtime: 144, genres: ["Adventure", "Drama", "Science Fiction"], overview: "An astronaut stranded on Mars must rely on ingenuity and determination while Earth works to bring him home.", createdAt: "2026-08-20T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 286217 },
+  ];
+  isLoading = false;
+}
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -129,6 +158,74 @@ function metadataLine(item) {
   if (item.runtime) parts.push(`${item.runtime} min`);
   if (item.genres.length) parts.push(item.genres.slice(0, 2).join(" · "));
   return parts.join(" · ") || "Movie details pending";
+}
+
+function createRouletteState(sessionMembers) {
+  return {
+    phase: "ready",
+    members: [...sessionMembers],
+    usedVetoes: [],
+    winnerId: null,
+    poolOpen: false,
+    previewIds: [],
+    filters: {
+      runtime: "120",
+      genre: "all",
+      includeWatched: false,
+      weightedByAge: true,
+    },
+  };
+}
+
+function getRouletteCandidates() {
+  if (!rouletteState) return [];
+  const runtimeLimit = Number(rouletteState.filters.runtime) || null;
+  return movieList.filter((item) => {
+    if (!rouletteState.filters.includeWatched && item.watched) return false;
+    if (runtimeLimit && item.runtime && item.runtime > runtimeLimit) return false;
+    if (rouletteState.filters.genre !== "all" && !item.genres.some((genre) => genre.toLowerCase() === rouletteState.filters.genre)) return false;
+    return true;
+  });
+}
+
+function rouletteWeights(candidates) {
+  const byAge = [...candidates].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const denominator = Math.max(1, byAge.length - 1);
+  return new Map(byAge.map((item, index) => {
+    const weight = rouletteState?.filters.weightedByAge && byAge.length > 1
+      ? 4 - Math.floor((index / denominator) * 3)
+      : 1;
+    return [item.id, Math.max(1, weight)];
+  }));
+}
+
+function weightedRoulettePick(candidates) {
+  const weights = rouletteWeights(candidates);
+  const total = candidates.reduce((sum, item) => sum + (weights.get(item.id) || 1), 0);
+  let draw = Math.random() * total;
+  for (const item of candidates) {
+    draw -= weights.get(item.id) || 1;
+    if (draw <= 0) return item;
+  }
+  return candidates.at(-1);
+}
+
+function roulettePreviewFilms(candidates, winner = null) {
+  if (!candidates.length) return [];
+  const ordered = winner
+    ? [winner, ...candidates.filter((item) => item.id !== winner.id)]
+    : [...candidates].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  return Array.from({ length: 8 }, (_, index) => ordered[index % ordered.length]);
+}
+
+function rouletteFilterLabels() {
+  if (!rouletteState) return [];
+  const runtime = rouletteState.filters.runtime === "any" ? "Any runtime" : `Under ${rouletteState.filters.runtime} min`;
+  const genre = rouletteState.filters.genre === "all"
+    ? "Any genre"
+    : `${rouletteState.filters.genre[0].toUpperCase()}${rouletteState.filters.genre.slice(1)}`;
+  const status = rouletteState.filters.includeWatched ? "Rewatches allowed" : "Ready only";
+  return [runtime, genre, status];
 }
 
 function setFilmSearchStatus(message = "", tone = "neutral") {
@@ -336,7 +433,114 @@ function renderList() {
     </section>`;
 }
 
+function renderRouletteParticipants() {
+  if (!rouletteState) return "";
+  return rouletteState.members.map((name) => `
+    <span class="roulette-player" title="${escapeHTML(name)}">
+      <img src="${escapeHTML(avatarForName(name))}" alt="" />
+      <span>${escapeHTML(name)}</span>
+    </span>`).join("");
+}
+
+function renderRoulettePool(candidates) {
+  if (!rouletteState) return "";
+  const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
+  return `
+    <section class="roulette-pool ${rouletteState.poolOpen ? "is-open" : ""}" aria-labelledby="roulette-pool-title">
+      <button class="roulette-pool-toggle" type="button" data-adjust-roulette aria-expanded="${rouletteState.poolOpen}">
+        <span><span class="material-symbols-outlined" aria-hidden="true">tune</span><strong id="roulette-pool-title">Adjust pool</strong><small>${candidates.length} eligible ${candidates.length === 1 ? "film" : "films"}</small></span>
+        <span class="material-symbols-outlined" aria-hidden="true">${rouletteState.poolOpen ? "expand_less" : "expand_more"}</span>
+      </button>
+      <div class="roulette-pool-controls" ${rouletteState.poolOpen ? "" : "hidden"}>
+        <label><span>Maximum runtime</span><select id="roulette-runtime"><option value="any" ${rouletteState.filters.runtime === "any" ? "selected" : ""}>Any runtime</option><option value="90" ${rouletteState.filters.runtime === "90" ? "selected" : ""}>Under 90 min</option><option value="120" ${rouletteState.filters.runtime === "120" ? "selected" : ""}>Under 120 min</option><option value="150" ${rouletteState.filters.runtime === "150" ? "selected" : ""}>Under 150 min</option></select></label>
+        <label><span>Genre</span><select id="roulette-genre"><option value="all">Any genre</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${rouletteState.filters.genre === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
+        <label class="roulette-switch"><input id="roulette-rewatches" type="checkbox" ${rouletteState.filters.includeWatched ? "checked" : ""} /><span><strong>Allow rewatches</strong><small>Include films already marked watched.</small></span></label>
+        <label class="roulette-switch"><input id="roulette-age-weight" type="checkbox" ${rouletteState.filters.weightedByAge ? "checked" : ""} /><span><strong>Weight older entries</strong><small>The longest-waiting films get up to 4× chance.</small></span></label>
+      </div>
+    </section>`;
+}
+
+function renderRouletteWheel(candidates) {
+  if (!rouletteState) return "";
+  const preview = rouletteState.previewIds.length
+    ? rouletteState.previewIds.map((id) => candidates.find((item) => item.id === id) || movieList.find((item) => item.id === id)).filter(Boolean)
+    : roulettePreviewFilms(candidates);
+  const filledPreview = preview.length ? Array.from({ length: 8 }, (_, index) => preview[index % preview.length]) : [];
+  return `
+    <div class="roulette-wheel-stage" aria-label="Queue Roulette wheel containing ${candidates.length} eligible films">
+      <span class="roulette-pointer material-symbols-outlined" aria-hidden="true">arrow_drop_down</span>
+      <div class="roulette-wheel-track ${rouletteState.phase === "spinning" ? "is-spinning" : ""}" data-roulette-wheel>
+        ${filledPreview.map((item, index) => `<span class="roulette-segment" style="--segment-index:${index}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
+        <span class="roulette-hub"><strong>${candidates.length}</strong><small>Eligible</small></span>
+      </div>
+    </div>`;
+}
+
+function renderRouletteReady(candidates) {
+  const isSpinning = rouletteState?.phase === "spinning";
+  const filterLabels = rouletteFilterLabels();
+  const remainingVetoes = rouletteState.members.filter((name) => !rouletteState.usedVetoes.includes(name));
+  return `
+    <div class="roulette-ready-layout">
+      <div class="roulette-stage-column">
+        ${renderRouletteWheel(candidates)}
+        <div class="roulette-filter-summary" aria-label="Current candidate filters">${filterLabels.map((label, index) => `<span><span class="material-symbols-outlined" aria-hidden="true">${["schedule", "local_offer", "check_circle"][index]}</span>${escapeHTML(label)}</span>`).join("")}</div>
+        <p class="roulette-weight-note"><span class="material-symbols-outlined" aria-hidden="true">info</span>${rouletteState.filters.weightedByAge ? "Older list entries have extra weight." : "Every eligible film has an equal chance."}</p>
+      </div>
+      <aside class="roulette-control-column">
+        ${renderRoulettePool(candidates)}
+        <section class="roulette-veto-panel" aria-labelledby="roulette-veto-title"><span class="eyebrow" id="roulette-veto-title">Veto tokens</span><p>Each player can reject one result.</p><div class="roulette-veto-list">${rouletteState.members.map((name) => `<span class="roulette-veto-token ${rouletteState.usedVetoes.includes(name) ? "is-used" : ""}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><strong>${rouletteState.usedVetoes.includes(name) ? "Used" : "1"}</strong></span>`).join("")}</div><small>${remainingVetoes.length} remaining</small></section>
+        <button class="primary-button roulette-spin-button" type="button" data-spin-roulette ${!candidates.length || isSpinning ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">casino</span>${isSpinning ? "Spinning…" : "Spin the list"}</button>
+        ${candidates.length ? "" : `<p class="roulette-empty-warning">No films match these filters. Adjust the pool to continue.</p>`}
+      </aside>
+    </div>`;
+}
+
+function renderRouletteReveal(candidates, winner) {
+  const weights = rouletteWeights(candidates);
+  const weight = weights.get(winner.id) || 1;
+  const orbitFilms = [...candidates.filter((item) => item.id !== winner.id), ...movieList.filter((item) => item.id !== winner.id)].slice(0, 4);
+  const confirmed = rouletteState.phase === "confirmed";
+  return `
+    <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}">
+      <div class="roulette-result-stage">
+        <div class="roulette-orbit" aria-hidden="true">
+          ${orbitFilms.map((item, index) => `<span class="roulette-orbit-card orbit-${index + 1}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
+          <div class="roulette-winning-poster"><img src="${escapeHTML(filmPoster(winner))}" alt="${escapeHTML(winner.title)} poster" /><span>${weight}×</span></div>
+        </div>
+      </div>
+      <section class="roulette-result-copy" aria-labelledby="roulette-winner-title">
+        <span class="eyebrow">${confirmed ? "Tonight's film" : "Roulette selected"}</span>
+        <div class="roulette-winner-heading"><div><h2 id="roulette-winner-title">${escapeHTML(winner.title)}</h2><p>${winner.year ? escapeHTML(winner.year) : "Year pending"}</p></div><span class="status-pill ${winner.watched ? "watched" : "ready"}">${winner.watched ? "Rewatch" : "Ready"}</span></div>
+        <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span><span class="material-symbols-outlined" aria-hidden="true">weight</span>${weight}× chance</span></div>
+        <p class="roulette-winner-overview">${escapeHTML(winner.overview || "The wheel has made its choice. Confirm it for tonight, spin again, or let one player spend their veto.")}</p>
+        ${confirmed ? `
+          <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span><div><strong>Choice confirmed</strong><p>The website list and Discord have not been changed.</p></div></div>
+          <button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>
+          <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : `
+          <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.members.map((name) => { const used = rouletteState.usedVetoes.includes(name); return `<button type="button" data-veto-member="${escapeHTML(name)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span>${escapeHTML(name)}</span><strong>${used ? "Used" : "Veto"}</strong></button>`; }).join("")}</div></section>
+          <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
+          <button class="secondary-button roulette-wide-action" type="button" data-reroll-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Spin again without a veto</button>`}
+      </section>
+    </div>`;
+}
+
+function renderQueueRoulette() {
+  const candidates = getRouletteCandidates();
+  const winner = rouletteState?.winnerId ? movieList.find((item) => item.id === rouletteState.winnerId) : null;
+  return `
+    <section class="roulette-game" aria-labelledby="roulette-title">
+      <header class="roulette-header">
+        <div><span class="eyebrow">Pick Tonight · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
+        <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="End Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+      </header>
+      <div class="roulette-session-strip"><div class="roulette-players">${renderRouletteParticipants()}</div><span><strong>${candidates.length}</strong> eligible</span></div>
+      ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
+    </section>`;
+}
+
 function renderPick() {
+  if (activeSession?.mode === "Queue Roulette" && rouletteState) return renderQueueRoulette();
   const candidateCount = movieList.filter((item) => !item.watched).length;
   return `
     <section class="page-view" aria-labelledby="pick-title">
@@ -347,10 +551,11 @@ function renderPick() {
 }
 
 function renderSessions() {
+  const rouletteWinner = activeSession?.confirmedFilmId ? movieList.find((item) => item.id === activeSession.confirmedFilmId) : null;
   return `
     <section class="page-view" aria-labelledby="sessions-title">
       <header class="page-header"><div><span class="eyebrow">Decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">The place for live film-picking rooms—not the Discord Journal.</p></div><button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button></header>
-      ${activeSession ? `<article class="active-session session-feature"><div class="active-session-head"><div><span class="eyebrow">Active setup · ${escapeHTML(activeSession.mode)}</span><h3>The room is ready for the next game build.</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available for this session.</p></div><button class="secondary-button" type="button" data-end-session>End Session</button></div></article>` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Start with Consensus Sprint, Queue Roulette or a Reel Bracket.</p><button class="secondary-button" type="button" data-open-party>Choose a game</button></div>`}
+      ${activeSession ? `<article class="active-session session-feature"><div class="active-session-head"><div><span class="eyebrow">Active session · ${escapeHTML(activeSession.mode)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This game is prepared for a future build."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available for this session.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}<button class="secondary-button" type="button" data-end-session>End Session</button></div></div></article>` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Start with Consensus Sprint, Queue Roulette or a Reel Bracket.</p><button class="secondary-button" type="button" data-open-party>Choose a game</button></div>`}
     </section>`;
 }
 
@@ -459,6 +664,44 @@ function openPartyModal(mode = "Consensus Sprint") {
 function closePartyModal() {
   partyModal.hidden = true;
   document.body.style.overflow = "";
+}
+
+function stopRouletteSpin() {
+  rouletteSpinToken += 1;
+  window.clearTimeout(rouletteSpinTimer);
+  rouletteSpinTimer = null;
+}
+
+function spinRoulette(vetoMember = null) {
+  if (!rouletteState || rouletteState.phase === "spinning") return;
+  const candidates = getRouletteCandidates();
+  if (!candidates.length) {
+    showToast("No films match the current Roulette filters.");
+    return;
+  }
+  if (vetoMember) {
+    if (!rouletteState.members.includes(vetoMember) || rouletteState.usedVetoes.includes(vetoMember)) return;
+    rouletteState.usedVetoes.push(vetoMember);
+  }
+  const winner = weightedRoulettePick(candidates);
+  const preview = roulettePreviewFilms(candidates, winner);
+  rouletteState.winnerId = winner.id;
+  rouletteState.previewIds = preview.map((item) => item.id);
+  rouletteState.phase = "spinning";
+  const spinToken = ++rouletteSpinToken;
+  render();
+  rouletteSpinTimer = window.setTimeout(() => {
+    if (!rouletteState || rouletteSpinToken !== spinToken) return;
+    rouletteState.phase = "reveal";
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 80 : 1800);
+}
+
+function endRoulette() {
+  stopRouletteSpin();
+  rouletteState = null;
+  if (activeSession?.mode === "Queue Roulette") activeSession = null;
 }
 
 function openFilmModal(item = null) {
@@ -817,13 +1060,46 @@ document.addEventListener("click", async (event) => {
 
   const modeButton = event.target.closest("[data-select-mode]");
   if (modeButton) { openPartyModal(modeButton.dataset.selectMode); return; }
-  if (event.target.closest("[data-end-session]")) { activeSession = null; render(); showToast("Session ended. The movie list was not changed."); }
+  if (event.target.closest("[data-adjust-roulette]")) { rouletteState.poolOpen = !rouletteState.poolOpen; render(); return; }
+  if (event.target.closest("[data-spin-roulette]")) { spinRoulette(); return; }
+  const vetoButton = event.target.closest("[data-veto-member]");
+  if (vetoButton) { spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-reroll-roulette]")) { spinRoulette(); return; }
+  if (event.target.closest("[data-confirm-roulette]")) {
+    if (!rouletteState?.winnerId || !activeSession) return;
+    rouletteState.phase = "confirmed";
+    activeSession.confirmedFilmId = rouletteState.winnerId;
+    render();
+    showToast("Tonight's film is confirmed. The list and Discord were not changed.");
+    return;
+  }
+  if (event.target.closest("[data-new-roulette]")) {
+    const sessionMembers = [...rouletteState.members];
+    rouletteState = createRouletteState(sessionMembers);
+    if (activeSession) delete activeSession.confirmedFilmId;
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (event.target.closest("[data-continue-roulette]")) { navigate("pick"); return; }
+  if (event.target.closest("[data-close-roulette]")) {
+    if (!window.confirm("End this Queue Roulette session? The movie list and Discord will not change.")) return;
+    endRoulette();
+    render();
+    showToast("Queue Roulette ended. The movie list was not changed.");
+    return;
+  }
+  if (event.target.closest("[data-end-session]")) { endRoulette(); activeSession = null; render(); showToast("Session ended. The movie list was not changed."); }
 });
 
 document.addEventListener("change", (event) => {
   if (event.target.matches("#list-sort")) { listSort = event.target.value; render(); }
   if (event.target.matches("#genre-filter")) { genreFilter = event.target.value; render(); }
   if (event.target.matches("#member-filter")) { memberFilter = event.target.value; render(); }
+  if (event.target.matches("#roulette-runtime")) { rouletteState.filters.runtime = event.target.value; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
+  if (event.target.matches("#roulette-genre")) { rouletteState.filters.genre = event.target.value; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
+  if (event.target.matches("#roulette-rewatches")) { rouletteState.filters.includeWatched = event.target.checked; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
+  if (event.target.matches("#roulette-age-weight")) { rouletteState.filters.weightedByAge = event.target.checked; rouletteState.winnerId = null; rouletteState.previewIds = []; render(); }
 });
 
 partyForm.addEventListener("submit", (event) => {
@@ -833,7 +1109,13 @@ partyForm.addEventListener("submit", (event) => {
   if (!selectedMembers.length) { showToast("Choose at least one Discordian."); return; }
   activeSession = { members: selectedMembers, mode: String(form.get("mode")), candidateCount: movieList.filter((item) => !item.watched).length };
   closePartyModal();
-  navigate("sessions");
+  if (activeSession.mode === "Queue Roulette") {
+    rouletteState = createRouletteState(selectedMembers);
+    navigate("pick");
+  } else {
+    rouletteState = null;
+    navigate("sessions");
+  }
   showToast(`${activeSession.mode} session created for ${selectedMembers.length} people.`);
 });
 
@@ -850,9 +1132,14 @@ window.addEventListener("hashchange", () => {
   if (nextView && nextView !== currentView && authUser && activeGroup) { currentView = nextView; render(); }
 });
 
-supabase.auth.onAuthStateChange((_event, session) => {
-  window.setTimeout(() => { if (session?.user?.id !== authUser?.id) syncSession(session); }, 0);
-});
+if (designPreviewMode) {
+  loadDesignPreviewWorkspace();
+  render();
+} else {
+  supabase.auth.onAuthStateChange((_event, session) => {
+    window.setTimeout(() => { if (session?.user?.id !== authUser?.id) syncSession(session); }, 0);
+  });
 
-const { data: sessionData } = await supabase.auth.getSession();
-await syncSession(sessionData.session);
+  const { data: sessionData } = await supabase.auth.getSession();
+  await syncSession(sessionData.session);
+}
