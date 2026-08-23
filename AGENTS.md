@@ -13,6 +13,12 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 - Run `npm run build` before treating an implementation task as complete.
 - Report the files changed, validation performed and any unresolved risks.
 
+## Branches and worktrees
+
+- The working copy is `moviepicker/`. Confirm you are in it, and on the branch you think you are, before reviewing or editing â a stale worktree once caused a review of code that `main` had already moved past.
+- Extra worktrees live under `.worktrees/`, one per open PR, removed when that PR merges.
+- Run `npm run git:cleanup` after a PR merges to see what is spent; `-- --apply` deletes it. Full policy in `docs/branch-and-worktree-policy.md`.
+
 ## Active code
 
 - `index.html` — application shell, dialogs and entry points.
