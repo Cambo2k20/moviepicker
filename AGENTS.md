@@ -15,9 +15,9 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 
 ## Branches and worktrees
 
-- The working copy is `moviepicker/`. Confirm you are in it, and on the branch you think you are, before reviewing or editing â a stale worktree once caused a review of code that `main` had already moved past.
+- The working copy is `moviepicker/`. Confirm you are in it, and on the branch you think you are, before reviewing or editing — a stale worktree once caused a review of code that `main` had already moved past.
 - Extra worktrees live under `.worktrees/`, one per open PR, removed when that PR merges.
-- Run `npm run git:cleanup` after a PR merges to see what is spent; `-- --apply` deletes it. Full policy in `docs/branch-and-worktree-policy.md`.
+- Run `npm run git:cleanup` after a PR merges to see what is spent. It only reports — branches are never deleted automatically, and an agent deletes one only when Cameron asks. Full policy in `docs/branch-and-worktree-policy.md`.
 
 ## Active code
 

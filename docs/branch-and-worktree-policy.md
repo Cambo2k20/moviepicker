@@ -33,18 +33,19 @@ source of wrong answers.
 4. **Never work directly on `main`.** Branch first, PR always. (This mirrors
    the working agreement in `AGENTS.md`.)
 
-5. **The remote should delete its own branches.** Turn this on once and merged
-   PRs take their branches with them:
+5. **Nothing is deleted automatically.** GitHub's `deleteBranchOnMerge` stays
+   **off** on this repository, deliberately. A merged PR keeps its branch until
+   Cameron decides otherwise — either by deleting it manually, or by asking
+   an agent to, which the `AGENTS.md` working agreement already requires ("never
+   merge, auto-merge, rebase, delete or force-update a branch unless Cameron
+   explicitly requests it").
 
-   ```bash
-   gh repo edit Cambo2k20/moviepicker --enable-delete-branch-on-merge
-   ```
-
-   Without it, every merged PR leaves a branch behind forever â that is how
-   15 remote branches accumulated before the first cleanup.
+   The cost of this choice is that branches accumulate, which is how 15 remote
+   branches built up before the first cleanup. Rule 6 is how that stays visible
+   without anything disappearing on its own.
 
 6. **Run the hygiene check when a PR merges**, or any time the branch list
-   looks long:
+   looks long. It reports; it never deletes on its own:
 
    ```bash
    npm run git:cleanup            # report only, changes nothing
@@ -52,7 +53,8 @@ source of wrong answers.
    ```
 
    Add `--remote` to the apply run to delete the matching branches on `origin`
-   as well. That is rarely needed once rule 5 is in place.
+   as well. Both flags are deliberate, one-off acts — there is no scheduled job,
+   no hook and no CI step that runs them.
 
 ## What counts as "spent"
 
