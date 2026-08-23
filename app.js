@@ -79,6 +79,7 @@ let movieList = [];
 let activeSession = null;
 let sessionHistory = [];
 let discordDraft = null;
+let journalDetailsOpen = false;
 let listQuery = "";
 let listFilter = "all";
 let listSort = "votes";
@@ -240,19 +241,47 @@ function buildDiscordTemplate(draft) {
   return lines.join("\n");
 }
 
+function journalDetailsNeedAttention(draft) {
+  const year = Number(draft.year);
+  return !String(draft.title).trim()
+    || !String(draft.viewers).trim()
+    || !Number.isInteger(year)
+    || year < 1888
+    || year > 2200;
+}
+
 function renderDiscordTemplate(session, film) {
   const draft = ensureDiscordDraft(session, film);
+  // The drawer opens on request, and on its own when a session-filled value is
+  // missing, so "collapsed" never hides a problem.
+  const detailsOpen = journalDetailsOpen || journalDetailsNeedAttention(draft);
   return `
     <section class="discord-copy-card" aria-labelledby="discord-copy-title">
-      <div class="discord-copy-heading"><div><span class="eyebrow">Optional Discord handoff</span><h3 id="discord-copy-title">Prepare the Journal post</h3><p>Edit anything that differs, then copy the familiar format into Discord yourself.</p></div><span class="copy-only-badge"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy only</span></div>
+      <div class="discord-copy-heading">
+        <div><span class="eyebrow">Optional Discord handoff</span><h3 id="discord-copy-title">Prepare the Journal post</h3><p>Check the post below, then copy it into Discord yourself.</p></div>
+        <span class="copy-only-badge"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy only</span>
+      </div>
       <form id="discord-template-form" class="discord-template-form">
-        <label><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" required value="${escapeHTML(draft.entryNumber)}" placeholder="307" /></label>
-        <label><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" /></label>
-        <label><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" /></label>
-        <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" /></label>
-        <label><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
-        <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…">${escapeHTML(draft.comment)}</textarea></label>
-        <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
+        <div class="discord-post-row">
+          <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
+          <div class="discord-author-fields">
+            <label class="discord-entry-field"><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" required value="${escapeHTML(draft.entryNumber)}" placeholder="307" /></label>
+            <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…">${escapeHTML(draft.comment)}</textarea></label>
+          </div>
+        </div>
+        <details class="discord-entry-details" ${detailsOpen ? "open" : ""}>
+          <summary data-toggle-journal-details>
+            <span class="discord-summary-label"><span class="material-symbols-outlined" aria-hidden="true">tune</span>Edit entry details</span>
+            <span class="discord-summary-hint">Title, year, viewers and status — filled in from this session.</span>
+            <span class="discord-summary-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </summary>
+          <div class="discord-entry-fields">
+            <label class="discord-title-field"><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" /></label>
+            <label class="discord-year-field"><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" /></label>
+            <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" /></label>
+            <label class="discord-status-field"><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
+          </div>
+        </details>
         <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><small>Nothing is posted automatically.</small></div>
       </form>
     </section>`;
@@ -752,31 +781,39 @@ function renderRouletteReveal(candidates, winner) {
   const confirmed = rouletteState.phase === "confirmed";
   const canManage = canManageSession();
   const overview = winner.overview || "The wheel has made its choice. Confirm it for tonight, spin again, or let one player spend their veto.";
-  const chanceReason = rouletteState.filters.weightedByAge
-    ? `${weight} ${weight === 1 ? "chance" : "chances"} · ${rouletteWaitLabel(winner)}`
-    : "1 equal chance";
+  // Before the decision this reads as live odds; afterwards it is history.
+  const chanceReason = !rouletteState.filters.weightedByAge
+    ? (confirmed ? "Won at even odds" : "1 equal chance")
+    : confirmed
+      ? `Won at ${weight}× odds · ${rouletteWaitLabel(winner)}`
+      : `${weight} ${weight === 1 ? "chance" : "chances"} · ${rouletteWaitLabel(winner)}`;
   return `
-    <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}" role="status" aria-live="polite">
+    <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}">
       <div class="roulette-result-stage">
-        <div class="roulette-result-wheel">${renderRouletteWheel(candidates, { resultSummary: true })}</div>
+        ${confirmed ? "" : `<div class="roulette-result-wheel">${renderRouletteWheel(candidates, { resultSummary: true })}</div>`}
         <figure class="roulette-winning-poster"><img src="${escapeHTML(filmPoster(winner))}" alt="${escapeHTML(winner.title)} poster" /><figcaption title="${escapeHTML(chanceReason)}"><span class="material-symbols-outlined" aria-hidden="true">stars</span>${weight}×</figcaption></figure>
       </div>
       <section class="roulette-result-copy" aria-labelledby="roulette-winner-title">
         <span class="eyebrow">${confirmed ? "Tonight's film" : "Roulette selected"}</span>
-        <div class="roulette-winner-heading"><div><h2 id="roulette-winner-title">${escapeHTML(winner.title)}</h2><p>${winner.year ? escapeHTML(winner.year) : "Year pending"}</p></div><span class="status-pill ${winner.watched ? "watched" : "ready"}">${winner.watched ? "Rewatch" : "Ready"}</span></div>
+        <div class="roulette-winner-heading"><div><h2 id="roulette-winner-title" tabindex="-1">${escapeHTML(winner.title)}</h2><p>${winner.year ? escapeHTML(winner.year) : "Year pending"}</p></div><span class="status-pill ${winner.watched ? "watched" : "ready"}">${winner.watched ? "Rewatch" : "Ready"}</span></div>
         <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span title="${escapeHTML(chanceReason)}"><span class="material-symbols-outlined" aria-hidden="true">weight</span>${escapeHTML(chanceReason)}</span></div>
         <div class="roulette-overview-block"><p class="roulette-winner-overview ${rouletteState.overviewOpen ? "is-expanded" : ""}">${escapeHTML(overview)}</p>${overview.length > 150 ? `<button class="roulette-overview-toggle" type="button" data-toggle-roulette-overview aria-expanded="${rouletteState.overviewOpen}">${rouletteState.overviewOpen ? "Show less" : "Read more"}</button>` : ""}</div>
         ${confirmed ? `
-          <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>
-          <div class="roulette-confirmed-actions">${canManage ? `<button class="primary-button" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}<button class="secondary-button" type="button" data-view="list">Return to The List</button></div>` : canManage ? `
+          <div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>` : canManage ? `
           <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.participants.map(({ id, name }) => { const used = rouletteState.usedVetoes.includes(id); return `<button type="button" data-veto-member="${escapeHTML(id)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}" title="${escapeHTML(name)}${used ? " · veto used" : " · one veto available"}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "1"}</em></button>`; }).join("")}</div></section>
           <div class="roulette-decision-actions">
             <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
             <button class="secondary-button roulette-wide-action" type="button" data-request-reroll><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Spin again</button>
             ${rouletteState.rerollConfirmOpen ? `<div class="roulette-reroll-confirm" role="alert"><p>Re-spin without spending anyone's veto?</p><div><button class="secondary-button" type="button" data-cancel-reroll>Cancel</button><button class="primary-button" type="button" data-reroll-roulette>Yes, re-spin</button></div></div>` : ""}
-          </div>` : `<div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
+          </div>` : `<div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
-      ${confirmed ? `<div class="roulette-result-handoff">${renderDiscordTemplate(activeSession, winner)}</div>` : ""}
+      ${confirmed ? `
+      <div class="roulette-result-handoff">${renderDiscordTemplate(activeSession, winner)}</div>
+      <div class="roulette-session-actions">
+        <span class="roulette-session-note">Session saved · Hosted by ${escapeHTML(activeSession.hostName)}</span>
+        ${canManage ? `<button class="ghost-button" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
+        <button class="secondary-button" type="button" data-view="list">Return to The List</button>
+      </div>` : ""}
     </div>`;
 }
 
@@ -1655,6 +1692,13 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-toggle-journal-details]")) {
+    event.preventDefault();
+    journalDetailsOpen = !journalDetailsOpen;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-toggle-journal-details]")?.focus({ preventScroll: true }));
+    return;
+  }
   if (event.target.closest("[data-toggle-roulette-overview]")) {
     rouletteState.overviewOpen = !rouletteState.overviewOpen;
     render();
@@ -1681,7 +1725,7 @@ document.addEventListener("click", async (event) => {
     try {
       await confirmMovieSession(winner);
       render();
-      showToast("Tonight's film and session were saved. The list and Discord were not changed.");
+      window.requestAnimationFrame(() => document.querySelector("#roulette-winner-title")?.focus({ preventScroll: true }));
     } catch (error) {
       confirmButton.disabled = false;
       showToast(`The session was not confirmed: ${error.message}`);

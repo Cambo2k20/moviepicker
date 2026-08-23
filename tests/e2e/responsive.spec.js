@@ -308,6 +308,23 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator(".roulette-result-copy .discord-copy-card")).toHaveCount(0);
   await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toBeVisible();
 
+  await expect(page.locator(".roulette-result-wheel")).toHaveCount(0);
+  await expect(page.locator(".roulette-landed-callout")).toHaveCount(0);
+  await expect(page.locator(".roulette-session-actions")).toBeVisible();
+  await expect(page.locator("#roulette-winner-title")).toBeFocused();
+
+  // The session fills these in, so they start folded away.
+  const entryDetails = page.locator(".discord-entry-details");
+  await expect(entryDetails).not.toHaveAttribute("open", /.*/);
+  await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeHidden();
+  await page.locator("[data-toggle-journal-details]").click();
+  await expect(entryDetails).toHaveAttribute("open", /.*/);
+  await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeVisible();
+  // The drawer is state, not DOM, so leaving the view and coming back must not close it.
+  await page.locator('[data-view="sessions"]').click();
+  await page.getByRole("button", { name: "View result" }).click();
+  await expect(entryDetails).toHaveAttribute("open", /.*/);
+
   if (testInfo.project.name === "desktop") {
     await page.setViewportSize({ width: 1553, height: 938 });
     const confirmedGeometry = await page.evaluate(() => {
@@ -315,23 +332,30 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
       const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
       const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
       const handoff = document.querySelector(".roulette-result-handoff")?.getBoundingClientRect();
-      const card = document.querySelector(".roulette-result-handoff .discord-copy-card");
+      const actions = document.querySelector(".roulette-session-actions")?.getBoundingClientRect();
+      const preview = document.querySelector("#discord-template-preview");
+      const buttons = [".discord-copy-actions .primary-button", ".roulette-session-actions .ghost-button", ".roulette-session-actions .secondary-button"];
       return {
-        layoutHeight: layout?.height || Number.POSITIVE_INFINITY,
         paddingTop: layout ? parseFloat(getComputedStyle(document.querySelector(".roulette-result-layout")).paddingTop) : Number.NaN,
-        stageWidth: stage?.width || 0,
+        copyWidth: copy?.width || 0,
         handoffSpansLayout: Boolean(layout && handoff && Math.abs(handoff.left - layout.left) <= 1 && Math.abs(handoff.right - layout.right) <= 1),
         handoffBelowResult: Boolean(stage && copy && handoff && handoff.top >= Math.max(stage.bottom, copy.bottom) - 1),
-        handoffColumns: card ? getComputedStyle(card).gridTemplateColumns.split(" ").length : 0,
+        actionsBelowHandoff: Boolean(handoff && actions && actions.top >= handoff.bottom - 1),
+        // The post you are about to paste must be fully visible, not scrolled.
+        previewClippedVertically: Boolean(preview && preview.scrollHeight > preview.clientHeight + 1),
+        previewClippedHorizontally: Boolean(preview && preview.scrollWidth > preview.clientWidth + 1),
+        // A button whose label wraps is a button that was given too little room.
+        tallestButton: Math.max(...buttons.map((selector) => document.querySelector(selector)?.getBoundingClientRect().height || 0)),
       };
     });
     expect(confirmedGeometry.paddingTop).toBe(0);
-    expect(confirmedGeometry.layoutHeight).toBeLessThanOrEqual(810);
-    expect(confirmedGeometry.stageWidth).toBeGreaterThanOrEqual(840);
-    expect(confirmedGeometry.stageWidth).toBeLessThanOrEqual(846);
+    expect(confirmedGeometry.copyWidth).toBeGreaterThanOrEqual(420);
     expect(confirmedGeometry.handoffSpansLayout).toBe(true);
     expect(confirmedGeometry.handoffBelowResult).toBe(true);
-    expect(confirmedGeometry.handoffColumns).toBe(2);
+    expect(confirmedGeometry.actionsBelowHandoff).toBe(true);
+    expect(confirmedGeometry.previewClippedVertically).toBe(false);
+    expect(confirmedGeometry.previewClippedHorizontally).toBe(false);
+    expect(confirmedGeometry.tallestButton).toBeLessThanOrEqual(60);
   }
 
   const overflowState = await page.evaluate(() => ({
