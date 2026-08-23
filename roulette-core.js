@@ -32,7 +32,7 @@ export function createRouletteState(participants = []) {
     vetoedFilmIds: [],
     excludedFilmIds: [],
     winnerId: null,
-    poolOpen: false,
+    landingAngle: null,
     previewIds: [],
     overviewOpen: false,
     rerollConfirmOpen: false,
@@ -43,13 +43,13 @@ export function createRouletteState(participants = []) {
 export function serialiseRouletteState(state) {
   if (!state) return {};
   return {
-    version: 3,
+    version: 4,
     phase: state.phase,
     usedVetoes: [...state.usedVetoes],
     vetoedFilmIds: [...state.vetoedFilmIds],
     excludedFilmIds: [...state.excludedFilmIds],
     winnerId: state.winnerId,
-    poolOpen: Boolean(state.poolOpen),
+    landingAngle: Number.isFinite(state.landingAngle) ? state.landingAngle : null,
     previewIds: [...state.previewIds],
     overviewOpen: Boolean(state.overviewOpen),
     rerollConfirmOpen: false,
@@ -82,7 +82,7 @@ export function restoreRouletteState(session) {
   restored.vetoedFilmIds = Array.isArray(saved.vetoedFilmIds) ? saved.vetoedFilmIds.map(String) : [];
   restored.excludedFilmIds = Array.isArray(saved.excludedFilmIds) ? saved.excludedFilmIds.map(String) : [];
   restored.winnerId = session?.selectedFilmId || saved.winnerId || null;
-  restored.poolOpen = Boolean(saved.poolOpen);
+  restored.landingAngle = Number.isFinite(saved.landingAngle) ? saved.landingAngle : null;
   restored.previewIds = Array.isArray(saved.previewIds) ? saved.previewIds.map(String) : [];
   restored.overviewOpen = Boolean(saved.overviewOpen);
   restored.filters = {
@@ -126,4 +126,17 @@ export function pickWeightedRouletteCandidate(candidates, weights, random = Math
     if (draw <= 0) return item;
   }
   return candidates.at(-1);
+}
+
+export function pickRouletteLandingAngle(entry, random = Math.random) {
+  const startAngle = Number(entry?.startAngle);
+  const endAngle = Number(entry?.endAngle);
+  if (!Number.isFinite(startAngle) || !Number.isFinite(endAngle) || endAngle <= startAngle) return null;
+
+  const span = endAngle - startAngle;
+  const draw = Math.min(0.999999, Math.max(0, Number(random()) || 0));
+  const sideProgress = (draw % 0.5) / 0.5;
+  const startRatio = draw < 0.5 ? 0.15 : 0.65;
+  const endRatio = draw < 0.5 ? 0.35 : 0.85;
+  return startAngle + span * (startRatio + (endRatio - startRatio) * sideProgress);
 }
