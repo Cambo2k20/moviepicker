@@ -271,7 +271,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
         posterMarginLeft: parseFloat(posterStyle?.marginLeft || "0"),
         calloutMarginRight: parseFloat(calloutStyle?.marginRight || "0"),
         calloutMarginLeft: parseFloat(calloutStyle?.marginLeft || "0"),
-        wheelClearsPoster: Boolean(wheelBox && posterBox && wheelBox.right <= posterBox.left),
+        wheelBelowPoster: Boolean(wheelBox && posterBox && wheelBox.top >= posterBox.bottom - 1),
         rerollDisplay: rerollStyle?.display || "",
         rerollGap: parseFloat(rerollStyle?.gap || "0"),
         rerollPaddingRight: parseFloat(rerollStyle?.paddingRight || "0"),
@@ -290,7 +290,8 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(wideResultGeometry.posterMarginLeft).toBe(70);
     expect(wideResultGeometry.calloutMarginRight).toBe(21);
     expect(wideResultGeometry.calloutMarginLeft).toBe(21);
-    expect(wideResultGeometry.wheelClearsPoster).toBe(true);
+    // The wheel stacks under the poster so the poster holds the same spot once confirmed.
+    expect(wideResultGeometry.wheelBelowPoster).toBe(true);
     expect(wideResultGeometry.rerollDisplay).toBe("flex");
     expect(wideResultGeometry.rerollGap).toBe(8);
     expect(wideResultGeometry.rerollPaddingRight).toBe(0);
@@ -303,8 +304,34 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(resultGeometry.posterWidth).toBeLessThanOrEqual(216);
     expect(resultGeometry.stageHeight).toBeLessThanOrEqual(324);
   }
+  // Confirming changes what the screen says, not where the film sits.
+  const boxes = () => page.evaluate(() => {
+    // Document-relative, so scrolling between the two reads is not mistaken for movement.
+    const rect = (selector) => {
+      const box = document.querySelector(selector)?.getBoundingClientRect();
+      return box ? { x: Math.round(box.x + window.scrollX), y: Math.round(box.y + window.scrollY), width: Math.round(box.width) } : null;
+    };
+    return { poster: rect(".roulette-winning-poster"), title: rect("#roulette-winner-title"), facts: rect(".roulette-winner-facts") };
+  });
+  // Measure once the reveal animation has settled, or its scale(0.96) reads as movement.
+  const posterSettled = () => page.waitForFunction(() => {
+    const poster = document.querySelector(".roulette-winning-poster");
+    return Boolean(poster) && poster.getAnimations().every((animation) => animation.playState === "finished");
+  });
+  await posterSettled();
+  const beforeConfirm = await boxes();
+
   await page.locator("[data-confirm-roulette]").click();
   await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
+
+  await posterSettled();
+  const afterConfirm = await boxes();
+  const shiftMessage = `before=${JSON.stringify(beforeConfirm)} after=${JSON.stringify(afterConfirm)}`;
+  for (const part of ["poster", "title", "facts"]) {
+    expect(Math.abs(afterConfirm[part].x - beforeConfirm[part].x), `${part}.x ${shiftMessage}`).toBeLessThanOrEqual(4);
+    expect(Math.abs(afterConfirm[part].y - beforeConfirm[part].y), `${part}.y ${shiftMessage}`).toBeLessThanOrEqual(4);
+    expect(Math.abs(afterConfirm[part].width - beforeConfirm[part].width), `${part}.width ${shiftMessage}`).toBeLessThanOrEqual(4);
+  }
   await expect(page.locator(".roulette-result-copy .discord-copy-card")).toHaveCount(0);
   await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toBeVisible();
 

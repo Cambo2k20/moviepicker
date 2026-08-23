@@ -790,8 +790,8 @@ function renderRouletteReveal(candidates, winner) {
   return `
     <div class="roulette-result-layout ${confirmed ? "is-confirmed" : ""}">
       <div class="roulette-result-stage">
-        ${confirmed ? "" : `<div class="roulette-result-wheel">${renderRouletteWheel(candidates, { resultSummary: true })}</div>`}
         <figure class="roulette-winning-poster"><img src="${escapeHTML(filmPoster(winner))}" alt="${escapeHTML(winner.title)} poster" /><figcaption title="${escapeHTML(chanceReason)}"><span class="material-symbols-outlined" aria-hidden="true">stars</span>${weight}×</figcaption></figure>
+        ${confirmed ? "" : `<div class="roulette-result-wheel">${renderRouletteWheel(candidates, { resultSummary: true })}</div>`}
       </div>
       <section class="roulette-result-copy" aria-labelledby="roulette-winner-title">
         <span class="eyebrow">${confirmed ? "Tonight's film" : "Roulette selected"}</span>

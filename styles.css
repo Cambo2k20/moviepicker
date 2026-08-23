@@ -4124,6 +4124,12 @@ legend,
   font-size: 16px;
 }
 
+/* The poster is already on screen by the time you confirm; re-rendering it
+   must not replay the reveal animation underneath the pointer. */
+.roulette-result-layout.is-confirmed .roulette-winning-poster {
+  animation: none;
+}
+
 @keyframes roulette-poster-reveal {
   from { opacity: 0; transform: translateY(14px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -4394,9 +4400,15 @@ legend,
   }
 
   .roulette-result-stage {
-    grid-template-columns: minmax(220px, 0.72fr) minmax(280px, 1.28fr);
+    grid-template-columns: minmax(0, 1fr);
     width: min(680px, 100%);
     margin: 0 auto;
+  }
+
+  /* The recap wheel is a wide-screen affordance. Keeping it here would move the
+     poster when it disappears on confirm. */
+  .roulette-result-wheel {
+    display: none;
   }
 
   .roulette-result-copy {
@@ -4568,7 +4580,7 @@ legend,
   }
 
   .roulette-result-stage {
-    grid-template-columns: minmax(170px, 0.8fr) minmax(215px, 1.2fr);
+    grid-template-columns: minmax(0, 1fr);
     width: 100%;
     gap: 20px;
     margin: 0;
@@ -4853,15 +4865,30 @@ legend,
   color: var(--muted);
 }
 
-.roulette-result-layout.is-confirmed .roulette-result-stage {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/* Two columns only where both fit; narrower widths keep the single-column
-   stack the base layout already falls back to. */
+/* Reveal and confirmed share one grid so confirming changes what the screen
+   says, not where anything sits. The poster holds a fixed column; the wheel
+   stacks beneath it and simply stops being rendered once the pick is locked.
+   Narrower widths keep the single-column stack the base layout falls back to. */
 @media (min-width: 1181px) {
+  .roulette-result-layout,
   .roulette-result-layout.is-confirmed {
-    grid-template-columns: minmax(0, 260px) minmax(420px, 1fr);
+    grid-template-columns: minmax(0, 320px) minmax(420px, 1fr);
+  }
+
+  .roulette-result-stage {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .roulette-winning-poster {
+    width: 100%;
+  }
+
+
+  .roulette-result-wheel .roulette-wheel-stage {
+    width: min(240px, 100%);
+    margin: 0 auto;
   }
 }
 
