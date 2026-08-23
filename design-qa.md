@@ -1,5 +1,27 @@
 # Design QA — Mobile list and Queue Roulette polish
 
+## Stabilization revalidation — 22 August 2026
+
+The absolute `/workspace/scratch/...` paths below are historical evidence from the earlier polish pass and are not repository assets. Current verification uses the checked-in Playwright tests plus direct source and production-preview browser checks.
+
+- Automated Chromium checks pass at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`.
+- The list, decision-mode screen, watch-party dialog and confirmed Queue Roulette result have no horizontal page overflow at those sizes.
+- The watch-party dialog defaults to Queue Roulette; Consensus Sprint and Reel Bracket are disabled and labelled **Coming soon**.
+- The full create → spin → reveal → confirm flow reaches the editable **Copy for Discord** form.
+- Six bundled local images resolve in the generated `dist/` artifact, and no source asset path remains in the bundle.
+- Source and production-preview browser consoles contain no application warnings or errors.
+- Newly found desktop result overflows were fixed by allowing the Discord form grid to shrink and switching the confirmed-result layout to one column below `1180px`; the full-result browser test now guards both widths.
+
+Commands used:
+
+```bash
+npm run test:unit
+npm run build
+npm run test:e2e
+```
+
+Current result: passed. The staged Supabase privilege migration was not applied during design QA.
+
 - Source visual truth — list: `/workspace/scratch/1eeb17f1f72e/upload/507F1D9A-DFB6-4738-93DE-57971956EB31.png`
 - Source visual truth — wheel: `/workspace/scratch/1eeb17f1f72e/upload/139A82C2-2469-475B-8954-0BC153CD5691.jpeg`
 - Source visual truth — selected film: `/workspace/scratch/1eeb17f1f72e/upload/AA16DE6F-B610-4882-9EB3-E884CD5E29C1.png`

@@ -330,7 +330,8 @@ begin
 end;
 $$;
 
-revoke all on table public.group_join_requests from anon;
+revoke all on table public.group_join_requests from anon, authenticated;
+revoke all on table public.group_memberships from anon, authenticated;
 grant select, insert, update, delete on table public.group_join_requests to authenticated;
 grant select, insert, update, delete on table public.group_memberships to authenticated;
 

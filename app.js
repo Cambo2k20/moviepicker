@@ -1,4 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  calculateRouletteWeights,
+  createRouletteState,
+  filterRouletteCandidates,
+  pickWeightedRouletteCandidate,
+  restoreRouletteState,
+  serialiseRouletteState as serialiseRouletteStateValue,
+} from "./roulette-core.js";
 
 const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
@@ -9,18 +17,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 const designPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("design-preview");
 
+const imageAssets = {
+  cameron: new URL("./assets/avatar-cameron.png", import.meta.url).href,
+  dean: new URL("./assets/avatar-dean.png", import.meta.url).href,
+  kieran: new URL("./assets/avatar-kieran.png", import.meta.url).href,
+  andrew: new URL("./assets/avatar-andrew.png", import.meta.url).href,
+  ross: new URL("./assets/avatar-ross.png", import.meta.url).href,
+  journalFallback: new URL("./assets/hero-journal-web.png", import.meta.url).href,
+};
 const knownAvatars = {
-  cameron: "./assets/avatar-cameron.png",
-  dean: "./assets/avatar-dean.png",
-  kieran: "./assets/avatar-kieran.png",
-  andrew: "./assets/avatar-andrew.png",
-  ross: "./assets/avatar-ross.png"
+  cameron: imageAssets.cameron,
+  dean: imageAssets.dean,
+  kieran: imageAssets.kieran,
+  andrew: imageAssets.andrew,
+  ross: imageAssets.ross,
 };
 
 const decisionModes = [
-  { code: "01", title: "Consensus Sprint", tone: "Fair and fast", copy: "Everyone privately chooses yes, maybe or no. The strongest shared approval becomes tonight's finalist." },
-  { code: "02", title: "Queue Roulette", tone: "Weighted chaos", copy: "Older list entries receive more weight. Add one veto each, or turn on No Cowards mode." },
-  { code: "03", title: "Reel Bracket", tone: "Competitive", copy: "Put the shortlist through head-to-head votes until only one film survives." }
+  { code: "01", title: "Consensus Sprint", tone: "Coming soon", copy: "Private yes, maybe or no voting is designed but is not implemented yet.", available: false },
+  { code: "02", title: "Queue Roulette", tone: "Weighted chaos", copy: "Older list entries receive more weight. Each participant has one optional veto.", available: true },
+  { code: "03", title: "Reel Bracket", tone: "Coming soon", copy: "Head-to-head voting is designed but is not implemented yet.", available: false }
 ];
 
 const root = document.querySelector("#view-root");
@@ -71,6 +87,10 @@ let isLoading = true;
 let toastTimer;
 
 const DISCORD_ENTRY_DIVIDER = "————————————————————————————————————————————————————————————————————————————————————";
+const ROULETTE_SPIN_DURATION_MS = 4200;
+const ROULETTE_SETTLE_DURATION_MS = 1100;
+const ROULETTE_REDUCED_SPIN_DURATION_MS = 80;
+const ROULETTE_REDUCED_SETTLE_DURATION_MS = 650;
 
 function loadDesignPreviewWorkspace() {
   authUser = { id: "preview-cameron", email: "preview@cine-cord.local" };
@@ -106,7 +126,7 @@ function escapeHTML(value) {
 }
 
 function avatarForName(name) {
-  return knownAvatars[String(name).trim().toLowerCase()] || "./assets/avatar-cameron.png";
+  return knownAvatars[String(name).trim().toLowerCase()] || imageAssets.cameron;
 }
 
 function isCurrentAdmin() {
@@ -151,11 +171,11 @@ function normaliseGenres(value) {
 
 function filmPoster(item) {
   if (item.posterUrl) return item.posterUrl;
-  return "./assets/hero-journal-web.png";
+  return imageAssets.journalFallback;
 }
 
 function tmdbPoster(path, size = "w500") {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : "./assets/hero-journal-web.png";
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : imageAssets.journalFallback;
 }
 
 function runtimeLabel(item) {
@@ -169,55 +189,8 @@ function metadataLine(item) {
   return parts.join(" · ") || "Movie details pending";
 }
 
-function createRouletteState(sessionMembers) {
-  return {
-    phase: "ready",
-    members: [...sessionMembers],
-    usedVetoes: [],
-    vetoedFilmIds: [],
-    winnerId: null,
-    poolOpen: false,
-    previewIds: [],
-    overviewOpen: false,
-    rerollConfirmOpen: false,
-    filters: {
-      runtime: "120",
-      genre: "all",
-      includeWatched: false,
-      weightedByAge: true,
-    },
-  };
-}
-
 function serialiseRouletteState() {
-  if (!rouletteState) return {};
-  return {
-    phase: rouletteState.phase,
-    usedVetoes: [...rouletteState.usedVetoes],
-    vetoedFilmIds: [...rouletteState.vetoedFilmIds],
-    winnerId: rouletteState.winnerId,
-    poolOpen: rouletteState.poolOpen,
-    previewIds: [...rouletteState.previewIds],
-    overviewOpen: Boolean(rouletteState.overviewOpen),
-    rerollConfirmOpen: false,
-    filters: { ...rouletteState.filters },
-  };
-}
-
-function restoreRouletteState(session) {
-  const restored = createRouletteState(session.members);
-  const saved = session.gameState && typeof session.gameState === "object" ? session.gameState : {};
-  restored.phase = saved.phase === "spinning" ? "reveal" : (saved.phase || (session.status === "CONFIRMED" ? "confirmed" : "ready"));
-  restored.usedVetoes = Array.isArray(saved.usedVetoes) ? saved.usedVetoes.filter((name) => session.members.includes(name)) : [];
-  restored.vetoedFilmIds = Array.isArray(saved.vetoedFilmIds) ? saved.vetoedFilmIds.map(String) : [];
-  restored.winnerId = session.selectedFilmId || saved.winnerId || null;
-  restored.poolOpen = Boolean(saved.poolOpen);
-  restored.previewIds = Array.isArray(saved.previewIds) ? saved.previewIds : [];
-  restored.overviewOpen = Boolean(saved.overviewOpen);
-  restored.rerollConfirmOpen = false;
-  restored.filters = { ...restored.filters, ...(saved.filters || {}) };
-  if (session.status === "CONFIRMED") restored.phase = "confirmed";
-  return restored;
+  return serialiseRouletteStateValue(rouletteState);
 }
 
 function selectedFilmForSession(session) {
@@ -290,26 +263,11 @@ function updateDiscordDraftPreview(form) {
 }
 
 function getRouletteCandidates() {
-  if (!rouletteState) return [];
-  const runtimeLimit = Number(rouletteState.filters.runtime) || null;
-  return movieList.filter((item) => {
-    if (rouletteState.vetoedFilmIds.includes(item.id)) return false;
-    if (!rouletteState.filters.includeWatched && item.watched) return false;
-    if (runtimeLimit && item.runtime && item.runtime > runtimeLimit) return false;
-    if (rouletteState.filters.genre !== "all" && !item.genres.some((genre) => genre.toLowerCase() === rouletteState.filters.genre)) return false;
-    return true;
-  });
+  return filterRouletteCandidates(movieList, rouletteState);
 }
 
 function rouletteWeights(candidates) {
-  const byAge = [...candidates].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  const denominator = Math.max(1, byAge.length - 1);
-  return new Map(byAge.map((item, index) => {
-    const weight = rouletteState?.filters.weightedByAge && byAge.length > 1
-      ? 4 - Math.floor((index / denominator) * 3)
-      : 1;
-    return [item.id, Math.max(1, weight)];
-  }));
+  return calculateRouletteWeights(candidates, rouletteState?.filters.weightedByAge);
 }
 
 function rouletteWaitLabel(item) {
@@ -373,14 +331,7 @@ function rouletteWheelEntries(candidates) {
 }
 
 function weightedRoulettePick(candidates) {
-  const weights = rouletteWeights(candidates);
-  const total = candidates.reduce((sum, item) => sum + (weights.get(item.id) || 1), 0);
-  let draw = Math.random() * total;
-  for (const item of candidates) {
-    draw -= weights.get(item.id) || 1;
-    if (draw <= 0) return item;
-  }
-  return candidates.at(-1);
+  return pickWeightedRouletteCandidate(candidates, rouletteWeights(candidates));
 }
 
 function roulettePreviewFilms(candidates, winner = null) {
@@ -399,6 +350,23 @@ function rouletteFilterLabels() {
     : `${rouletteState.filters.genre[0].toUpperCase()}${rouletteState.filters.genre.slice(1)}`;
   const status = rouletteState.filters.includeWatched ? "Rewatches allowed" : "Ready only";
   return [runtime, genre, status];
+}
+
+function rouletteHasActiveFilters() {
+  if (!rouletteState) return false;
+  return rouletteState.filters.runtime !== "any"
+    || rouletteState.filters.genre !== "all"
+    || rouletteState.filters.includeWatched
+    || rouletteState.excludedFilmIds.length > 0;
+}
+
+function resetRouletteOutcome() {
+  if (!rouletteState) return;
+  rouletteState.phase = "ready";
+  rouletteState.winnerId = null;
+  rouletteState.previewIds = [];
+  rouletteState.overviewOpen = false;
+  rouletteState.rerollConfirmOpen = false;
 }
 
 function setFilmSearchStatus(message = "", tone = "neutral") {
@@ -464,8 +432,9 @@ async function saveMovie(movie = null) {
   if (filmEditingId) {
     const item = movieList.find((candidate) => candidate.id === filmEditingId);
     if (!item || !canManageFilm(item)) throw new Error("You cannot update this film.");
-    const { error } = await supabase.from("queue_items").update(payload).eq("id", item.id).eq("group_id", activeGroup.id);
+    const { data, error } = await supabase.from("queue_items").update(payload).eq("id", item.id).eq("group_id", activeGroup.id).select("id").maybeSingle();
     if (error) throw error;
+    if (!data) throw new Error("No film row was updated. Refresh before trying again.");
     return { action: "updated", title: payload.title };
   }
 
@@ -589,7 +558,7 @@ function renderList() {
   return `
     <section class="list-view" aria-labelledby="list-title">
       <header class="list-hero">
-        <div><span class="eyebrow">The Discordians · Shared watchlist</span><h1 id="list-title" class="page-title">The List</h1><p class="page-subtitle">The films we’re saving for the right time.</p></div>
+        <div><span class="eyebrow">The Discordians · Shared watchlist</span><h1 id="list-title" class="page-title">Collective Film Library</h1><p class="page-subtitle">Our shared collection of films to watch or appreciate</p></div>
         <div class="list-hero-actions"><button class="primary-button" type="button" data-open-film><span class="material-symbols-outlined" aria-hidden="true">add</span> Add Film</button><button class="secondary-button" type="button" data-open-party>Pick Tonight <span class="material-symbols-outlined" aria-hidden="true">casino</span></button></div>
       </header>
       <div class="list-toolbar">
@@ -611,7 +580,7 @@ function renderList() {
 
 function renderRouletteParticipants() {
   if (!rouletteState) return "";
-  return rouletteState.members.map((name) => `
+  return rouletteState.participants.map(({ name }) => `
     <span class="roulette-player" title="${escapeHTML(name)}">
       <img src="${escapeHTML(avatarForName(name))}" alt="" />
       <span>${escapeHTML(name)}</span>
@@ -621,14 +590,17 @@ function renderRouletteParticipants() {
 function renderRouletteChanceRows(candidates, className = "roulette-pool-chances") {
   const { entries, totalChances } = rouletteWheelEntries(candidates);
   if (!entries.length) return "";
+  const canManage = canManageSession();
+  const canRemove = canManage && rouletteState?.phase === "ready" && entries.length > 1;
   return `
     <div class="${className}" aria-label="Current weighted chances">
       ${entries.map(({ item, index, weight, percentage }) => `
-        <div class="roulette-chance-row">
+        <div class="roulette-chance-row ${canManage ? "has-removal" : ""}">
           <span class="roulette-chance-number">${String(index + 1).padStart(2, "0")}</span>
           <img src="${escapeHTML(filmPoster(item))}" alt="" />
           <span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(rouletteWaitLabel(item))}</small></span>
           <span class="roulette-chance-value"><strong>${weight}</strong><small>${weight === 1 ? "chance" : "chances"} · ${percentage}%</small></span>
+          ${canManage ? `<button class="roulette-chance-remove" type="button" data-exclude-roulette-film="${escapeHTML(item.id)}" aria-label="Remove ${escapeHTML(item.title)} from this Roulette pool" title="Remove from this round" ${canRemove ? "" : "disabled"}><span class="material-symbols-outlined" aria-hidden="true">close</span></button>` : ""}
         </div>`).join("")}
       <p>${entries.length} ${entries.length === 1 ? "film" : "films"} share ${totalChances} weighted ${totalChances === 1 ? "chance" : "chances"}.</p>
     </div>`;
@@ -637,19 +609,28 @@ function renderRouletteChanceRows(candidates, className = "roulette-pool-chances
 function renderRoulettePool(candidates) {
   if (!rouletteState) return "";
   const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
-  const vetoedFilms = rouletteState.vetoedFilmIds.map((id) => movieList.find((item) => item.id === id)).filter(Boolean);
+  const omittedFilms = [
+    ...rouletteState.vetoedFilmIds.map((id) => ({ item: movieList.find((candidate) => candidate.id === id), reason: "Vetoed" })),
+    ...rouletteState.excludedFilmIds.map((id) => ({ item: movieList.find((candidate) => candidate.id === id), reason: "Removed" })),
+  ].filter(({ item }) => item);
+  const isBusy = ["spinning", "settling"].includes(rouletteState.phase);
+  const controlsDisabled = canManageSession() && !isBusy ? "" : "disabled";
+  const clearDisabled = !canManageSession() || isBusy || !rouletteHasActiveFilters();
   return `
     <section class="roulette-pool ${rouletteState.poolOpen ? "is-open" : ""}" aria-labelledby="roulette-pool-title">
-      <button class="roulette-pool-toggle" type="button" data-adjust-roulette aria-expanded="${rouletteState.poolOpen}">
-        <span><span class="material-symbols-outlined" aria-hidden="true">tune</span><strong id="roulette-pool-title">Adjust pool</strong><small>${candidates.length} eligible ${candidates.length === 1 ? "film" : "films"}</small></span>
-        <span class="material-symbols-outlined" aria-hidden="true">${rouletteState.poolOpen ? "expand_less" : "expand_more"}</span>
-      </button>
+      <div class="roulette-pool-head">
+        <button class="roulette-pool-toggle" type="button" data-adjust-roulette aria-expanded="${rouletteState.poolOpen}">
+          <span><span class="material-symbols-outlined" aria-hidden="true">tune</span><strong id="roulette-pool-title">Adjust pool</strong><small>${candidates.length} eligible ${candidates.length === 1 ? "film" : "films"}</small></span>
+          <span class="material-symbols-outlined" aria-hidden="true">${rouletteState.poolOpen ? "expand_less" : "expand_more"}</span>
+        </button>
+        <button class="roulette-clear-filters" type="button" data-clear-roulette-filters ${clearDisabled ? "disabled" : ""} aria-label="Clear Roulette filters and restore removed films" title="Clear filters"><span class="material-symbols-outlined" aria-hidden="true">filter_alt_off</span><span>Clear</span></button>
+      </div>
       <div class="roulette-pool-controls" ${rouletteState.poolOpen ? "" : "hidden"}>
-        <label><span>Maximum runtime</span><select id="roulette-runtime"><option value="any" ${rouletteState.filters.runtime === "any" ? "selected" : ""}>Any runtime</option><option value="90" ${rouletteState.filters.runtime === "90" ? "selected" : ""}>Under 90 min</option><option value="120" ${rouletteState.filters.runtime === "120" ? "selected" : ""}>Under 120 min</option><option value="150" ${rouletteState.filters.runtime === "150" ? "selected" : ""}>Under 150 min</option></select></label>
-        <label><span>Genre</span><select id="roulette-genre"><option value="all">Any genre</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${rouletteState.filters.genre === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
-        <label class="roulette-switch"><input id="roulette-rewatches" type="checkbox" ${rouletteState.filters.includeWatched ? "checked" : ""} /><span><strong>Allow rewatches</strong><small>Include films already marked watched.</small></span></label>
-        <label class="roulette-switch"><input id="roulette-age-weight" type="checkbox" ${rouletteState.filters.weightedByAge ? "checked" : ""} /><span><strong>Weight older entries</strong><small>The longest-waiting films get up to 4× chance.</small></span></label>
-        ${vetoedFilms.length ? `<div class="roulette-vetoed-films"><span class="eyebrow">Out this round</span><div>${vetoedFilms.map((item) => `<span><img src="${escapeHTML(filmPoster(item))}" alt="" /><strong>${escapeHTML(item.title)}</strong><small>Vetoed</small></span>`).join("")}</div></div>` : ""}
+        <label><span>Maximum runtime</span><select id="roulette-runtime" ${controlsDisabled}><option value="any" ${rouletteState.filters.runtime === "any" ? "selected" : ""}>Any runtime</option><option value="90" ${rouletteState.filters.runtime === "90" ? "selected" : ""}>Under 90 min</option><option value="120" ${rouletteState.filters.runtime === "120" ? "selected" : ""}>Under 120 min</option><option value="150" ${rouletteState.filters.runtime === "150" ? "selected" : ""}>Under 150 min</option></select></label>
+        <label><span>Genre</span><select id="roulette-genre" ${controlsDisabled}><option value="all">Any genre</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${rouletteState.filters.genre === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
+        <label class="roulette-switch"><input id="roulette-rewatches" type="checkbox" ${rouletteState.filters.includeWatched ? "checked" : ""} ${controlsDisabled} /><span><strong>Allow rewatches</strong><small>Include films already marked watched.</small></span></label>
+        <label class="roulette-switch"><input id="roulette-age-weight" type="checkbox" ${rouletteState.filters.weightedByAge ? "checked" : ""} ${controlsDisabled} /><span><strong>Weight older entries</strong><small>The longest-waiting films get up to 4× chance.</small></span></label>
+        ${omittedFilms.length ? `<div class="roulette-vetoed-films"><span class="eyebrow">Out this round</span><div>${omittedFilms.map(({ item, reason }) => `<span><img src="${escapeHTML(filmPoster(item))}" alt="" /><strong>${escapeHTML(item.title)}</strong><small>${reason}</small></span>`).join("")}</div></div>` : ""}
         <div class="roulette-pool-odds"><span class="eyebrow">Current chances</span>${renderRouletteChanceRows(candidates)}</div>
       </div>
     </section>`;
@@ -661,24 +642,29 @@ function renderRouletteWheel(candidates) {
   const winnerEntry = entries.find(({ item }) => item.id === rouletteState.winnerId);
   const winnerOffset = winnerEntry ? -90 - winnerEntry.middleAngle : 0;
   const spinEnd = 1440 + winnerOffset;
+  const isSpinning = rouletteState.phase === "spinning";
+  const isSettling = rouletteState.phase === "settling";
   return `
-    <div class="roulette-wheel-stage" role="img" aria-label="Queue Roulette wheel containing ${candidates.length} films and ${totalChances} weighted chances. Wider slices have more chances.">
+    <div class="roulette-wheel-stage ${isSettling ? "is-settling" : ""}" role="img" aria-label="Queue Roulette wheel containing ${candidates.length} films and ${totalChances} weighted chances. Wider slices have more chances.">
       <span class="roulette-pointer material-symbols-outlined" aria-hidden="true">arrow_drop_down</span>
-      <div class="roulette-wheel-track ${rouletteState.phase === "spinning" ? "is-spinning" : ""}" data-roulette-wheel style="--roulette-spin-end:${spinEnd.toFixed(3)}deg">
-        ${entries.map(({ item, polygon }) => `<span class="roulette-segment" style="clip-path:${polygon}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
+      <div class="roulette-wheel-track ${isSpinning ? "is-spinning" : ""} ${isSettling ? "is-settling" : ""}" data-roulette-wheel style="--roulette-spin-end:${spinEnd.toFixed(3)}deg">
+        ${entries.map(({ item, polygon }) => `<span class="roulette-segment ${isSettling && item.id === rouletteState.winnerId ? "is-winner" : ""}" style="clip-path:${polygon}"><img src="${escapeHTML(filmPoster(item))}" alt="" /></span>`).join("")}
         ${entries.map(({ startAngle }) => `<span class="roulette-divider" aria-hidden="true" style="--divider-angle:${(startAngle + 90).toFixed(3)}deg"></span>`).join("")}
-        ${entries.map(({ item, index, weight, labelX, labelY }) => `<span class="roulette-wedge-label" aria-hidden="true" title="${escapeHTML(item.title)} · ${weight} ${weight === 1 ? "chance" : "chances"}" style="--label-x:${labelX.toFixed(3)}%;--label-y:${labelY.toFixed(3)}%"><strong>${String(index + 1).padStart(2, "0")}</strong><small>${weight}×</small></span>`).join("")}
+        ${entries.map(({ item, index, weight, labelX, labelY }) => `<span class="roulette-wedge-label ${isSettling && item.id === rouletteState.winnerId ? "is-winner" : ""}" aria-hidden="true" title="${escapeHTML(item.title)} · ${weight} ${weight === 1 ? "chance" : "chances"}" style="--label-x:${labelX.toFixed(3)}%;--label-y:${labelY.toFixed(3)}%"><strong>${String(index + 1).padStart(2, "0")}</strong><small>${weight}×</small></span>`).join("")}
         <span class="roulette-hub"><strong>${candidates.length}</strong><small>${candidates.length === 1 ? "Film" : "Films"}</small><em>${totalChances} ${totalChances === 1 ? "chance" : "chances"}</em></span>
       </div>
     </div>
+    ${isSettling ? `<p class="roulette-settle-status" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Wheel stopped · revealing the result…</p>` : ""}
     ${renderRouletteChanceRows(candidates, "roulette-chance-strip")}`;
 }
 
 function renderRouletteReady(candidates) {
   const isSpinning = rouletteState?.phase === "spinning";
+  const isSettling = rouletteState?.phase === "settling";
+  const isBusy = isSpinning || isSettling;
   const canManage = canManageSession();
   const filterLabels = rouletteFilterLabels();
-  const remainingVetoes = rouletteState.members.filter((name) => !rouletteState.usedVetoes.includes(name));
+  const remainingVetoes = rouletteState.participants.filter(({ id }) => !rouletteState.usedVetoes.includes(id));
   return `
     <div class="roulette-ready-layout">
       <div class="roulette-stage-column">
@@ -688,8 +674,8 @@ function renderRouletteReady(candidates) {
       </div>
       <aside class="roulette-control-column">
         ${renderRoulettePool(candidates)}
-        <section class="roulette-veto-panel" aria-labelledby="roulette-veto-title"><span class="eyebrow" id="roulette-veto-title">Veto tokens</span><p>Each player can reject one result.</p><div class="roulette-veto-list">${rouletteState.members.map((name) => `<span class="roulette-veto-token ${rouletteState.usedVetoes.includes(name) ? "is-used" : ""}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><strong>${rouletteState.usedVetoes.includes(name) ? "Used" : "1"}</strong></span>`).join("")}</div><small>${remainingVetoes.length} remaining</small></section>
-        <button class="primary-button roulette-spin-button" type="button" data-spin-roulette ${!candidates.length || isSpinning || !canManage ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">casino</span>${isSpinning ? "Spinning…" : canManage ? "Spin the list" : `Waiting for ${escapeHTML(activeSession.hostName)}`}</button>
+        <section class="roulette-veto-panel" aria-labelledby="roulette-veto-title"><span class="eyebrow" id="roulette-veto-title">Veto tokens</span><p>Each player can reject one result.</p><div class="roulette-veto-list">${rouletteState.participants.map(({ id, name }) => `<span class="roulette-veto-token ${rouletteState.usedVetoes.includes(id) ? "is-used" : ""}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><strong>${rouletteState.usedVetoes.includes(id) ? "Used" : "1"}</strong></span>`).join("")}</div><small>${remainingVetoes.length} remaining</small></section>
+        <button class="primary-button roulette-spin-button" type="button" data-spin-roulette ${!candidates.length || isBusy || !canManage ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">${isSettling ? "check_circle" : "casino"}</span>${isSpinning ? "Spinning…" : isSettling ? "Wheel stopped…" : canManage ? "Spin the list" : `Waiting for ${escapeHTML(activeSession.hostName)}`}</button>
         ${candidates.length ? "" : `<p class="roulette-empty-warning">No films match these filters. Adjust the pool to continue.</p>`}
       </aside>
     </div>`;
@@ -723,7 +709,7 @@ function renderRouletteReveal(candidates, winner) {
           ${renderDiscordTemplate(activeSession, winner)}
           ${canManage ? `<button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
           <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : canManage ? `
-          <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.members.map((name) => { const used = rouletteState.usedVetoes.includes(name); return `<button type="button" data-veto-member="${escapeHTML(name)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "Use veto"}</em></button>`; }).join("")}</div></section>
+          <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.participants.map(({ id, name }) => { const used = rouletteState.usedVetoes.includes(id); return `<button type="button" data-veto-member="${escapeHTML(id)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "Use veto"}</em></button>`; }).join("")}</div></section>
           <div class="roulette-decision-actions">
             <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
             <button class="secondary-button roulette-wide-action" type="button" data-request-reroll><span class="material-symbols-outlined" aria-hidden="true">refresh</span>House re-spin</button>
@@ -757,7 +743,7 @@ function renderPick() {
     <section class="page-view" aria-labelledby="pick-title">
       <header class="page-header"><div><span class="eyebrow">${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}</span><h1 id="pick-title" class="page-title">Pick Tonight</h1><p class="page-subtitle">Choose the group, choose the rules, then let the website settle the argument.</p></div><button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></header>
       <div class="pick-callout"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
-      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount ? "" : "disabled"}>Choose</button></article>`).join("")}</div>
+      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
     </section>`;
 }
 
@@ -766,8 +752,8 @@ function renderSessions() {
   const canManage = canManageSession();
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Movie-night choices now survive refresh. Discord remains a separate, manual handoff.</p></div>${activeSession ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
-      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Active")} · ${escapeHTML(activeSession.mode)} · Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This game is prepared for a future build."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}${canManage ? `<button class="secondary-button" type="button" data-end-session>End Session</button>` : ""}</div></div></article>${rouletteWinner ? renderDiscordTemplate(activeSession, rouletteWinner) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Start with Consensus Sprint, Queue Roulette or a Reel Bracket.</p><button class="secondary-button" type="button" data-open-party>Choose a game</button></div>`}
+      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Movie-night choices now survive refresh. Discord remains a separate, manual handoff.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Active")} · ${escapeHTML(activeSession.mode)} · Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This legacy session uses a mode that is not implemented."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}${canManage ? `<button class="secondary-button" type="button" data-end-session>End Session</button>` : ""}</div></div></article>${rouletteWinner ? renderDiscordTemplate(activeSession, rouletteWinner) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Start Queue Roulette</button></div>`}
       ${sessionHistory.length ? `<section class="session-history" aria-labelledby="session-history-title"><div class="section-heading"><div><span class="eyebrow">Saved history</span><h2 id="session-history-title">Previous sessions</h2></div><span class="request-count">${sessionHistory.length}</span></div><div class="session-history-list">${sessionHistory.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.startedAt))} · ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ")}</small></div><span class="status-pill watched">Ended</span></article>`; }).join("")}</div></section>` : ""}
     </section>`;
 }
@@ -861,7 +847,12 @@ function navigate(view) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function openPartyModal(mode = "Consensus Sprint") {
+function openPartyModal(mode = "Queue Roulette") {
+  const selectedMode = decisionModes.find((candidate) => candidate.title === mode);
+  if (!selectedMode?.available) {
+    showToast(`${mode} is coming soon. Queue Roulette is the available decision game.`);
+    return;
+  }
   if (activeSession) {
     showToast("A movie-night session is already open. End it before starting another.");
     navigate("sessions");
@@ -890,15 +881,39 @@ function stopRouletteSpin() {
   rouletteSpinTimer = null;
 }
 
-async function persistRouletteState() {
-  if (!activeSession || designPreviewMode) return;
-  const gameState = serialiseRouletteState();
-  const { error } = await supabase
+function cloneRouletteState(state = rouletteState) {
+  if (!state) return null;
+  return {
+    ...state,
+    participants: state.participants.map((participant) => ({ ...participant })),
+    usedVetoes: [...state.usedVetoes],
+    vetoedFilmIds: [...state.vetoedFilmIds],
+    excludedFilmIds: [...state.excludedFilmIds],
+    previewIds: [...state.previewIds],
+    filters: { ...state.filters },
+  };
+}
+
+async function updateActiveMovieSession(patch) {
+  if (!activeSession || !activeGroup) throw new Error("There is no active session to update.");
+  if (!canManageSession()) throw new Error("Only the session host or a website administrator can change this session.");
+  if (designPreviewMode) return;
+
+  const { data, error } = await supabase
     .from("movie_sessions")
-    .update({ game_state: gameState })
+    .update(patch)
     .eq("id", activeSession.id)
-    .eq("group_id", activeGroup.id);
+    .eq("group_id", activeGroup.id)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("No session row was updated. Refresh before trying again.");
+}
+
+async function persistRouletteState() {
+  if (!activeSession) return;
+  const gameState = serialiseRouletteState();
+  await updateActiveMovieSession({ game_state: gameState });
   activeSession.gameState = gameState;
 }
 
@@ -906,16 +921,8 @@ async function createMovieSession(participantIds, mode) {
   const selectedMembers = participantIds.map((id) => members.find((member) => member.id === id)).filter(Boolean);
   const memberNames = selectedMembers.map((member) => member.name);
   const candidateCount = movieList.filter((item) => !item.watched).length;
-  const initialRoulette = mode === "Queue Roulette" ? createRouletteState(memberNames) : null;
-  const gameState = initialRoulette ? {
-    phase: initialRoulette.phase,
-    usedVetoes: [],
-    vetoedFilmIds: [],
-    winnerId: null,
-    poolOpen: false,
-    previewIds: [],
-    filters: { ...initialRoulette.filters },
-  } : {};
+  const initialRoulette = mode === "Queue Roulette" ? createRouletteState(selectedMembers) : null;
+  const gameState = initialRoulette ? serialiseRouletteStateValue(initialRoulette) : {};
 
   if (designPreviewMode) {
     activeSession = {
@@ -927,6 +934,7 @@ async function createMovieSession(participantIds, mode) {
       status: "ACTIVE",
       candidateCount,
       participantIds,
+      participants: selectedMembers.map(({ id, name }) => ({ id, name })),
       members: memberNames,
       selectedFilmId: null,
       selectedFilm: null,
@@ -953,26 +961,25 @@ async function createMovieSession(participantIds, mode) {
 
 async function confirmMovieSession(winner) {
   if (!activeSession || !rouletteState) return;
+  const previousPhase = rouletteState.phase;
   rouletteState.phase = "confirmed";
   const gameState = serialiseRouletteState();
-  if (!designPreviewMode) {
-    const { error } = await supabase
-      .from("movie_sessions")
-      .update({
-        status: "CONFIRMED",
-        selected_queue_item_id: winner.id,
-        selected_title: winner.title,
-        selected_release_year: winner.year || null,
-        selected_tmdb_id: winner.tmdbId || null,
-        selected_poster_path: winner.posterPath || null,
-        selected_runtime_minutes: winner.runtime || null,
-        selected_genres: winner.genres || [],
-        selected_overview: winner.overview || null,
-        game_state: gameState,
-      })
-      .eq("id", activeSession.id)
-      .eq("group_id", activeGroup.id);
-    if (error) throw error;
+  try {
+    await updateActiveMovieSession({
+      status: "CONFIRMED",
+      selected_queue_item_id: winner.id,
+      selected_title: winner.title,
+      selected_release_year: winner.year || null,
+      selected_tmdb_id: winner.tmdbId || null,
+      selected_poster_path: winner.posterPath || null,
+      selected_runtime_minutes: winner.runtime || null,
+      selected_genres: winner.genres || [],
+      selected_overview: winner.overview || null,
+      game_state: gameState,
+    });
+  } catch (error) {
+    rouletteState.phase = previousPhase;
+    throw error;
   }
   activeSession.status = "CONFIRMED";
   activeSession.selectedFilmId = winner.id;
@@ -984,27 +991,21 @@ async function confirmMovieSession(winner) {
 
 async function resetMovieSessionRoulette() {
   if (!activeSession) return;
-  rouletteState = createRouletteState(activeSession.members);
-  const gameState = serialiseRouletteState();
-  if (!designPreviewMode) {
-    const { error } = await supabase
-      .from("movie_sessions")
-      .update({
-        status: "ACTIVE",
-        selected_queue_item_id: null,
-        selected_title: null,
-        selected_release_year: null,
-        selected_tmdb_id: null,
-        selected_poster_path: null,
-        selected_runtime_minutes: null,
-        selected_genres: [],
-        selected_overview: null,
-        game_state: gameState,
-      })
-      .eq("id", activeSession.id)
-      .eq("group_id", activeGroup.id);
-    if (error) throw error;
-  }
+  const nextRouletteState = createRouletteState(activeSession.participants || []);
+  const gameState = serialiseRouletteStateValue(nextRouletteState);
+  await updateActiveMovieSession({
+    status: "ACTIVE",
+    selected_queue_item_id: null,
+    selected_title: null,
+    selected_release_year: null,
+    selected_tmdb_id: null,
+    selected_poster_path: null,
+    selected_runtime_minutes: null,
+    selected_genres: [],
+    selected_overview: null,
+    game_state: gameState,
+  });
+  rouletteState = nextRouletteState;
   activeSession.status = "ACTIVE";
   activeSession.selectedFilmId = null;
   activeSession.selectedFilm = null;
@@ -1017,12 +1018,7 @@ async function endMovieSession() {
   if (!activeSession) return;
   stopRouletteSpin();
   if (!designPreviewMode) {
-    const { error } = await supabase
-      .from("movie_sessions")
-      .update({ status: "ENDED", game_state: serialiseRouletteState() })
-      .eq("id", activeSession.id)
-      .eq("group_id", activeGroup.id);
-    if (error) throw error;
+    await updateActiveMovieSession({ status: "ENDED", game_state: serialiseRouletteState() });
     await loadWorkspace();
   } else {
     sessionHistory.unshift({ ...activeSession, status: "ENDED", endedAt: new Date().toISOString() });
@@ -1032,20 +1028,22 @@ async function endMovieSession() {
   }
 }
 
-async function spinRoulette(vetoMember = null) {
-  if (!rouletteState || rouletteState.phase === "spinning") return;
+async function spinRoulette(vetoParticipantId = null) {
+  if (!rouletteState || ["spinning", "settling"].includes(rouletteState.phase) || !canManageSession()) return;
+  const previousState = cloneRouletteState();
   let candidates = getRouletteCandidates();
   if (!candidates.length) {
     showToast("No films match the current Roulette filters.");
     return;
   }
-  if (vetoMember) {
-    if (!rouletteState.members.includes(vetoMember) || rouletteState.usedVetoes.includes(vetoMember)) return;
+  if (vetoParticipantId) {
+    const participant = rouletteState.participants.find(({ id }) => id === vetoParticipantId);
+    if (!participant || rouletteState.usedVetoes.includes(vetoParticipantId)) return;
     if (candidates.length <= 1) {
       showToast("The final remaining film cannot be vetoed. Confirm it or start a new round.");
       return;
     }
-    rouletteState.usedVetoes.push(vetoMember);
+    rouletteState.usedVetoes.push(vetoParticipantId);
     if (rouletteState.winnerId && !rouletteState.vetoedFilmIds.includes(rouletteState.winnerId)) rouletteState.vetoedFilmIds.push(rouletteState.winnerId);
     candidates = getRouletteCandidates();
   }
@@ -1058,16 +1056,32 @@ async function spinRoulette(vetoMember = null) {
   rouletteState.phase = "spinning";
   const spinToken = ++rouletteSpinToken;
   try { await persistRouletteState(); }
-  catch (error) { showToast(`Roulette state was not saved: ${error.message}`); return; }
+  catch (error) {
+    rouletteState = previousState;
+    render();
+    showToast(`Roulette state was not saved: ${error.message}`);
+    return;
+  }
   render();
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const spinDuration = reducedMotion ? ROULETTE_REDUCED_SPIN_DURATION_MS : ROULETTE_SPIN_DURATION_MS;
+  const settleDuration = reducedMotion ? ROULETTE_REDUCED_SETTLE_DURATION_MS : ROULETTE_SETTLE_DURATION_MS;
   rouletteSpinTimer = window.setTimeout(async () => {
     if (!rouletteState || rouletteSpinToken !== spinToken) return;
-    rouletteState.phase = "reveal";
-    try { await persistRouletteState(); }
-    catch (error) { showToast(`Roulette result was not saved: ${error.message}`); }
+    rouletteState.phase = "settling";
     render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 80 : 1800);
+    try { await persistRouletteState(); }
+    catch (error) { showToast(`Roulette stopped state was not saved: ${error.message}`); }
+    if (!rouletteState || rouletteSpinToken !== spinToken) return;
+    rouletteSpinTimer = window.setTimeout(async () => {
+      if (!rouletteState || rouletteSpinToken !== spinToken) return;
+      rouletteState.phase = "reveal";
+      try { await persistRouletteState(); }
+      catch (error) { showToast(`Roulette result was not saved: ${error.message}`); }
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }, settleDuration);
+  }, spinDuration);
 }
 
 function openFilmModal(item = null) {
@@ -1201,6 +1215,7 @@ async function loadWorkspace() {
       status: session.status,
       candidateCount: session.candidate_count,
       participantIds: participants.map((participant) => participant.id).filter(Boolean),
+      participants: participants.map(({ id, name }) => ({ id, name })),
       members: participants.map((participant) => participant.name),
       selectedFilmId: session.selected_queue_item_id,
       selectedFilm,
@@ -1365,8 +1380,9 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-cancel-access-request]")) {
     if (!accessRequest || !window.confirm("Cancel your website access request?")) return;
-    const { error } = await supabase.from("group_join_requests").delete().eq("id", accessRequest.id);
+    const { data, error } = await supabase.from("group_join_requests").delete().eq("id", accessRequest.id).select("id").maybeSingle();
     if (error) { showToast(`Request was not cancelled: ${error.message}`); return; }
+    if (!data) { showToast("The request was not cancelled. Refresh before trying again."); return; }
     await loadWorkspace(); render(); showToast("Access request cancelled."); return;
   }
   if (event.target.closest("[data-copy-invite]")) {
@@ -1484,8 +1500,9 @@ document.addEventListener("click", async (event) => {
     if (!item || item.watched) return;
     voteButton.disabled = true;
     const query = item.votedByMe ? supabase.from("queue_votes").delete().eq("queue_item_id", item.id).eq("user_id", authUser.id) : supabase.from("queue_votes").insert({ queue_item_id: item.id, user_id: authUser.id });
-    const { error } = await query;
+    const { data, error } = await query.select("queue_item_id").maybeSingle();
     if (error) { voteButton.disabled = false; showToast(`Vote was not changed: ${error.message}`); return; }
+    if (!data) { voteButton.disabled = false; showToast("The vote was not changed. Refresh before trying again."); return; }
     await loadWorkspace(); render(); showToast(item.votedByMe ? `Vote removed from ${item.title}.` : `Vote added for ${item.title}.`); return;
   }
 
@@ -1494,8 +1511,9 @@ document.addEventListener("click", async (event) => {
     const item = movieList.find((candidate) => candidate.id === watchedButton.dataset.toggleWatched);
     if (!item || !canManageFilm(item)) return;
     watchedButton.disabled = true;
-    const { error } = await supabase.from("queue_items").update({ watched: !item.watched }).eq("id", item.id);
+    const { data, error } = await supabase.from("queue_items").update({ watched: !item.watched }).eq("id", item.id).eq("group_id", activeGroup.id).select("id").maybeSingle();
     if (error) { watchedButton.disabled = false; showToast(`Film status was not changed: ${error.message}`); return; }
+    if (!data) { watchedButton.disabled = false; showToast("Film status was not changed. Refresh before trying again."); return; }
     await loadWorkspace(); render(); showToast(`${item.title} marked ${item.watched ? "ready" : "watched"}.`); return;
   }
 
@@ -1504,8 +1522,9 @@ document.addEventListener("click", async (event) => {
     const item = movieList.find((candidate) => candidate.id === deleteFilmButton.dataset.removeFilm);
     if (!item || !canManageFilm(item) || !window.confirm(`Remove ${item.title} from the website list? This does not change Discord.`)) return;
     deleteFilmButton.disabled = true;
-    const { error } = await supabase.from("queue_items").delete().eq("id", item.id).eq("group_id", activeGroup.id);
+    const { data, error } = await supabase.from("queue_items").delete().eq("id", item.id).eq("group_id", activeGroup.id).select("id").maybeSingle();
     if (error) { deleteFilmButton.disabled = false; showToast(`Film was not removed: ${error.message}`); return; }
+    if (!data) { deleteFilmButton.disabled = false; showToast("The film was not removed. Refresh before trying again."); return; }
     selectedFilmId = null;
     shortlistedFilmIds.delete(item.id);
     await loadWorkspace(); render(); showToast(`${item.title} removed from the website list. Discord was not changed.`); return;
@@ -1513,11 +1532,56 @@ document.addEventListener("click", async (event) => {
 
   const modeButton = event.target.closest("[data-select-mode]");
   if (modeButton) { openPartyModal(modeButton.dataset.selectMode); return; }
+  if (event.target.closest("[data-clear-roulette-filters]")) {
+    if (!rouletteState || !canManageSession() || ["spinning", "settling"].includes(rouletteState.phase) || !rouletteHasActiveFilters()) return;
+    const previousState = cloneRouletteState();
+    rouletteState.filters.runtime = "any";
+    rouletteState.filters.genre = "all";
+    rouletteState.filters.includeWatched = false;
+    rouletteState.excludedFilmIds = [];
+    resetRouletteOutcome();
+    render();
+    try {
+      await persistRouletteState();
+      showToast("Roulette filters cleared and removed films restored.");
+    } catch (error) {
+      rouletteState = previousState;
+      render();
+      showToast(`Roulette filters were not cleared: ${error.message}`);
+    }
+    return;
+  }
+  const excludeRouletteFilmButton = event.target.closest("[data-exclude-roulette-film]");
+  if (excludeRouletteFilmButton) {
+    if (!rouletteState || !canManageSession() || rouletteState.phase !== "ready") return;
+    const item = movieList.find((candidate) => candidate.id === excludeRouletteFilmButton.dataset.excludeRouletteFilm);
+    const candidates = getRouletteCandidates();
+    if (!item || !candidates.some((candidate) => candidate.id === item.id)) return;
+    if (candidates.length <= 1) {
+      showToast("The final eligible film cannot be removed from this round.");
+      return;
+    }
+    const previousState = cloneRouletteState();
+    rouletteState.excludedFilmIds.push(item.id);
+    resetRouletteOutcome();
+    render();
+    try {
+      await persistRouletteState();
+      showToast(`${item.title} removed from this round. Clear filters to restore it.`);
+    } catch (error) {
+      rouletteState = previousState;
+      render();
+      showToast(`The film was not removed from Roulette: ${error.message}`);
+    }
+    return;
+  }
   if (event.target.closest("[data-adjust-roulette]")) {
     rouletteState.poolOpen = !rouletteState.poolOpen;
     render();
-    try { await persistRouletteState(); }
-    catch (error) { showToast(`Roulette panel state was not saved: ${error.message}`); }
+    if (canManageSession()) {
+      try { await persistRouletteState(); }
+      catch (error) { showToast(`Roulette panel state was not saved: ${error.message}`); }
+    }
     return;
   }
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
@@ -1594,19 +1658,31 @@ document.addEventListener("change", async (event) => {
   if (event.target.matches("#list-sort")) { listSort = event.target.value; render(); }
   if (event.target.matches("#genre-filter")) { genreFilter = event.target.value; render(); }
   if (event.target.matches("#member-filter")) { memberFilter = event.target.value; render(); }
+  const isRouletteControl = event.target.matches("#roulette-runtime, #roulette-genre, #roulette-rewatches, #roulette-age-weight");
+  if (isRouletteControl && !canManageSession()) {
+    render();
+    showToast("Only the session host or a website administrator can change Roulette filters.");
+    return;
+  }
+  if (isRouletteControl && ["spinning", "settling"].includes(rouletteState?.phase)) {
+    render();
+    return;
+  }
+  const previousRouletteState = isRouletteControl ? cloneRouletteState() : null;
   let rouletteChanged = false;
   if (event.target.matches("#roulette-runtime")) { rouletteState.filters.runtime = event.target.value; rouletteChanged = true; }
   if (event.target.matches("#roulette-genre")) { rouletteState.filters.genre = event.target.value; rouletteChanged = true; }
   if (event.target.matches("#roulette-rewatches")) { rouletteState.filters.includeWatched = event.target.checked; rouletteChanged = true; }
   if (event.target.matches("#roulette-age-weight")) { rouletteState.filters.weightedByAge = event.target.checked; rouletteChanged = true; }
   if (rouletteChanged) {
-    rouletteState.winnerId = null;
-    rouletteState.previewIds = [];
-    rouletteState.overviewOpen = false;
-    rouletteState.rerollConfirmOpen = false;
+    resetRouletteOutcome();
     render();
     try { await persistRouletteState(); }
-    catch (error) { showToast(`Roulette filters were not saved: ${error.message}`); }
+    catch (error) {
+      rouletteState = previousRouletteState;
+      render();
+      showToast(`Roulette filters were not saved: ${error.message}`);
+    }
   }
 });
 
@@ -1616,6 +1692,10 @@ partyForm.addEventListener("submit", async (event) => {
   const selectedMemberIds = form.getAll("members").map(String);
   if (!selectedMemberIds.length) { showToast("Choose at least one Discordian."); return; }
   const mode = String(form.get("mode"));
+  if (!decisionModes.some((candidate) => candidate.title === mode && candidate.available)) {
+    showToast("That decision game is not available yet. Choose Queue Roulette.");
+    return;
+  }
   const submit = partyForm.querySelector("button[type='submit']");
   submit.disabled = true;
   try {

@@ -63,7 +63,7 @@ Keep this manual copy path even if a later Discord integration is considered. Do
 
 ### Journal
 
-Journal entries and their viewers are persistent. Writes use database functions and security policies so users cannot gain access merely by manipulating browser requests.
+Journal entries, viewers and secure write functions exist in the Supabase backend. The active frontend currently has no Journal route, reader or write form, so Journal persistence is backend capability rather than a user-facing feature. Do not describe it as shipped until that UI is implemented and validated.
 
 ### Statistics and challenges
 
@@ -95,12 +95,13 @@ Persistent:
 
 - authentication and profiles;
 - group membership and access requests;
-- Journal entries and viewers;
+- Journal entries and viewers at the database layer only;
 - movie list, metadata and voting;
 - movie-night sessions, participants, selected-film snapshots and resumable Queue Roulette state.
 
 Not yet persistent or integrated:
 
+- active Journal reading and writing in the frontend;
 - Discord posting or synchronisation;
 - live multiplayer presence;
 - final Wrapped calculations;
@@ -110,12 +111,13 @@ Not yet persistent or integrated:
 
 These are backlog directions, not permission to implement all of them in one change:
 
-1. Verify the persistent-session migration and recovery flow against real Supabase data.
-2. Add additional decision games such as Consensus Sprint and Reel Bracket.
-3. Design persistent server-wide and personal statistics/challenges.
-4. Improve automated testing around pure selection logic and Supabase mapping.
-5. Split the growing `app.js` and `styles.css` into maintainable modules without changing behaviour.
-6. Consider Discord synchronisation only after defining credentials, permissions, conflict handling and the source of truth.
+1. Review and apply the staged least-privilege migration, then verify live grants and session writes.
+2. Design and implement the active Journal reader/write flow against the existing secure backend.
+3. Add decision games such as Consensus Sprint and Reel Bracket only when their full interaction and persistence rules are defined.
+4. Design persistent server-wide and personal statistics/challenges.
+5. Expand automated coverage around Supabase mapping and authenticated multi-user behavior.
+6. Continue splitting the growing `app.js` and `styles.css` into focused modules without replacing working behavior.
+7. Consider Discord synchronisation only after defining credentials, permissions, conflict handling and the source of truth.
 
 ## Definition of done for a change
 
