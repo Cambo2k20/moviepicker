@@ -245,33 +245,22 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   });
   expect(resultGeometry.resultFitsMainWidth).toBe(true);
   if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1900, height: 1040 });
     const wideResultGeometry = await page.evaluate(() => {
-      const header = document.querySelector(".roulette-header > div");
-      const wheel = document.querySelector(".roulette-result-wheel .roulette-wheel-stage");
-      const callout = document.querySelector(".roulette-result-wheel .roulette-landed-callout.is-summary");
-      const poster = document.querySelector(".roulette-winning-poster");
+      const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
+      const poster = document.querySelector(".roulette-winning-poster")?.getBoundingClientRect();
+      const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
       const reroll = document.querySelector("[data-request-reroll]");
       const rerollIcon = reroll?.querySelector(".material-symbols-outlined");
-      const wheelBox = wheel?.getBoundingClientRect();
-      const posterBox = poster?.getBoundingClientRect();
-      const headerStyle = header ? getComputedStyle(header) : null;
-      const wheelStyle = wheel ? getComputedStyle(wheel) : null;
-      const calloutStyle = callout ? getComputedStyle(callout) : null;
-      const posterStyle = poster ? getComputedStyle(poster) : null;
       const rerollStyle = reroll ? getComputedStyle(reroll) : null;
       const rerollIconStyle = rerollIcon ? getComputedStyle(rerollIcon) : null;
       return {
-        headerMarginLeft: parseFloat(headerStyle?.marginLeft || "0"),
-        wheelWidth: wheelBox?.width || 0,
-        wheelHeight: wheelBox?.height || 0,
-        wheelMarginTop: parseFloat(wheelStyle?.marginTop || "0"),
-        wheelMarginRight: parseFloat(wheelStyle?.marginRight || "0"),
-        wheelMarginLeft: parseFloat(wheelStyle?.marginLeft || "0"),
-        posterMarginTop: parseFloat(posterStyle?.marginTop || "0"),
-        posterMarginLeft: parseFloat(posterStyle?.marginLeft || "0"),
-        calloutMarginRight: parseFloat(calloutStyle?.marginRight || "0"),
-        calloutMarginLeft: parseFloat(calloutStyle?.marginLeft || "0"),
-        wheelBelowPoster: Boolean(wheelBox && posterBox && wheelBox.top >= posterBox.bottom - 1),
+        // The decision is still open here, so the wheel belongs to the spin, not this screen.
+        wheelCount: document.querySelectorAll(".roulette-result-wheel").length,
+        calloutCount: document.querySelectorAll(".roulette-landed-callout").length,
+        // Hand-tuned offsets once pushed the poster out of its column and over the text.
+        posterWithinStage: Boolean(stage && poster && poster.left >= stage.left - 1 && poster.right <= stage.right + 1),
+        posterClearsCopy: Boolean(poster && copy && poster.right <= copy.left + 1),
         rerollDisplay: rerollStyle?.display || "",
         rerollGap: parseFloat(rerollStyle?.gap || "0"),
         rerollPaddingRight: parseFloat(rerollStyle?.paddingRight || "0"),
@@ -280,18 +269,10 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
         viewportOverflow: document.documentElement.scrollWidth - window.innerWidth,
       };
     });
-    expect(wideResultGeometry.headerMarginLeft).toBe(-86);
-    expect(wideResultGeometry.wheelWidth).toBeCloseTo(437, 0);
-    expect(wideResultGeometry.wheelHeight).toBeCloseTo(437, 0);
-    expect(wideResultGeometry.wheelMarginTop).toBe(80);
-    expect(wideResultGeometry.wheelMarginRight).toBe(-100);
-    expect(wideResultGeometry.wheelMarginLeft).toBe(-90);
-    expect(wideResultGeometry.posterMarginTop).toBe(30);
-    expect(wideResultGeometry.posterMarginLeft).toBe(70);
-    expect(wideResultGeometry.calloutMarginRight).toBe(21);
-    expect(wideResultGeometry.calloutMarginLeft).toBe(21);
-    // The wheel stacks under the poster so the poster holds the same spot once confirmed.
-    expect(wideResultGeometry.wheelBelowPoster).toBe(true);
+    expect(wideResultGeometry.wheelCount).toBe(0);
+    expect(wideResultGeometry.calloutCount).toBe(0);
+    expect(wideResultGeometry.posterWithinStage).toBe(true);
+    expect(wideResultGeometry.posterClearsCopy).toBe(true);
     expect(wideResultGeometry.rerollDisplay).toBe("flex");
     expect(wideResultGeometry.rerollGap).toBe(8);
     expect(wideResultGeometry.rerollPaddingRight).toBe(0);
@@ -321,7 +302,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await posterSettled();
   const beforeConfirm = await boxes();
 
-  await page.locator("[data-confirm-roulette]").click();
+  await page.getByRole("button", { name: "Confirm Movie and Create Session" }).click();
   await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
 
   await posterSettled();

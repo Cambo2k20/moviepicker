@@ -7,6 +7,8 @@
   --border-soft: #292c35;
   --purple: #6d5ae6;
   --purple-light: #9b8afb;
+  /* Small uppercase labels need more lift than body-sized purple. */
+  --label: #bcb0ff;
   --text: #f7f7fa;
   --muted: #a7a9b2;
   --dim: #898c98;
@@ -117,10 +119,11 @@ select:focus-visible {
 
 .section-label,
 .eyebrow {
-  color: var(--purple-light);
+  color: var(--label);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -4372,28 +4375,6 @@ legend,
   gap: 10px;
 }
 
-@media (min-width: 1600px) and (min-height: 900px) {
-  .roulette-game.has-result .roulette-header > div {
-    margin-left: -86px;
-  }
-
-  .roulette-game.has-result .roulette-result-wheel .roulette-wheel-stage {
-    width: 437px;
-    margin: 80px -100px 0 -90px;
-  }
-
-  .roulette-game.has-result .roulette-winning-poster {
-    margin: 30px 0 0 70px;
-  }
-
-  .roulette-game.has-result .roulette-result-wheel .roulette-landed-callout.is-summary {
-    width: calc(100% - 42px);
-    max-width: none;
-    justify-content: center;
-    margin: 10px 21px 0;
-  }
-}
-
 @media (max-width: 1180px) {
   .roulette-result-layout {
     grid-template-columns: 1fr;
@@ -4709,7 +4690,7 @@ legend,
   align-content: start;
   gap: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -4819,11 +4800,11 @@ legend,
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  color: var(--purple-light);
+  color: var(--label);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -4904,10 +4885,10 @@ legend,
 
 .roulette-session-note {
   margin-right: auto;
-  color: var(--dim);
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
