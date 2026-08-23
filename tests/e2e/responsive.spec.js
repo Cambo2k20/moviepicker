@@ -334,6 +334,20 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(confirmedGeometry.handoffColumns).toBe(2);
   }
 
-  const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(pageOverflow).toBeLessThanOrEqual(1);
+  const overflowState = await page.evaluate(() => ({
+    pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    overflowingElements: [...document.querySelectorAll("body *")]
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          selector: element.id ? `#${element.id}` : `.${[...element.classList].join(".")}`,
+          left: Math.round(box.left),
+          right: Math.round(box.right),
+          width: Math.round(box.width),
+        };
+      })
+      .filter(({ left, right }) => left < -1 || right > window.innerWidth + 1)
+      .slice(0, 12),
+  }));
+  expect(overflowState.pageOverflow, JSON.stringify(overflowState.overflowingElements)).toBeLessThanOrEqual(1);
 });
