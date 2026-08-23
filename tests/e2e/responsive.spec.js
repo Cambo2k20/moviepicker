@@ -117,45 +117,80 @@ test("local application images resolve in the browser", async ({ page }) => {
   expect(viewportOverflow).toBeLessThanOrEqual(1);
 });
 
-test("a confirmed Queue Roulette result and Discord form stay in-bounds", async ({ page }) => {
+test("a confirmed Queue Roulette result and Discord form stay in-bounds", async ({ page }, testInfo) => {
   await page.locator('[data-view="pick"]').click();
   await page.getByRole("button", { name: /Start a Session/ }).click();
   await page.getByRole("button", { name: /Create Watch Party/ }).click();
   await expect(page.locator("#roulette-runtime")).toHaveValue("any");
+
+  if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1430, height: 804 });
+    const titleFontSize = await page.locator("#roulette-title").evaluate((title) => parseFloat(getComputedStyle(title).fontSize));
+    expect(titleFontSize).toBe(65);
+  }
 
   const chanceRows = page.locator(".roulette-chance-strip .roulette-chance-row");
   const initialCandidateCount = await chanceRows.count();
   await expect(page.locator("[data-adjust-roulette]")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Adjust pool" })).toBeVisible();
   await expect(page.locator(".roulette-pool-controls")).toBeVisible();
-  await expect(page.locator(".roulette-session-strip [data-spin-roulette]")).toBeVisible();
-  await expect(page.locator(".roulette-session-strip .roulette-session-vetoes")).toBeVisible();
-  await expect(page.locator(".roulette-session-strip .roulette-veto-token")).toHaveCount(3);
-  await expect(page.locator(".roulette-session-strip .roulette-players")).toHaveCount(0);
+  await expect(page.locator(".roulette-session-strip")).toHaveCount(0);
+  await expect(page.locator(".roulette-wheel-stage [data-spin-roulette]")).toBeVisible();
+  await expect(page.locator(".roulette-wheel-stage [data-spin-roulette]")).toHaveText("Spin");
+  await expect(page.locator(".roulette-wheel-stage [data-spin-roulette]")).toHaveAttribute("aria-label", "Spin the list");
+  await expect(page.locator(".roulette-pool .roulette-session-vetoes")).toBeVisible();
+  await expect(page.locator(".roulette-pool .roulette-veto-token")).toHaveCount(3);
+  await expect(page.locator(".roulette-pool .roulette-veto-player")).toContainText(["Cameron", "Dean", "Kieran"]);
   await expect(page.locator(".roulette-pool-odds")).toHaveCount(0);
   await expect(page.locator(".roulette-control-column [data-spin-roulette]")).toHaveCount(0);
   await expect(page.locator(".roulette-veto-panel")).toHaveCount(0);
 
-  const sessionStripOrder = await page.locator(".roulette-session-strip").evaluate((strip) => [...strip.children].map((child) => {
-    if (child.matches(".roulette-session-vetoes")) return "players";
-    if (child.matches("[data-spin-roulette]")) return "spin";
-    if (child.matches(".roulette-session-count")) return "details";
-    return "other";
-  }));
-  expect(sessionStripOrder).toEqual(["players", "spin", "details"]);
-
   const readyGeometry = await page.evaluate(() => {
-    const strip = document.querySelector(".roulette-session-strip")?.getBoundingClientRect();
+    const header = document.querySelector(".roulette-header")?.getBoundingClientRect();
+    const main = document.querySelector("#view-root")?.getBoundingClientRect();
+    const stage = document.querySelector(".roulette-stage-column")?.getBoundingClientRect();
     const wheel = document.querySelector(".roulette-wheel-stage")?.getBoundingClientRect();
+    const track = document.querySelector(".roulette-wheel-track")?.getBoundingClientRect();
+    const hub = document.querySelector(".roulette-wheel-stage [data-spin-roulette]")?.getBoundingClientRect();
+    const rail = document.querySelector(".roulette-chance-strip")?.getBoundingClientRect();
     const controls = document.querySelector(".roulette-control-column")?.getBoundingClientRect();
+    const pool = document.querySelector(".roulette-pool")?.getBoundingClientRect();
+    const players = document.querySelector(".roulette-session-vetoes")?.getBoundingClientRect();
     const overlaps = (one, two) => one.left < two.right && one.right > two.left && one.top < two.bottom && one.bottom > two.top;
     return {
-      wheelBelowHeader: Boolean(strip && wheel && wheel.top >= strip.bottom - 1),
+      wheelBelowHeader: Boolean(header && wheel && wheel.top >= header.bottom - 1),
       wheelControlsOverlap: Boolean(wheel && controls && overlaps(wheel, controls)),
+      hubInsideWheel: Boolean(track && hub && hub.left >= track.left - 1 && hub.right <= track.right + 1 && hub.top >= track.top - 1 && hub.bottom <= track.bottom + 1),
+      hubCentered: Boolean(track && hub && Math.abs((hub.left + hub.right) / 2 - (track.left + track.right) / 2) <= 1 && Math.abs((hub.top + hub.bottom) / 2 - (track.top + track.bottom) / 2) <= 1),
+      railBelowWheel: Boolean(wheel && rail && rail.top >= wheel.bottom - 1),
+      playersInsidePool: Boolean(pool && players && players.left >= pool.left - 1 && players.right <= pool.right + 1 && players.top >= pool.top - 1 && players.bottom <= pool.bottom + 1),
+      stageInsideMain: Boolean(main && stage && stage.left >= main.left - 1 && stage.right <= main.right + 1),
     };
   });
   expect(readyGeometry.wheelBelowHeader).toBe(true);
   expect(readyGeometry.wheelControlsOverlap).toBe(false);
+  expect(readyGeometry.hubInsideWheel).toBe(true);
+  expect(readyGeometry.hubCentered).toBe(true);
+  expect(readyGeometry.railBelowWheel).toBe(true);
+  expect(readyGeometry.playersInsidePool).toBe(true);
+  expect(readyGeometry.stageInsideMain).toBe(true);
+
+  if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1969, height: 1107 });
+    const annotatedViewportFit = await page.evaluate(() => {
+      const stage = document.querySelector(".roulette-stage-column")?.getBoundingClientRect();
+      const controls = document.querySelector(".roulette-control-column")?.getBoundingClientRect();
+      return {
+        stageBottom: stage?.bottom || Number.POSITIVE_INFINITY,
+        columnsOverlap: Boolean(stage && controls && stage.right > controls.left),
+        viewportHeight: window.innerHeight,
+        viewportOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    expect(annotatedViewportFit.stageBottom).toBeLessThanOrEqual(annotatedViewportFit.viewportHeight + 1);
+    expect(annotatedViewportFit.columnsOverlap).toBe(false);
+    expect(annotatedViewportFit.viewportOverflow).toBeLessThanOrEqual(1);
+  }
   await page.locator("#roulette-runtime").selectOption("150");
   await page.locator("#roulette-rewatches").check();
   const filteredCandidateCount = await chanceRows.count();
@@ -168,7 +203,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator("#roulette-rewatches")).not.toBeChecked();
 
   await page.locator("[data-spin-roulette]").click();
-  await expect(page.locator("[data-spin-roulette]")).toContainText("Spinning");
+  await expect(page.locator("[data-spin-roulette]")).toHaveText("Spinning");
   const spinKeyframeOffsets = await page.locator("[data-roulette-wheel]").evaluate((element) => (
     element.getAnimations()[0]?.effect.getKeyframes().map(({ offset }) => offset)
   ));

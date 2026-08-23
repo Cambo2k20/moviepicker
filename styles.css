@@ -3130,7 +3130,6 @@ legend,
 }
 
 .roulette-header,
-.roulette-session-strip,
 .roulette-winner-heading,
 .roulette-confirmed-note,
 .session-actions {
@@ -3148,7 +3147,7 @@ legend,
 .roulette-header h1 {
   margin: 7px 0 0;
   font-family: "Barlow Condensed", Impact, sans-serif;
-  font-size: clamp(54px, 7vw, 86px);
+  font-size: clamp(48px, 5vw, 65px);
   font-weight: 500;
   letter-spacing: 0.03em;
   line-height: 0.9;
@@ -3157,35 +3156,6 @@ legend,
 
 .roulette-close {
   flex: 0 0 auto;
-}
-
-.roulette-session-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px) auto;
-  gap: 14px 18px;
-  align-items: center;
-  min-height: 78px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.roulette-session-count {
-  display: flex;
-  align-items: baseline;
-  justify-self: end;
-  gap: 7px;
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.roulette-session-count strong {
-  color: var(--text);
-  font-family: "Barlow Condensed", Impact, sans-serif;
-  font-size: 27px;
-  font-weight: 500;
 }
 
 .roulette-ready-layout {
@@ -3206,6 +3176,12 @@ legend,
   width: min(570px, 100%);
   margin: 0 auto;
   padding: 18px;
+}
+
+@media (min-width: 981px) {
+  .roulette-wheel-stage:not(.is-result-summary) {
+    width: min(570px, 100%, 52dvh);
+  }
 }
 
 .roulette-pointer {
@@ -3239,10 +3215,6 @@ legend,
 }
 
 .roulette-wheel-track.is-settling .roulette-wedge-label {
-  transform: translate(-50%, -50%) rotate(var(--roulette-label-counter));
-}
-
-.roulette-wheel-track.is-settling .roulette-hub {
   transform: translate(-50%, -50%) rotate(var(--roulette-label-counter));
 }
 
@@ -3357,7 +3329,7 @@ legend,
 
 .roulette-hub {
   position: absolute;
-  z-index: 3;
+  z-index: 5;
   top: 50%;
   left: 50%;
   display: flex;
@@ -3367,9 +3339,11 @@ legend,
   width: 35%;
   place-items: center;
   aspect-ratio: 1;
+  padding: 0;
   border: 2px solid var(--border);
   border-radius: 50%;
   background: #15171d;
+  color: var(--text);
   box-shadow: 0 0 0 7px rgba(11, 12, 16, 0.88), 0 10px 28px rgba(0, 0, 0, 0.5);
   transform: translate(-50%, -50%);
 }
@@ -3390,14 +3364,34 @@ legend,
   text-transform: uppercase;
 }
 
-.roulette-hub em {
-  margin-top: 5px;
-  color: var(--purple-light);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
-  font-style: normal;
-  letter-spacing: 0.08em;
+.roulette-spin-button {
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.roulette-spin-button strong {
+  font-size: clamp(30px, 4.2vw, 52px);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.roulette-spin-button:hover:not(:disabled),
+.roulette-spin-button:focus-visible {
+  border-color: var(--purple-light);
+  background: linear-gradient(145deg, #7253ff, #4f35d4);
+  box-shadow: 0 0 0 7px rgba(11, 12, 16, 0.88), 0 0 34px rgba(105, 73, 255, 0.52);
+  outline: 0;
+  transform: translate(-50%, -50%) scale(1.035);
+}
+
+.roulette-spin-button[aria-busy="true"] {
+  border-color: var(--purple-light);
+  background: rgba(105, 73, 255, 0.34);
+  box-shadow: 0 0 0 7px rgba(11, 12, 16, 0.88), 0 0 30px rgba(105, 73, 255, 0.42);
+}
+
+.roulette-spin-button:disabled {
+  cursor: not-allowed;
 }
 
 @keyframes roulette-spin {
@@ -3504,7 +3498,7 @@ legend,
 .roulette-chance-strip .roulette-chance-row {
   position: relative;
   display: flex;
-  flex: 0 0 clamp(84px, 9vw, 100px);
+  flex: 0 0 clamp(80px, 10dvh, 100px);
   min-height: 0;
   align-items: stretch;
   flex-direction: column;
@@ -3514,7 +3508,7 @@ legend,
 }
 
 .roulette-chance-strip .roulette-chance-row.has-removal {
-  flex-basis: clamp(84px, 9vw, 100px);
+  flex-basis: clamp(80px, 10dvh, 100px);
 }
 
 .roulette-chance-strip .roulette-chance-row.is-winner {
@@ -3898,13 +3892,22 @@ legend,
 }
 
 .roulette-session-vetoes {
-  display: flex;
+  display: grid;
+  width: 100%;
   min-width: 0;
-  align-items: center;
-  gap: 9px;
+  gap: 11px;
+  padding: 13px 0 2px;
+  border-bottom: 1px solid var(--border-soft);
 }
 
-.roulette-session-vetoes > small {
+.roulette-player-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.roulette-player-summary-head > small {
   color: var(--dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 7px;
@@ -3914,17 +3917,34 @@ legend,
 }
 
 .roulette-session-vetoes .eyebrow {
-  font-size: 7px;
+  font-size: 8px;
 }
 
 .roulette-session-vetoes .roulette-veto-token {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
 }
 
 .roulette-veto-list {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
   gap: 8px;
+}
+
+.roulette-veto-player {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 6px;
+}
+
+.roulette-veto-player > small {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roulette-veto-token {
@@ -3968,20 +3988,6 @@ legend,
 .roulette-wide-action {
   width: 100%;
   justify-content: center;
-}
-
-.roulette-spin-button {
-  justify-content: center;
-  min-height: 58px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.roulette-session-strip .roulette-spin-button {
-  width: 100%;
-  min-width: 0;
-  min-height: 46px;
 }
 
 .roulette-empty-warning {
@@ -4029,11 +4035,6 @@ legend,
 .roulette-result-wheel .roulette-hub small {
   margin-top: 6px;
   font-size: 6px;
-}
-
-.roulette-result-wheel .roulette-hub em {
-  margin-top: 3px;
-  font-size: 5px;
 }
 
 .roulette-result-wheel .roulette-wedge-label {
@@ -4361,27 +4362,6 @@ legend,
     white-space: nowrap;
   }
 
-  .roulette-session-strip {
-    grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 56px;
-    gap: 10px 14px;
-  }
-
-  .roulette-session-vetoes {
-    justify-self: start;
-  }
-
-  .roulette-session-count {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .roulette-session-strip .roulette-spin-button {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    width: 100%;
-  }
-
   .roulette-ready-layout,
   .roulette-result-layout {
     gap: 25px;
@@ -4404,11 +4384,6 @@ legend,
   .roulette-hub small {
     margin-top: 8px;
     font-size: 7px;
-  }
-
-  .roulette-hub em {
-    margin-top: 4px;
-    font-size: 6px;
   }
 
   .roulette-wedge-label {
