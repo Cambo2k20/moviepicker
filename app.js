@@ -768,9 +768,7 @@ function renderRouletteReveal(candidates, winner) {
         <div class="roulette-overview-block"><p class="roulette-winner-overview ${rouletteState.overviewOpen ? "is-expanded" : ""}">${escapeHTML(overview)}</p>${overview.length > 150 ? `<button class="roulette-overview-toggle" type="button" data-toggle-roulette-overview aria-expanded="${rouletteState.overviewOpen}">${rouletteState.overviewOpen ? "Show less" : "Read more"}</button>` : ""}</div>
         ${confirmed ? `
           <div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>
-          ${renderDiscordTemplate(activeSession, winner)}
-          ${canManage ? `<button class="primary-button roulette-wide-action" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
-          <button class="secondary-button roulette-wide-action" type="button" data-view="list">Return to The List</button>` : canManage ? `
+          <div class="roulette-confirmed-actions">${canManage ? `<button class="primary-button" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}<button class="secondary-button" type="button" data-view="list">Return to The List</button></div>` : canManage ? `
           <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.participants.map(({ id, name }) => { const used = rouletteState.usedVetoes.includes(id); return `<button type="button" data-veto-member="${escapeHTML(id)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}" title="${escapeHTML(name)}${used ? " · veto used" : " · one veto available"}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "1"}</em></button>`; }).join("")}</div></section>
           <div class="roulette-decision-actions">
             <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm for tonight</button>
@@ -778,6 +776,7 @@ function renderRouletteReveal(candidates, winner) {
             ${rouletteState.rerollConfirmOpen ? `<div class="roulette-reroll-confirm" role="alert"><p>Re-spin without spending anyone's veto?</p><div><button class="secondary-button" type="button" data-cancel-reroll>Cancel</button><button class="primary-button" type="button" data-reroll-roulette>Yes, re-spin</button></div></div>` : ""}
           </div>` : `<div class="roulette-confirmed-note"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
+      ${confirmed ? `<div class="roulette-result-handoff">${renderDiscordTemplate(activeSession, winner)}</div>` : ""}
     </div>`;
 }
 

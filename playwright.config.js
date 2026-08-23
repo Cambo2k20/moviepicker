@@ -1,5 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
+const testPort = process.env.PLAYWRIGHT_PORT || "4173";
+const testBaseURL = `http://127.0.0.1:${testPort}`;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -7,12 +10,12 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: testBaseURL,
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173/moviepicker/?design-preview",
+    command: `npm run dev -- --host 127.0.0.1 --port ${testPort}`,
+    url: `${testBaseURL}/moviepicker/?design-preview`,
     reuseExistingServer: !process.env.CI,
   },
   projects: [

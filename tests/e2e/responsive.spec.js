@@ -202,6 +202,10 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator("#roulette-runtime")).toHaveValue("any");
   await expect(page.locator("#roulette-rewatches")).not.toBeChecked();
 
+  if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1790, height: 1007 });
+  }
+
   await page.locator("[data-spin-roulette]").click();
   await expect(page.locator("[data-spin-roulette]")).toHaveText("Spinning");
   const spinKeyframeOffsets = await page.locator("[data-roulette-wheel]").evaluate((element) => (
@@ -240,6 +244,60 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     };
   });
   expect(resultGeometry.resultFitsMainWidth).toBe(true);
+  if (testInfo.project.name === "desktop") {
+    const wideResultGeometry = await page.evaluate(() => {
+      const header = document.querySelector(".roulette-header > div");
+      const wheel = document.querySelector(".roulette-result-wheel .roulette-wheel-stage");
+      const callout = document.querySelector(".roulette-result-wheel .roulette-landed-callout.is-summary");
+      const poster = document.querySelector(".roulette-winning-poster");
+      const reroll = document.querySelector("[data-request-reroll]");
+      const rerollIcon = reroll?.querySelector(".material-symbols-outlined");
+      const wheelBox = wheel?.getBoundingClientRect();
+      const posterBox = poster?.getBoundingClientRect();
+      const headerStyle = header ? getComputedStyle(header) : null;
+      const wheelStyle = wheel ? getComputedStyle(wheel) : null;
+      const calloutStyle = callout ? getComputedStyle(callout) : null;
+      const posterStyle = poster ? getComputedStyle(poster) : null;
+      const rerollStyle = reroll ? getComputedStyle(reroll) : null;
+      const rerollIconStyle = rerollIcon ? getComputedStyle(rerollIcon) : null;
+      return {
+        headerMarginLeft: parseFloat(headerStyle?.marginLeft || "0"),
+        wheelWidth: wheelBox?.width || 0,
+        wheelHeight: wheelBox?.height || 0,
+        wheelMarginTop: parseFloat(wheelStyle?.marginTop || "0"),
+        wheelMarginRight: parseFloat(wheelStyle?.marginRight || "0"),
+        wheelMarginLeft: parseFloat(wheelStyle?.marginLeft || "0"),
+        posterMarginTop: parseFloat(posterStyle?.marginTop || "0"),
+        posterMarginLeft: parseFloat(posterStyle?.marginLeft || "0"),
+        calloutMarginRight: parseFloat(calloutStyle?.marginRight || "0"),
+        calloutMarginLeft: parseFloat(calloutStyle?.marginLeft || "0"),
+        wheelClearsPoster: Boolean(wheelBox && posterBox && wheelBox.right <= posterBox.left),
+        rerollDisplay: rerollStyle?.display || "",
+        rerollGap: parseFloat(rerollStyle?.gap || "0"),
+        rerollPaddingRight: parseFloat(rerollStyle?.paddingRight || "0"),
+        rerollPaddingLeft: parseFloat(rerollStyle?.paddingLeft || "0"),
+        rerollIconMarginLeft: parseFloat(rerollIconStyle?.marginLeft || "0"),
+        viewportOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    expect(wideResultGeometry.headerMarginLeft).toBe(-86);
+    expect(wideResultGeometry.wheelWidth).toBeCloseTo(437, 0);
+    expect(wideResultGeometry.wheelHeight).toBeCloseTo(437, 0);
+    expect(wideResultGeometry.wheelMarginTop).toBe(80);
+    expect(wideResultGeometry.wheelMarginRight).toBe(-100);
+    expect(wideResultGeometry.wheelMarginLeft).toBe(-90);
+    expect(wideResultGeometry.posterMarginTop).toBe(30);
+    expect(wideResultGeometry.posterMarginLeft).toBe(70);
+    expect(wideResultGeometry.calloutMarginRight).toBe(21);
+    expect(wideResultGeometry.calloutMarginLeft).toBe(21);
+    expect(wideResultGeometry.wheelClearsPoster).toBe(true);
+    expect(wideResultGeometry.rerollDisplay).toBe("flex");
+    expect(wideResultGeometry.rerollGap).toBe(8);
+    expect(wideResultGeometry.rerollPaddingRight).toBe(0);
+    expect(wideResultGeometry.rerollPaddingLeft).toBe(0);
+    expect(wideResultGeometry.rerollIconMarginLeft).toBe(0);
+    expect(wideResultGeometry.viewportOverflow).toBeLessThanOrEqual(1);
+  }
   if (resultGeometry.viewportWidth >= 1000 && resultGeometry.viewportWidth <= 1180) {
     expect(resultGeometry.layoutColumns).toBe(2);
     expect(resultGeometry.posterWidth).toBeLessThanOrEqual(216);
@@ -247,7 +305,49 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   }
   await page.locator("[data-confirm-roulette]").click();
   await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
+  await expect(page.locator(".roulette-result-copy .discord-copy-card")).toHaveCount(0);
+  await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toBeVisible();
 
-  const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(pageOverflow).toBeLessThanOrEqual(1);
+  if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1553, height: 938 });
+    const confirmedGeometry = await page.evaluate(() => {
+      const layout = document.querySelector(".roulette-result-layout")?.getBoundingClientRect();
+      const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
+      const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
+      const handoff = document.querySelector(".roulette-result-handoff")?.getBoundingClientRect();
+      const card = document.querySelector(".roulette-result-handoff .discord-copy-card");
+      return {
+        layoutHeight: layout?.height || Number.POSITIVE_INFINITY,
+        paddingTop: layout ? parseFloat(getComputedStyle(document.querySelector(".roulette-result-layout")).paddingTop) : Number.NaN,
+        stageWidth: stage?.width || 0,
+        handoffSpansLayout: Boolean(layout && handoff && Math.abs(handoff.left - layout.left) <= 1 && Math.abs(handoff.right - layout.right) <= 1),
+        handoffBelowResult: Boolean(stage && copy && handoff && handoff.top >= Math.max(stage.bottom, copy.bottom) - 1),
+        handoffColumns: card ? getComputedStyle(card).gridTemplateColumns.split(" ").length : 0,
+      };
+    });
+    expect(confirmedGeometry.paddingTop).toBe(0);
+    expect(confirmedGeometry.layoutHeight).toBeLessThanOrEqual(810);
+    expect(confirmedGeometry.stageWidth).toBeGreaterThanOrEqual(840);
+    expect(confirmedGeometry.stageWidth).toBeLessThanOrEqual(846);
+    expect(confirmedGeometry.handoffSpansLayout).toBe(true);
+    expect(confirmedGeometry.handoffBelowResult).toBe(true);
+    expect(confirmedGeometry.handoffColumns).toBe(2);
+  }
+
+  const overflowState = await page.evaluate(() => ({
+    pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    overflowingElements: [...document.querySelectorAll("body *")]
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          selector: element.id ? `#${element.id}` : `.${[...element.classList].join(".")}`,
+          left: Math.round(box.left),
+          right: Math.round(box.right),
+          width: Math.round(box.width),
+        };
+      })
+      .filter(({ left, right }) => left < -1 || right > window.innerWidth + 1)
+      .slice(0, 12),
+  }));
+  expect(overflowState.pageOverflow, JSON.stringify(overflowState.overflowingElements)).toBeLessThanOrEqual(1);
 });
