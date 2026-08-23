@@ -8,6 +8,7 @@ import {
   pickRouletteLandingAngle,
   pickWeightedRouletteCandidate,
   restoreRouletteState,
+  rouletteWaitingSince,
   serialiseRouletteState,
 } from "../roulette-core.js";
 
@@ -45,6 +46,20 @@ test("age weighting gives the oldest film four chances and the newest one", () =
   assert.equal(weights.get("unknown"), 1);
   assert.equal(pickWeightedRouletteCandidate(films, weights, () => 0), films[0]);
   assert.equal(pickWeightedRouletteCandidate(films, weights, () => 0.999), films[2]);
+});
+
+test("rewatch weighting restarts from the most recent watched date", () => {
+  const candidates = [
+    { id: "rewatched", createdAt: "2020-01-01T00:00:00Z", lastWatchedOn: "2026-08-20" },
+    { id: "waiting", createdAt: "2026-01-01T00:00:00Z", lastWatchedOn: null },
+    { id: "recent", createdAt: "2026-08-01T00:00:00Z", lastWatchedOn: null },
+  ];
+  const weights = calculateRouletteWeights(candidates, true);
+
+  assert.equal(rouletteWaitingSince(candidates[0]), "2026-08-20");
+  assert.equal(weights.get("waiting"), 4);
+  assert.equal(weights.get("recent"), 3);
+  assert.equal(weights.get("rewatched"), 1);
 });
 
 test("roulette landing points stay inside the winner slice and away from its label", () => {

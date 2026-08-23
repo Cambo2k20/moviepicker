@@ -245,33 +245,22 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   });
   expect(resultGeometry.resultFitsMainWidth).toBe(true);
   if (testInfo.project.name === "desktop") {
+    await page.setViewportSize({ width: 1900, height: 1040 });
     const wideResultGeometry = await page.evaluate(() => {
-      const header = document.querySelector(".roulette-header > div");
-      const wheel = document.querySelector(".roulette-result-wheel .roulette-wheel-stage");
-      const callout = document.querySelector(".roulette-result-wheel .roulette-landed-callout.is-summary");
-      const poster = document.querySelector(".roulette-winning-poster");
+      const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
+      const poster = document.querySelector(".roulette-winning-poster")?.getBoundingClientRect();
+      const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
       const reroll = document.querySelector("[data-request-reroll]");
       const rerollIcon = reroll?.querySelector(".material-symbols-outlined");
-      const wheelBox = wheel?.getBoundingClientRect();
-      const posterBox = poster?.getBoundingClientRect();
-      const headerStyle = header ? getComputedStyle(header) : null;
-      const wheelStyle = wheel ? getComputedStyle(wheel) : null;
-      const calloutStyle = callout ? getComputedStyle(callout) : null;
-      const posterStyle = poster ? getComputedStyle(poster) : null;
       const rerollStyle = reroll ? getComputedStyle(reroll) : null;
       const rerollIconStyle = rerollIcon ? getComputedStyle(rerollIcon) : null;
       return {
-        headerMarginLeft: parseFloat(headerStyle?.marginLeft || "0"),
-        wheelWidth: wheelBox?.width || 0,
-        wheelHeight: wheelBox?.height || 0,
-        wheelMarginTop: parseFloat(wheelStyle?.marginTop || "0"),
-        wheelMarginRight: parseFloat(wheelStyle?.marginRight || "0"),
-        wheelMarginLeft: parseFloat(wheelStyle?.marginLeft || "0"),
-        posterMarginTop: parseFloat(posterStyle?.marginTop || "0"),
-        posterMarginLeft: parseFloat(posterStyle?.marginLeft || "0"),
-        calloutMarginRight: parseFloat(calloutStyle?.marginRight || "0"),
-        calloutMarginLeft: parseFloat(calloutStyle?.marginLeft || "0"),
-        wheelClearsPoster: Boolean(wheelBox && posterBox && wheelBox.right <= posterBox.left),
+        // The decision is still open here, so the wheel belongs to the spin, not this screen.
+        wheelCount: document.querySelectorAll(".roulette-result-wheel").length,
+        calloutCount: document.querySelectorAll(".roulette-landed-callout").length,
+        // Hand-tuned offsets once pushed the poster out of its column and over the text.
+        posterWithinStage: Boolean(stage && poster && poster.left >= stage.left - 1 && poster.right <= stage.right + 1),
+        posterClearsCopy: Boolean(poster && copy && poster.right <= copy.left + 1),
         rerollDisplay: rerollStyle?.display || "",
         rerollGap: parseFloat(rerollStyle?.gap || "0"),
         rerollPaddingRight: parseFloat(rerollStyle?.paddingRight || "0"),
@@ -280,17 +269,10 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
         viewportOverflow: document.documentElement.scrollWidth - window.innerWidth,
       };
     });
-    expect(wideResultGeometry.headerMarginLeft).toBe(-86);
-    expect(wideResultGeometry.wheelWidth).toBeCloseTo(437, 0);
-    expect(wideResultGeometry.wheelHeight).toBeCloseTo(437, 0);
-    expect(wideResultGeometry.wheelMarginTop).toBe(80);
-    expect(wideResultGeometry.wheelMarginRight).toBe(-100);
-    expect(wideResultGeometry.wheelMarginLeft).toBe(-90);
-    expect(wideResultGeometry.posterMarginTop).toBe(30);
-    expect(wideResultGeometry.posterMarginLeft).toBe(70);
-    expect(wideResultGeometry.calloutMarginRight).toBe(21);
-    expect(wideResultGeometry.calloutMarginLeft).toBe(21);
-    expect(wideResultGeometry.wheelClearsPoster).toBe(true);
+    expect(wideResultGeometry.wheelCount).toBe(0);
+    expect(wideResultGeometry.calloutCount).toBe(0);
+    expect(wideResultGeometry.posterWithinStage).toBe(true);
+    expect(wideResultGeometry.posterClearsCopy).toBe(true);
     expect(wideResultGeometry.rerollDisplay).toBe("flex");
     expect(wideResultGeometry.rerollGap).toBe(8);
     expect(wideResultGeometry.rerollPaddingRight).toBe(0);
@@ -303,35 +285,127 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(resultGeometry.posterWidth).toBeLessThanOrEqual(216);
     expect(resultGeometry.stageHeight).toBeLessThanOrEqual(324);
   }
-  await page.locator("[data-confirm-roulette]").click();
+  // Confirming changes what the screen says, not where the film sits.
+  const boxes = () => page.evaluate(() => {
+    // Document-relative, so scrolling between the two reads is not mistaken for movement.
+    const rect = (selector) => {
+      const box = document.querySelector(selector)?.getBoundingClientRect();
+      return box ? { x: Math.round(box.x + window.scrollX), y: Math.round(box.y + window.scrollY), width: Math.round(box.width) } : null;
+    };
+    return { poster: rect(".roulette-winning-poster"), title: rect("#roulette-winner-title"), facts: rect(".roulette-winner-facts") };
+  });
+  // Measure once the reveal animation has settled, or its scale(0.96) reads as movement.
+  const posterSettled = () => page.waitForFunction(() => {
+    const poster = document.querySelector(".roulette-winning-poster");
+    return Boolean(poster) && poster.getAnimations().every((animation) => animation.playState === "finished");
+  });
+  await posterSettled();
+  const beforeConfirm = await boxes();
+  const winnerTitle = (await page.locator("#roulette-winner-title").textContent()).trim();
+
+  await page.getByRole("button", { name: "Confirm Movie and Create Session" }).click();
+
+  // Confirming creates an editable session, not a finished Journal entry.
+  await expect(page.locator(".session-summary")).toBeVisible();
+  await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toHaveCount(0);
+  await expect(page.locator(".session-summary-grid dt")).toHaveText(["Watch date", "Host", "Participants"]);
+  await expect(page.getByRole("button", { name: "Mark as watched" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start another round" })).toHaveCount(0);
+
+  await posterSettled();
+  const afterConfirm = await boxes();
+  const shiftMessage = `before=${JSON.stringify(beforeConfirm)} after=${JSON.stringify(afterConfirm)}`;
+  for (const part of ["poster", "title", "facts"]) {
+    expect(Math.abs(afterConfirm[part].x - beforeConfirm[part].x), `${part}.x ${shiftMessage}`).toBeLessThanOrEqual(4);
+    expect(Math.abs(afterConfirm[part].y - beforeConfirm[part].y), `${part}.y ${shiftMessage}`).toBeLessThanOrEqual(4);
+    expect(Math.abs(afterConfirm[part].width - beforeConfirm[part].width), `${part}.width ${shiftMessage}`).toBeLessThanOrEqual(4);
+  }
+
+  await expect(page.locator(".roulette-result-wheel")).toHaveCount(0);
+  await expect(page.locator(".roulette-landed-callout")).toHaveCount(0);
+  await expect(page.locator("#roulette-winner-title")).toBeFocused();
+
+  // The watch date, participants and (for an admin) host remain editable.
+  await page.locator("[data-edit-session-details]").click();
+  const dateField = page.locator("#session-details-form [name=watch_date]");
+  await expect(dateField).toBeVisible();
+  await expect(page.locator("#session-details-form [name=host_id]")).toHaveValue("preview-cameron");
+  await dateField.fill("2026-09-05");
+  await page.locator("#session-details-form [name=participant]").last().check();
+  await page.getByRole("button", { name: "Save session details" }).click();
+  // Formatted with the viewer's locale, so match the parts rather than an order.
+  await expect(page.locator(".session-summary-grid dd").first()).toHaveText(/September.*5|5.*September/);
+
+  // Marking watched is not immediate: the final details are reviewed first.
+  await page.getByRole("button", { name: "Mark as watched" }).click();
+  await expect(page.getByRole("heading", { name: "Review before marking watched" })).toBeVisible();
+  await expect(page.locator(".discord-copy-card")).toHaveCount(0);
+  await expect(page.locator("#session-details-form [name=watch_date]")).toHaveValue("2026-09-05");
+  await page.getByRole("button", { name: "Confirm and mark watched" }).click();
+  await expect(page.locator("#toast")).toContainText("is marked watched");
+
+  // Watching reveals the optional Journal on Sessions; Discord is still manual.
   await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
-  await expect(page.locator(".roulette-result-copy .discord-copy-card")).toHaveCount(0);
-  await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toBeVisible();
+  await expect(page.locator(".copy-only-badge")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(page.locator(".discord-copy-actions small")).toContainText("Nothing is posted automatically");
+  await expect(page.locator(".session-history-actions .status-pill").first()).toHaveText("Watched");
+
+  // A draft survives refresh without creating a Journal entry or assigning a number.
+  await page.locator("[name=comment]").fill("Still thinking about that ending.");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue Journal post" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue Journal post" }).click();
+  await expect(page.locator("[name=comment]")).toHaveValue("Still thinking about that ending.");
+  await expect(page.locator("[name=entry_number]")).toHaveValue("");
+
+  // Copy first saves the one real entry and receives its automatic number.
+  await page.getByRole("button", { name: "Copy for Discord" }).click();
+  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Edit Journal post" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit Journal post" }).click();
+  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
+
+  // Watched sessions remain editable, and the saved Journal stays linked.
+  await page.getByRole("button", { name: "Edit session" }).click();
+  await expect(page.getByRole("heading", { name: "Edit watched session" })).toBeVisible();
+  await page.locator("#session-details-form [name=watch_date]").fill("2026-09-06");
+  await page.getByRole("button", { name: "Save session details" }).click();
+  await expect(page.locator(".session-history-row").first()).toContainText(/6 Sept? 2026/);
+
+  // The viewing count is derived from watched sessions, so the list updates.
+  await page.locator('[data-view="list"]').click();
+  await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
+  await page.locator('[data-view="sessions"]').click();
+  await page.getByRole("button", { name: "Edit Journal post" }).click();
+
+  // The session fills these in, so they start folded away.
+  const entryDetails = page.locator(".discord-entry-details");
+  await expect(entryDetails).not.toHaveAttribute("open", /.*/);
+  await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeHidden();
+  await page.locator("[data-toggle-journal-details]").click();
+  await expect(entryDetails).toHaveAttribute("open", /.*/);
+  await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeVisible();
 
   if (testInfo.project.name === "desktop") {
     await page.setViewportSize({ width: 1553, height: 938 });
-    const confirmedGeometry = await page.evaluate(() => {
-      const layout = document.querySelector(".roulette-result-layout")?.getBoundingClientRect();
-      const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
-      const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
-      const handoff = document.querySelector(".roulette-result-handoff")?.getBoundingClientRect();
-      const card = document.querySelector(".roulette-result-handoff .discord-copy-card");
+    const journalGeometry = await page.evaluate(() => {
+      const preview = document.querySelector("#discord-template-preview");
+      const buttons = [".discord-copy-actions .primary-button", "[data-open-journal]"];
       return {
-        layoutHeight: layout?.height || Number.POSITIVE_INFINITY,
-        paddingTop: layout ? parseFloat(getComputedStyle(document.querySelector(".roulette-result-layout")).paddingTop) : Number.NaN,
-        stageWidth: stage?.width || 0,
-        handoffSpansLayout: Boolean(layout && handoff && Math.abs(handoff.left - layout.left) <= 1 && Math.abs(handoff.right - layout.right) <= 1),
-        handoffBelowResult: Boolean(stage && copy && handoff && handoff.top >= Math.max(stage.bottom, copy.bottom) - 1),
-        handoffColumns: card ? getComputedStyle(card).gridTemplateColumns.split(" ").length : 0,
+        // The post you are about to paste must be fully visible, not scrolled.
+        previewClippedVertically: Boolean(preview && preview.scrollHeight > preview.clientHeight + 1),
+        previewClippedHorizontally: Boolean(preview && preview.scrollWidth > preview.clientWidth + 1),
+        // A button whose label wraps is a button that was given too little room.
+        tallestButton: Math.max(...buttons.map((selector) => document.querySelector(selector)?.getBoundingClientRect().height || 0)),
       };
     });
-    expect(confirmedGeometry.paddingTop).toBe(0);
-    expect(confirmedGeometry.layoutHeight).toBeLessThanOrEqual(810);
-    expect(confirmedGeometry.stageWidth).toBeGreaterThanOrEqual(840);
-    expect(confirmedGeometry.stageWidth).toBeLessThanOrEqual(846);
-    expect(confirmedGeometry.handoffSpansLayout).toBe(true);
-    expect(confirmedGeometry.handoffBelowResult).toBe(true);
-    expect(confirmedGeometry.handoffColumns).toBe(2);
+    expect(journalGeometry.previewClippedVertically).toBe(false);
+    expect(journalGeometry.previewClippedHorizontally).toBe(false);
+    expect(journalGeometry.tallestButton).toBeLessThanOrEqual(60);
   }
 
   const overflowState = await page.evaluate(() => ({
@@ -350,4 +424,43 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
       .slice(0, 12),
   }));
   expect(overflowState.pageOverflow, JSON.stringify(overflowState.overflowingElements)).toBeLessThanOrEqual(1);
+});
+
+test("a participant cannot edit another host's sessions but can copy a saved Journal", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Permission surfaces are covered once.");
+  await page.evaluate(() => {
+    const alien = { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "A deadly lifeform.", tmdbId: 348 };
+    const homeAlone = { id: "preview-home-alone", title: "Home Alone", year: 1990, posterUrl: "https://image.tmdb.org/t/p/w500/onTSipZ8R3bliBdKfPtsDuHTdlL.jpg", runtime: 103, genres: ["Comedy", "Family"], overview: "Home alone.", tmdbId: 771 };
+    localStorage.setItem("cine-cord-design-preview-state", JSON.stringify({
+      activeSession: {
+        id: "permission-current", groupId: "preview-group", createdById: "preview-cameron", hostId: "preview-cameron", hostName: "Cameron", mode: "Queue Roulette", status: "CONFIRMED", candidateCount: 8,
+        participantIds: ["preview-cameron", "preview-dean"], participants: [{ id: "preview-cameron", name: "Cameron" }, { id: "preview-dean", name: "Dean" }], members: ["Cameron", "Dean"],
+        selectedFilmId: alien.id, selectedFilm: alien, gameState: { phase: "confirmed", winnerId: alien.id, filters: { runtime: "any", genre: "all", includeWatched: false, weightedByAge: true } }, startedAt: "2026-08-23T18:00:00.000Z", confirmedAt: "2026-08-23T18:05:00.000Z", sessionDate: "2026-08-23", watchedAt: null, journalDraft: null, journalEntry: null,
+      },
+      sessionHistory: [{
+        id: "permission-watched", groupId: "preview-group", createdById: "preview-cameron", hostId: "preview-cameron", hostName: "Cameron", mode: "Queue Roulette", status: "WATCHED", candidateCount: 8,
+        participantIds: ["preview-cameron", "preview-dean"], participants: [{ id: "preview-cameron", name: "Cameron" }, { id: "preview-dean", name: "Dean" }], members: ["Cameron", "Dean"],
+        selectedFilmId: homeAlone.id, selectedFilm: homeAlone, gameState: {}, startedAt: "2026-08-20T18:00:00.000Z", confirmedAt: "2026-08-20T18:05:00.000Z", sessionDate: "2026-08-20", watchedAt: "2026-08-20T00:00:00.000Z",
+        journalDraft: { sessionId: "permission-watched", entryNumber: "1317", title: "Home Alone", year: "1990", viewerIds: ["preview-cameron", "preview-dean"], viewers: "Cameron, Dean", status: "Finished", comment: "Christmas classic." },
+        journalEntry: { id: "permission-journal", entryNumber: 1317, title: "Home Alone", year: 1990, watchedAt: "2026-08-20", status: "FINISHED", comment: "Christmas classic.", viewerIds: ["preview-cameron", "preview-dean"] },
+      }],
+      rouletteState: { phase: "confirmed", winnerId: alien.id, filters: { runtime: "any", genre: "all", includeWatched: false, weightedByAge: true } },
+      discordDraft: null,
+      previewNextEntryNumber: 1318,
+      watchState: [{ id: homeAlone.id, watched: true, watchCount: 1, lastWatchedOn: "2026-08-20" }],
+    }));
+  });
+
+  await page.goto("/moviepicker/?design-preview=observer#sessions");
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByText("Hosted by Cameron").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark as watched" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel session" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit session" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Write Journal post" })).toHaveCount(0);
+  await page.getByRole("button", { name: "View Journal post" }).click();
+  await expect(page.getByRole("heading", { name: "Journal post" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(page.locator("[name=entry_number]")).toHaveAttribute("readonly", "");
 });

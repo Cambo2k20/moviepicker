@@ -106,8 +106,17 @@ export function filterRouletteCandidates(movieList, state) {
   });
 }
 
+export function rouletteWaitingSince(item = {}) {
+  return item.lastWatchedOn || item.createdAt || null;
+}
+
 export function calculateRouletteWeights(candidates, weightedByAge = true) {
-  const byAge = [...candidates].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const byAge = [...candidates].sort((a, b) => {
+    const aTime = new Date(rouletteWaitingSince(a)).getTime();
+    const bTime = new Date(rouletteWaitingSince(b)).getTime();
+    return (Number.isFinite(aTime) ? aTime : Number.POSITIVE_INFINITY)
+      - (Number.isFinite(bTime) ? bTime : Number.POSITIVE_INFINITY);
+  });
   const denominator = Math.max(1, byAge.length - 1);
   return new Map(byAge.map((item, index) => {
     const weight = weightedByAge && byAge.length > 1
