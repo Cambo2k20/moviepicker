@@ -4705,7 +4705,15 @@ legend,
 
 .discord-template-form label small {
   color: var(--dim);
-  font-size: 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.discord-template-form input[readonly],
+.discord-template-form textarea[readonly],
+.discord-template-form select:disabled {
+  color: var(--muted);
+  cursor: default;
 }
 
 .discord-template-form input,
@@ -4959,6 +4967,18 @@ legend,
   background: var(--border-soft);
 }
 
+.session-history-item {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  background: var(--border-soft);
+}
+
+.session-history-item > .session-summary {
+  border: 0;
+  box-shadow: none;
+}
+
 .session-history-row {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr) auto;
@@ -5114,6 +5134,14 @@ legend,
   text-wrap: balance;
 }
 
+.session-summary-head p {
+  max-width: 68ch;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .session-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -5180,7 +5208,8 @@ legend,
   text-transform: uppercase;
 }
 
-.session-details-form input[type="date"] {
+.session-details-form input[type="date"],
+.session-details-form select {
   width: 100%;
   min-height: 48px;
   margin-top: 8px;
@@ -5191,6 +5220,13 @@ legend,
   color: var(--text);
   font: inherit;
   font-size: 14px;
+}
+
+.session-details-form input[type="date"]:focus-visible,
+.session-details-form select:focus-visible {
+  border-color: var(--purple-light);
+  outline: 2px solid rgba(109, 90, 230, 0.3);
+  outline-offset: 2px;
 }
 
 .session-details-form small {
@@ -5254,6 +5290,7 @@ legend,
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  justify-content: flex-end;
 }
 
 .session-journal-open {
@@ -5268,5 +5305,10 @@ legend,
   .session-summary-actions .primary-button {
     width: 100%;
     justify-content: center;
+  }
+
+  .session-history-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 }

@@ -308,8 +308,9 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   // Confirming creates an editable session, not a finished Journal entry.
   await expect(page.locator(".session-summary")).toBeVisible();
   await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toHaveCount(0);
-  await expect(page.locator(".session-summary-grid dt")).toHaveText(["Session date", "Host", "Participants"]);
+  await expect(page.locator(".session-summary-grid dt")).toHaveText(["Watch date", "Host", "Participants"]);
   await expect(page.getByRole("button", { name: "Mark as watched" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start another round" })).toHaveCount(0);
 
   await posterSettled();
   const afterConfirm = await boxes();
@@ -324,29 +325,62 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator(".roulette-landed-callout")).toHaveCount(0);
   await expect(page.locator("#roulette-winner-title")).toBeFocused();
 
-  // The session date stays editable, in case the film is watched another night.
+  // The watch date, participants and (for an admin) host remain editable.
   await page.locator("[data-edit-session-details]").click();
-  const dateField = page.locator("#session-details-form [name=session_date]");
+  const dateField = page.locator("#session-details-form [name=watch_date]");
   await expect(dateField).toBeVisible();
+  await expect(page.locator("#session-details-form [name=host_id]")).toHaveValue("preview-cameron");
   await dateField.fill("2026-09-05");
   await page.locator("#session-details-form [name=participant]").last().check();
   await page.getByRole("button", { name: "Save session details" }).click();
   // Formatted with the viewer's locale, so match the parts rather than an order.
   await expect(page.locator(".session-summary-grid dd").first()).toHaveText(/September.*5|5.*September/);
 
-  await page.locator("[data-mark-session-watched]").click();
+  // Marking watched is not immediate: the final details are reviewed first.
+  await page.getByRole("button", { name: "Mark as watched" }).click();
+  await expect(page.getByRole("heading", { name: "Review before marking watched" })).toBeVisible();
+  await expect(page.locator(".discord-copy-card")).toHaveCount(0);
+  await expect(page.locator("#session-details-form [name=watch_date]")).toHaveValue("2026-09-05");
+  await page.getByRole("button", { name: "Confirm and mark watched" }).click();
+  await expect(page.locator("#toast")).toContainText("is marked watched");
 
-  // Watching reveals the Journal post, on the Sessions screen, still copy-only.
+  // Watching reveals the optional Journal on Sessions; Discord is still manual.
   await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
   await expect(page.locator(".copy-only-badge")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
   await expect(page.locator(".discord-copy-actions small")).toContainText("Nothing is posted automatically");
   await expect(page.locator(".session-history-actions .status-pill").first()).toHaveText("Watched");
 
+  // A draft survives refresh without creating a Journal entry or assigning a number.
+  await page.locator("[name=comment]").fill("Still thinking about that ending.");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue Journal post" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue Journal post" }).click();
+  await expect(page.locator("[name=comment]")).toHaveValue("Still thinking about that ending.");
+  await expect(page.locator("[name=entry_number]")).toHaveValue("");
+
+  // Copy first saves the one real entry and receives its automatic number.
+  await page.getByRole("button", { name: "Copy for Discord" }).click();
+  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Edit Journal post" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit Journal post" }).click();
+  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
+
+  // Watched sessions remain editable, and the saved Journal stays linked.
+  await page.getByRole("button", { name: "Edit session" }).click();
+  await expect(page.getByRole("heading", { name: "Edit watched session" })).toBeVisible();
+  await page.locator("#session-details-form [name=watch_date]").fill("2026-09-06");
+  await page.getByRole("button", { name: "Save session details" }).click();
+  await expect(page.locator(".session-history-row").first()).toContainText(/6 Sept? 2026/);
+
   // The viewing count is derived from watched sessions, so the list updates.
   await page.locator('[data-view="list"]').click();
   await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
   await page.locator('[data-view="sessions"]').click();
+  await page.getByRole("button", { name: "Edit Journal post" }).click();
 
   // The session fills these in, so they start folded away.
   const entryDetails = page.locator(".discord-entry-details");
@@ -390,4 +424,43 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
       .slice(0, 12),
   }));
   expect(overflowState.pageOverflow, JSON.stringify(overflowState.overflowingElements)).toBeLessThanOrEqual(1);
+});
+
+test("a participant cannot edit another host's sessions but can copy a saved Journal", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Permission surfaces are covered once.");
+  await page.evaluate(() => {
+    const alien = { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "A deadly lifeform.", tmdbId: 348 };
+    const homeAlone = { id: "preview-home-alone", title: "Home Alone", year: 1990, posterUrl: "https://image.tmdb.org/t/p/w500/onTSipZ8R3bliBdKfPtsDuHTdlL.jpg", runtime: 103, genres: ["Comedy", "Family"], overview: "Home alone.", tmdbId: 771 };
+    localStorage.setItem("cine-cord-design-preview-state", JSON.stringify({
+      activeSession: {
+        id: "permission-current", groupId: "preview-group", createdById: "preview-cameron", hostId: "preview-cameron", hostName: "Cameron", mode: "Queue Roulette", status: "CONFIRMED", candidateCount: 8,
+        participantIds: ["preview-cameron", "preview-dean"], participants: [{ id: "preview-cameron", name: "Cameron" }, { id: "preview-dean", name: "Dean" }], members: ["Cameron", "Dean"],
+        selectedFilmId: alien.id, selectedFilm: alien, gameState: { phase: "confirmed", winnerId: alien.id, filters: { runtime: "any", genre: "all", includeWatched: false, weightedByAge: true } }, startedAt: "2026-08-23T18:00:00.000Z", confirmedAt: "2026-08-23T18:05:00.000Z", sessionDate: "2026-08-23", watchedAt: null, journalDraft: null, journalEntry: null,
+      },
+      sessionHistory: [{
+        id: "permission-watched", groupId: "preview-group", createdById: "preview-cameron", hostId: "preview-cameron", hostName: "Cameron", mode: "Queue Roulette", status: "WATCHED", candidateCount: 8,
+        participantIds: ["preview-cameron", "preview-dean"], participants: [{ id: "preview-cameron", name: "Cameron" }, { id: "preview-dean", name: "Dean" }], members: ["Cameron", "Dean"],
+        selectedFilmId: homeAlone.id, selectedFilm: homeAlone, gameState: {}, startedAt: "2026-08-20T18:00:00.000Z", confirmedAt: "2026-08-20T18:05:00.000Z", sessionDate: "2026-08-20", watchedAt: "2026-08-20T00:00:00.000Z",
+        journalDraft: { sessionId: "permission-watched", entryNumber: "1317", title: "Home Alone", year: "1990", viewerIds: ["preview-cameron", "preview-dean"], viewers: "Cameron, Dean", status: "Finished", comment: "Christmas classic." },
+        journalEntry: { id: "permission-journal", entryNumber: 1317, title: "Home Alone", year: 1990, watchedAt: "2026-08-20", status: "FINISHED", comment: "Christmas classic.", viewerIds: ["preview-cameron", "preview-dean"] },
+      }],
+      rouletteState: { phase: "confirmed", winnerId: alien.id, filters: { runtime: "any", genre: "all", includeWatched: false, weightedByAge: true } },
+      discordDraft: null,
+      previewNextEntryNumber: 1318,
+      watchState: [{ id: homeAlone.id, watched: true, watchCount: 1, lastWatchedOn: "2026-08-20" }],
+    }));
+  });
+
+  await page.goto("/moviepicker/?design-preview=observer#sessions");
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByText("Hosted by Cameron").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark as watched" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel session" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit session" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Write Journal post" })).toHaveCount(0);
+  await page.getByRole("button", { name: "View Journal post" }).click();
+  await expect(page.getByRole("heading", { name: "Journal post" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(page.locator("[name=entry_number]")).toHaveAttribute("readonly", "");
 });

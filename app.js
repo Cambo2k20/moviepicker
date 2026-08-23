@@ -6,6 +6,7 @@ import {
   pickRouletteLandingAngle,
   pickWeightedRouletteCandidate,
   restoreRouletteState,
+  rouletteWaitingSince,
   serialiseRouletteState as serialiseRouletteStateValue,
 } from "./roulette-core.js";
 import {
@@ -80,9 +81,10 @@ let activeSession = null;
 let sessionHistory = [];
 let discordDraft = null;
 let journalDetailsOpen = false;
-let sessionDetailsEditing = false;
+let sessionDetailsEditing = null;
 let journalSessionId = null;
 let journalDraftTimer = 0;
+let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
 let listSort = "votes";
@@ -120,7 +122,8 @@ function persistDesignPreviewWorkspace() {
       rouletteState: rouletteState ? serialiseRouletteStateValue(rouletteState) : null,
       journalSessionId,
       discordDraft,
-      watchState: movieList.map(({ id, watched, watchCount }) => ({ id, watched, watchCount })),
+      previewNextEntryNumber,
+      watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn }) => ({ id, watched, watchCount, lastWatchedOn })),
     }));
   } catch { /* a full or blocked store must not break the preview */ }
 }
@@ -132,12 +135,17 @@ function restoreDesignPreviewWorkspace() {
   if (!saved) return;
   for (const entry of saved.watchState || []) {
     const item = movieList.find((film) => film.id === entry.id);
-    if (item) { item.watched = Boolean(entry.watched); item.watchCount = Number(entry.watchCount) || 0; }
+    if (item) {
+      item.watched = Boolean(entry.watched);
+      item.watchCount = Number(entry.watchCount) || 0;
+      item.lastWatchedOn = entry.lastWatchedOn || null;
+    }
   }
   activeSession = saved.activeSession || null;
   sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
   journalSessionId = null;
   discordDraft = saved.discordDraft || null;
+  previewNextEntryNumber = Math.max(1317, Number(saved.previewNextEntryNumber) || 1317);
   const draftSession = discordDraft && sessionHistory.find((session) => session.id === discordDraft.sessionId);
   if (draftSession) draftSession.journalDraft = discordDraft;
   if (activeSession?.mode === "Queue Roulette") {
@@ -153,11 +161,16 @@ function clearDesignPreviewWorkspace() {
 }
 
 function loadDesignPreviewWorkspace() {
-  authUser = { id: "preview-cameron", email: "preview@cine-cord.local" };
-  // ?design-preview=member renders the app as a plain member, so host-only and
-  // admin-only controls can be checked without a second account.
-  const previewRole = new URLSearchParams(window.location.search).get("design-preview") === "member" ? "member" : "admin";
-  currentProfile = { id: "preview-cameron", displayName: "Cameron", role: previewRole };
+  const previewVariant = new URLSearchParams(window.location.search).get("design-preview");
+  const previewObserver = previewVariant === "observer";
+  const previewIdentity = previewObserver
+    ? { id: "preview-dean", displayName: "Dean", email: "dean@cine-cord.local" }
+    : { id: "preview-cameron", displayName: "Cameron", email: "preview@cine-cord.local" };
+  authUser = { id: previewIdentity.id, email: previewIdentity.email };
+  // member is a non-admin host; observer is a non-admin participant. The same
+  // saved preview session can therefore exercise both permission surfaces.
+  const previewRole = ["member", "observer"].includes(previewVariant) ? "member" : "admin";
+  currentProfile = { id: previewIdentity.id, displayName: previewIdentity.displayName, role: previewRole };
   activeGroup = { id: "preview-group", name: "The Discordians", slug: "discordians" };
   members = [
     { id: "preview-cameron", name: "Cameron", role: "admin", avatar: knownAvatars.cameron },
@@ -203,7 +216,7 @@ function canManageFilm(item) {
 }
 
 function canManageSession(session = activeSession) {
-  return Boolean(session && (isCurrentAdmin() || session.createdById === authUser?.id));
+  return Boolean(session && (isCurrentAdmin() || session.hostId === authUser?.id));
 }
 
 function formatRequestDate(value) {
@@ -264,33 +277,49 @@ function selectedFilmForSession(session) {
 }
 
 function createDiscordDraft(session, film) {
+  const entry = session?.journalEntry;
   return {
     sessionId: session.id,
-    entryNumber: "",
-    title: film?.title || "",
-    year: film?.year || "",
+    entryNumber: entry?.entryNumber ? String(entry.entryNumber) : "",
+    title: entry?.title || film?.title || "",
+    year: entry?.year || film?.year || "",
+    viewerIds: (session.participantIds || []).filter(Boolean),
     viewers: session.members.join(", "),
-    status: "Finished",
-    comment: "",
+    status: entry?.status === "DNF" ? "DNF" : "Finished",
+    comment: entry?.comment || "",
   };
 }
 
+function sessionForId(sessionId) {
+  if (!sessionId) return null;
+  if (activeSession?.id === sessionId) return activeSession;
+  return sessionHistory.find((session) => session.id === sessionId) || null;
+}
+
 function journalSession() {
-  if (journalSessionId) {
-    const fromHistory = sessionHistory.find((session) => session.id === journalSessionId);
-    if (fromHistory) return fromHistory;
-  }
-  return activeSession;
+  return sessionForId(journalSessionId);
+}
+
+function sessionEditorMode(session) {
+  return sessionDetailsEditing && session && sessionDetailsEditing.sessionId === session.id
+    ? sessionDetailsEditing.mode
+    : null;
 }
 
 function ensureDiscordDraft(session, film) {
-  if (!discordDraft || discordDraft.sessionId !== session.id) discordDraft = createDiscordDraft(session, film);
+  if (!discordDraft || discordDraft.sessionId !== session.id) {
+    discordDraft = session.journalDraft
+      ? { ...session.journalDraft, sessionId: session.id }
+      : createDiscordDraft(session, film);
+  }
+  discordDraft.viewerIds = (session.participantIds || []).filter(Boolean);
+  discordDraft.viewers = session.members.join(", ");
   return discordDraft;
 }
 
 function buildDiscordTemplate(draft) {
   const lines = [
-    `- Entry #${String(draft.entryNumber || "").trim()}`,
+    `- Entry #${String(draft.entryNumber || "assigned when saved").trim()}`,
     `- ${String(draft.title || "").trim()}`,
     `- ${String(draft.year || "").trim()}`,
     `- Viewers: ${String(draft.viewers || "").trim()}`,
@@ -311,23 +340,29 @@ function journalDetailsNeedAttention(draft) {
     || year > 2200;
 }
 
-function renderSessionSummary(session, { editing }) {
-  const canManage = canManageSession();
+function renderSessionSummary(session, { editorMode = null } = {}) {
+  const canManage = canManageSession(session);
   const date = session.sessionDate || isoDateOnly(session.startedAt);
   const participants = session.participants || [];
-  if (editing && canManage) {
+  if (editorMode && canManage) {
+    const markingWatched = editorMode === "watch";
+    const hostControl = isCurrentAdmin()
+      ? `<label class="session-host-field"><span>Host</span><select name="host_id" required>${members.map((member) => `<option value="${escapeHTML(member.id)}" ${member.id === session.hostId ? "selected" : ""}>${escapeHTML(member.name)}</option>`).join("")}</select><small>Only administrators can transfer the host.</small></label>`
+      : `<div class="session-host-field"><span class="session-field-label">Host</span><p>${escapeHTML(session.hostName)}</p><input type="hidden" name="host_id" value="${escapeHTML(session.hostId)}" /><small>Ask an administrator to transfer the host.</small></div>`;
     return `
       <section class="session-summary is-editing" aria-labelledby="session-summary-title">
-        <div class="session-summary-head"><div><span class="eyebrow">Session details</span><h3 id="session-summary-title">Edit this session</h3></div></div>
+        <div class="session-summary-head"><div><span class="eyebrow">${markingWatched ? "Final watch details" : "Session details"}</span><h3 id="session-summary-title">${markingWatched ? "Review before marking watched" : session.status === "WATCHED" ? "Edit watched session" : "Edit this session"}</h3>${markingWatched ? "<p>Confirm the actual date, host and everyone who watched. This is what the viewing history and Journal will use.</p>" : ""}</div></div>
         <form id="session-details-form" class="session-details-form">
-          <label class="session-date-field"><span>Session date</span><input name="session_date" type="date" required value="${escapeHTML(date)}" /><small>Change this if you watch it another night.</small></label>
-          <div class="session-host-field"><span class="session-field-label">Host</span><p>${escapeHTML(session.hostName)}</p><small>The host is whoever started the session.</small></div>
+          <input type="hidden" name="session_id" value="${escapeHTML(session.id)}" />
+          <input type="hidden" name="intent" value="${markingWatched ? "watch" : "save"}" />
+          <label class="session-date-field"><span>Watch date</span><input name="watch_date" type="date" required value="${escapeHTML(date)}" /><small>${session.status === "WATCHED" ? "This is the date shown in watch history and the Journal." : "Today is filled in automatically; change it if needed."}</small></label>
+          ${hostControl}
           <fieldset class="session-participants-field">
             <legend class="session-field-label">Participants</legend>
             <div>${members.map((member) => `<label class="session-participant-toggle"><input type="checkbox" name="participant" value="${escapeHTML(member.id)}" ${participants.some((participant) => participant.id === member.id) ? "checked" : ""} /><img src="${escapeHTML(member.avatar)}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("")}</div>
           </fieldset>
           <div class="session-summary-actions">
-            <button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">save</span>Save session details</button>
+            <button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">${markingWatched ? "check_circle" : "save"}</span>${markingWatched ? "Confirm and mark watched" : "Save session details"}</button>
             <button class="secondary-button" type="button" data-cancel-session-edit>Cancel</button>
           </div>
         </form>
@@ -336,34 +371,37 @@ function renderSessionSummary(session, { editing }) {
   return `
     <section class="session-summary" aria-labelledby="session-summary-title">
       <div class="session-summary-head">
-        <div><span class="eyebrow">Session details</span><h3 id="session-summary-title">${escapeHTML(session.selectedFilm?.title || "Tonight's film")} is confirmed ${escapeHTML(sessionDateLabel(date))}.</h3></div>
-        ${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
+        <div><span class="eyebrow">${session.status === "WATCHED" ? "Watched session" : "Session details"}</span><h3 id="session-summary-title">${escapeHTML(session.selectedFilm?.title || "Tonight's film")} ${session.status === "WATCHED" ? `was watched ${escapeHTML(sessionDateLabel(date))}.` : `is confirmed ${escapeHTML(sessionDateLabel(date))}.`}</h3></div>
+        ${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
       </div>
       <dl class="session-summary-grid">
-        <div><dt>Session date</dt><dd>${escapeHTML(new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</dd></div>
+        <div><dt>Watch date</dt><dd>${escapeHTML(new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</dd></div>
         <div><dt>Host</dt><dd>${escapeHTML(session.hostName)}</dd></div>
         <div><dt>Participants</dt><dd>${participants.length ? escapeHTML(participants.map(({ name }) => name).join(", ")) : "No one added yet"}</dd></div>
       </dl>
-      ${canManage ? `<div class="session-summary-actions"><button class="primary-button" type="button" data-mark-session-watched><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button><small>Do this after the film. The Journal post opens once you do, and can be finished later from Sessions.</small></div>` : `<p class="session-summary-note">${escapeHTML(session.hostName)} can mark this session watched once you have all seen it.</p>`}
+      ${session.status === "CONFIRMED" ? (canManage ? `<div class="session-summary-actions"><button class="primary-button" type="button" data-review-session-watched="${escapeHTML(session.id)}"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button><small>You will review the final date, host and participants before anything is completed.</small></div>` : `<p class="session-summary-note">${escapeHTML(session.hostName)} can mark this session watched once you have all seen it.</p>`) : ""}
     </section>`;
 }
 
 function renderDiscordTemplate(session, film) {
   const draft = ensureDiscordDraft(session, film);
+  const canEdit = canManageSession(session);
+  const hasSavedEntry = Boolean(session.journalEntry);
+  const readOnly = canEdit ? "" : "readonly";
   // The drawer opens on request, and on its own when a session-filled value is
   // missing, so "collapsed" never hides a problem.
   const detailsOpen = journalDetailsOpen || journalDetailsNeedAttention(draft);
   return `
     <section class="discord-copy-card" aria-labelledby="discord-copy-title">
       <div class="discord-copy-heading">
-        <div><span class="eyebrow">Optional Discord handoff</span><h3 id="discord-copy-title">Prepare the Journal post</h3><p>Check the post below, then copy it into Discord yourself.</p></div>
+        <div><span class="eyebrow">${hasSavedEntry ? `Journal entry #${escapeHTML(draft.entryNumber)}` : "Optional Discord handoff"}</span><h3 id="discord-copy-title">${canEdit ? "Prepare the Journal post" : "Journal post"}</h3><p>${canEdit ? "Save the entry, then copy it into Discord yourself." : "This saved entry can be copied into Discord. Only the session host or an administrator can change it."}</p></div>
         </div>
       <form id="discord-template-form" class="discord-template-form">
         <div class="discord-post-row">
           <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
           <div class="discord-author-fields">
-            <label class="discord-entry-field"><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" required value="${escapeHTML(draft.entryNumber)}" placeholder="307" /></label>
-            <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…">${escapeHTML(draft.comment)}</textarea></label>
+            <label class="discord-entry-field"><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" value="${escapeHTML(draft.entryNumber)}" placeholder="Assigned when saved" ${readOnly} /><small>Leave blank for the next number. Change it only to correct an entry.</small></label>
+            <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…" ${readOnly}>${escapeHTML(draft.comment)}</textarea></label>
           </div>
         </div>
         <details class="discord-entry-details" ${detailsOpen ? "open" : ""}>
@@ -373,13 +411,13 @@ function renderDiscordTemplate(session, film) {
             <span class="discord-summary-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
           </summary>
           <div class="discord-entry-fields">
-            <label class="discord-title-field"><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" /></label>
-            <label class="discord-year-field"><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" /></label>
-            <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" /></label>
-            <label class="discord-status-field"><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
+            <label class="discord-title-field"><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" ${readOnly} /></label>
+            <label class="discord-year-field"><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" ${readOnly} /></label>
+            <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" readonly /><small>Edit the watched session to correct this list.</small></label>
+            <label class="discord-status-field"><span>Status</span><select name="status" ${canEdit ? "" : "disabled"}><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
           </div>
         </details>
-        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button><small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
+        <div class="discord-copy-actions"><button class="primary-button" type="${canEdit ? "submit" : "button"}" ${canEdit ? "" : "data-copy-saved-journal"}><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>${canEdit ? `<button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button>` : ""}<small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
       </form>
     </section>`;
 }
@@ -394,7 +432,8 @@ function updateDiscordDraftPreview(form) {
     entryNumber: String(values.get("entry_number") || ""),
     title: String(values.get("title") || ""),
     year: String(values.get("year") || ""),
-    viewers: String(values.get("viewers") || ""),
+    viewerIds: (session.participantIds || []).filter(Boolean),
+    viewers: session.members.join(", "),
     status: String(values.get("status")) === "DNF" ? "DNF" : "Finished",
     comment: String(values.get("comment") || ""),
   };
@@ -413,9 +452,15 @@ function scheduleJournalDraftSave(session) {
 }
 
 async function saveJournalDraft(session = journalSession()) {
-  if (designPreviewMode || !session || !discordDraft) return;
+  if (!session || !discordDraft) return;
+  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can save this draft.");
   const snapshot = { ...discordDraft };
-  const { error } = await supabase
+  if (designPreviewMode) {
+    session.journalDraft = snapshot;
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { data, error } = await supabase
     .from("movie_sessions")
     .update({ journal_draft: snapshot })
     .eq("id", session.id)
@@ -423,7 +468,81 @@ async function saveJournalDraft(session = journalSession()) {
     .select("id")
     .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("No session row was updated. Refresh before trying again.");
   session.journalDraft = snapshot;
+}
+
+async function saveJournalEntry(session, draft) {
+  if (!session || session.status !== "WATCHED") throw new Error("The Journal is available after the film is marked watched.");
+  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can save this Journal entry.");
+  const requestedNumber = String(draft.entryNumber || "").trim();
+  let saved;
+  if (designPreviewMode) {
+    const entryNumber = requestedNumber ? Number(requestedNumber) : (session.journalEntry?.entryNumber || previewNextEntryNumber);
+    if (!Number.isInteger(entryNumber) || entryNumber < 1) throw new Error("Entry number must be a positive whole number.");
+    if (sessionHistory.some((candidate) => candidate.id !== session.id && Number(candidate.journalEntry?.entryNumber) === entryNumber)) {
+      throw new Error(`Journal entry #${entryNumber} already exists.`);
+    }
+    previewNextEntryNumber = Math.max(previewNextEntryNumber, entryNumber + 1);
+    saved = {
+      id: session.journalEntry?.id || `preview-journal-${session.id}`,
+      entryNumber,
+      title: draft.title,
+      year: Number(draft.year),
+      watchedAt: session.sessionDate,
+      status: draft.status === "DNF" ? "DNF" : "FINISHED",
+      comment: draft.comment,
+      viewerIds: [...session.participantIds],
+    };
+  } else {
+    const { data, error } = await supabase.rpc("save_movie_session_journal", {
+      p_session_id: session.id,
+      p_title: String(draft.title).trim(),
+      p_release_year: Number(draft.year),
+      p_status: draft.status === "DNF" ? "DNF" : "FINISHED",
+      p_comment: String(draft.comment || "").trim(),
+      p_entry_number: requestedNumber ? Number(requestedNumber) : null,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("The Journal entry was not saved. Refresh before trying again.");
+    saved = {
+      id: row.id,
+      entryNumber: row.entry_number,
+      title: row.title,
+      year: row.release_year,
+      watchedAt: row.watched_at,
+      status: row.status,
+      comment: row.comment || "",
+      viewerIds: [...session.participantIds],
+    };
+  }
+  session.journalEntry = saved;
+  discordDraft = {
+    ...draft,
+    sessionId: session.id,
+    entryNumber: String(saved.entryNumber),
+    viewerIds: [...session.participantIds],
+    viewers: session.members.join(", "),
+  };
+  session.journalDraft = { ...discordDraft };
+  persistDesignPreviewWorkspace();
+  return discordDraft;
+}
+
+async function copyJournalToClipboard(draft, preview) {
+  const template = buildDiscordTemplate(draft);
+  try {
+    await navigator.clipboard.writeText(template);
+    return true;
+  } catch {
+    if (preview) {
+      preview.value = template;
+      preview.focus();
+      preview.select();
+    }
+    return false;
+  }
 }
 
 function getRouletteCandidates() {
@@ -435,7 +554,7 @@ function rouletteWeights(candidates) {
 }
 
 function rouletteWaitLabel(item) {
-  const createdAt = new Date(item.createdAt);
+  const createdAt = new Date(rouletteWaitingSince(item));
   if (Number.isNaN(createdAt.getTime())) return "Waiting time unknown";
   const days = Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 86400000));
   if (days < 2) return "Added today";
@@ -965,10 +1084,9 @@ function renderRouletteReveal(candidates, winner) {
           </div>` : `<div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
       ${confirmed ? `
-      <div class="roulette-result-handoff">${renderSessionSummary(activeSession, { editing: sessionDetailsEditing })}</div>
+      <div class="roulette-result-handoff">${renderSessionSummary(activeSession, { editorMode: sessionEditorMode(activeSession) })}</div>
       <div class="roulette-session-actions">
         <span class="roulette-session-note">Session saved · Hosted by ${escapeHTML(activeSession.hostName)}</span>
-        ${canManage ? `<button class="ghost-button" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
         <button class="secondary-button" type="button" data-view="list">Return to The List</button>
       </div>` : ""}
     </div>`;
@@ -1002,18 +1120,40 @@ function renderPick() {
 
 function renderSessions() {
   const rouletteWinner = selectedFilmForSession(activeSession);
-  const canManage = canManageSession();
   const watched = sessionHistory.filter((session) => session.status === "WATCHED");
-  const cancelled = sessionHistory.filter((session) => session.status !== "WATCHED");
   const openJournalFor = journalSession();
   const journalIsWatched = Boolean(openJournalFor && openJournalFor.status === "WATCHED");
+  const activeCanManage = canManageSession(activeSession);
+  const activeEditor = sessionEditorMode(activeSession);
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, watch it, then write the Journal post whenever suits. Discord stays a manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
-      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "In progress")} &middot; ${escapeHTML(activeSession.mode)} &middot; Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed ${escapeHTML(sessionDateLabel(activeSession.sessionDate || isoDateOnly(activeSession.startedAt)))}.` : "The wheel is ready when you are.") : "This legacy session uses a mode that is not implemented."}</h3><p class="session-members">${activeSession.participants?.length ? activeSession.members.map(escapeHTML).join(", ") : "No participants added yet"}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}${canManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-mark-session-watched><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}${canManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}</div></div></article>` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No session in progress.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Start Queue Roulette</button></div>`}
+      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then save the optional Journal post whenever it suits. Discord remains a manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${activeSession ? `
+        <article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">
+          ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
+          <div class="active-session-head">
+            <div>
+              <span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Roulette in progress")} &middot; ${escapeHTML(activeSession.mode)} &middot; Hosted by ${escapeHTML(activeSession.hostName)}</span>
+              <h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed ${escapeHTML(sessionDateLabel(activeSession.sessionDate || isoDateOnly(activeSession.startedAt)))}.` : "The wheel is ready when you are.") : "This session uses a mode that is not implemented yet."}</h3>
+              <p class="session-members">${activeSession.participants?.length ? activeSession.members.map(escapeHTML).join(", ") : "No participants added yet"}</p>
+              <p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film was" : "films were"} available when this session started.</p>
+            </div>
+            <div class="session-actions">
+              ${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
+              ${activeCanManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-review-session-watched="${escapeHTML(activeSession.id)}"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}
+              ${activeCanManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}
+            </div>
+          </div>
+        </article>
+        ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Pick a Movie</button></div>`}
       ${journalIsWatched ? `<section class="session-journal-open" aria-label="Journal post for ${escapeHTML(openJournalFor.selectedFilm?.title || "this session")}">${renderDiscordTemplate(openJournalFor, selectedFilmForSession(openJournalFor))}</section>` : ""}
-      ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Watched</span><h2 id="watched-history-title">Previous watch nights</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.watchedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${journalSessionId === session.id ? "" : `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${session.journalDraft ? "Continue Journal post" : "Write Journal post"}</button>`}</div></article>`; }).join("")}</div></section>` : ""}
-      ${cancelled.length ? `<section class="session-history" aria-labelledby="cancelled-history-title"><div class="section-heading"><div><span class="eyebrow">Cancelled</span><h2 id="cancelled-history-title">Sessions that did not happen</h2></div><span class="request-count">${cancelled.length}</span></div><div class="session-history-list">${cancelled.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.endedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ")}</small></div><span class="status-pill">Cancelled</span></article>`; }).join("")}</div></section>` : ""}
+      ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Watched</span><h2 id="watched-history-title">Previous watch nights</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
+        const film = selectedFilmForSession(session);
+        const canManage = canManageSession(session);
+        const journalLabel = session.journalEntry ? (canManage ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
+        const canOpenJournal = canManage || session.journalEntry;
+        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.watchedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+      }).join("")}</div></section>` : ""}
     </section>`;
 }
 
@@ -1154,8 +1294,8 @@ function cloneRouletteState(state = rouletteState) {
 }
 
 async function updateActiveMovieSession(patch, session = activeSession) {
-  if (!session || !activeGroup) throw new Error("There is no active session to update.");
-  if (!canManageSession()) throw new Error("Only the session host or a website administrator can change this session.");
+  if (!session || !activeGroup) throw new Error("There is no session to update.");
+  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can change this session.");
   if (designPreviewMode) return;
 
   const { data, error } = await supabase
@@ -1179,7 +1319,9 @@ function applySessionRow(session, row) {
   session.gameState = row.game_state || {};
   session.confirmedAt = row.confirmed_at;
   session.endedAt = row.ended_at;
-  session.sessionDate = row.planned_for || session.sessionDate;
+  session.hostId = row.host_id || session.hostId;
+  session.hostName = members.find((member) => member.id === session.hostId)?.name || session.hostName;
+  session.sessionDate = row.watch_date || session.sessionDate;
   session.watchedAt = row.watched_at || null;
   session.journalDraft = row.journal_draft && Object.keys(row.journal_draft).length ? row.journal_draft : null;
   return session;
@@ -1205,6 +1347,7 @@ async function createMovieSession(participantIds, mode) {
       id: `preview-session-${Date.now()}`,
       groupId: activeGroup.id,
       createdById: authUser.id,
+      hostId: authUser.id,
       hostName: currentProfile.displayName,
       mode,
       status: "ACTIVE",
@@ -1248,7 +1391,7 @@ async function confirmMovieSession(winner) {
   try {
     await updateActiveMovieSession({
       status: "CONFIRMED",
-      planned_for: activeSession.sessionDate || isoDateOnly(new Date()),
+      watch_date: activeSession.sessionDate || isoDateOnly(new Date()),
       selected_queue_item_id: winner.id,
       selected_title: winner.title,
       selected_release_year: winner.year || null,
@@ -1269,94 +1412,116 @@ async function confirmMovieSession(winner) {
   activeSession.gameState = gameState;
   activeSession.confirmedAt = new Date().toISOString();
   activeSession.sessionDate = activeSession.sessionDate || isoDateOnly(new Date());
-  sessionDetailsEditing = false;
-  discordDraft = createDiscordDraft(activeSession, winner);
+  sessionDetailsEditing = null;
+  discordDraft = null;
   persistDesignPreviewWorkspace();
 }
 
-async function resetMovieSessionRoulette() {
-  if (!activeSession) return;
-  const nextRouletteState = createRouletteState(activeSession.participants || []);
-  const gameState = serialiseRouletteStateValue(nextRouletteState);
-  await updateActiveMovieSession({
-    status: "ACTIVE",
-    selected_queue_item_id: null,
-    selected_title: null,
-    selected_release_year: null,
-    selected_tmdb_id: null,
-    selected_poster_path: null,
-    selected_runtime_minutes: null,
-    selected_genres: [],
-    selected_overview: null,
-    game_state: gameState,
-  });
-  rouletteState = nextRouletteState;
-  activeSession.status = "ACTIVE";
-  activeSession.selectedFilmId = null;
-  activeSession.selectedFilm = null;
-  activeSession.confirmedAt = null;
-  activeSession.gameState = gameState;
-  discordDraft = null;
-}
-
-async function saveSessionDetails({ sessionDate, participantIds }) {
-  if (!activeSession) throw new Error("There is no session to update.");
+async function saveSessionDetails(session, { sessionDate, hostId, participantIds }) {
+  if (!session) throw new Error("There is no session to update.");
   const chosen = members.filter((member) => participantIds.includes(member.id));
+  if (!chosen.length) throw new Error("Choose at least one participant.");
+  const host = members.find((member) => member.id === hostId);
+  if (!host) throw new Error("Choose an approved host.");
+  if (!isCurrentAdmin() && hostId !== session.hostId) throw new Error("Only a website administrator can transfer the session host.");
   if (!designPreviewMode) {
     // One transaction, so the date and the participant list cannot diverge.
     const { data, error } = await supabase.rpc("save_movie_session_details", {
-      p_session_id: activeSession.id,
-      p_session_date: sessionDate,
+      p_session_id: session.id,
+      p_watch_date: sessionDate,
+      p_host_id: hostId,
       p_participant_ids: chosen.map(({ id }) => id),
     });
     if (error) throw error;
     if (!data) throw new Error("The session was not saved. Refresh before trying again.");
-    applySessionRow(activeSession, Array.isArray(data) ? data[0] : data);
+    applySessionRow(session, Array.isArray(data) ? data[0] : data);
   }
-  activeSession.sessionDate = sessionDate;
-  activeSession.participantIds = chosen.map(({ id }) => id);
-  activeSession.participants = chosen.map(({ id, name }) => ({ id, name }));
-  activeSession.members = chosen.map(({ name }) => name);
-  if (rouletteState) {
-    rouletteState.participants = activeSession.participants.map(({ id, name }) => ({ id, name }));
-    rouletteState.usedVetoes = rouletteState.usedVetoes.filter((id) => activeSession.participantIds.includes(id));
+  session.sessionDate = sessionDate;
+  session.hostId = hostId;
+  session.hostName = host.name;
+  session.participantIds = chosen.map(({ id }) => id);
+  session.participants = chosen.map(({ id, name }) => ({ id, name }));
+  session.members = chosen.map(({ name }) => name);
+  if (session.status === "WATCHED") {
+    session.watchedAt = `${sessionDate}T00:00:00.000Z`;
+    if (session.journalEntry) session.journalEntry.watchedAt = sessionDate;
+    const listedFilm = movieList.find((item) => item.id === session.selectedFilmId);
+    if (listedFilm) {
+      listedFilm.lastWatchedOn = sessionHistory
+        .filter((candidate) => candidate.status === "WATCHED" && candidate.selectedFilmId === session.selectedFilmId)
+        .map((candidate) => candidate.sessionDate)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || sessionDate;
+    }
+  }
+  if (session.id === activeSession?.id && rouletteState) {
+    rouletteState.participants = session.participants.map(({ id, name }) => ({ id, name }));
+    rouletteState.usedVetoes = rouletteState.usedVetoes.filter((id) => session.participantIds.includes(id));
+  }
+  if (session.journalDraft) {
+    session.journalDraft = {
+      ...session.journalDraft,
+      viewerIds: [...session.participantIds],
+      viewers: session.members.join(", "),
+    };
+  }
+  if (discordDraft?.sessionId === session.id) {
+    discordDraft = {
+      ...discordDraft,
+      viewerIds: [...session.participantIds],
+      viewers: session.members.join(", "),
+    };
   }
   persistDesignPreviewWorkspace();
 }
 
-async function markSessionWatched() {
-  if (!activeSession) throw new Error("There is no session to mark watched.");
-  const film = selectedFilmForSession(activeSession);
-  // The night the group actually watched, not the moment the button was pressed.
-  const watchedOn = activeSession.sessionDate || isoDateOnly(activeSession.startedAt);
+async function markSessionWatched(session, { sessionDate, hostId, participantIds }) {
+  if (!session || session.id !== activeSession?.id) throw new Error("There is no current session to mark watched.");
+  const film = selectedFilmForSession(session);
+  const chosen = members.filter((member) => participantIds.includes(member.id));
+  if (!chosen.length) throw new Error("Choose at least one participant.");
+  const host = members.find((member) => member.id === hostId);
+  if (!host) throw new Error("Choose an approved host.");
+  if (!isCurrentAdmin() && hostId !== session.hostId) throw new Error("Only a website administrator can transfer the session host.");
+  // The date the group confirms in the final review, not the moment the button was pressed.
+  const watchedOn = sessionDate;
   let watchedAt = `${watchedOn}T00:00:00.000Z`;
   if (!designPreviewMode) {
     // One transaction covers the status, the participants and the queue item, so
     // a host who did not suggest the film cannot leave the two out of step.
     const { data, error } = await supabase.rpc("mark_movie_session_watched", {
-      p_session_id: activeSession.id,
+      p_session_id: session.id,
       p_watched_on: watchedOn,
-      p_participant_ids: (activeSession.participantIds || []).filter(Boolean),
+      p_host_id: hostId,
+      p_participant_ids: chosen.map(({ id }) => id),
     });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) throw new Error("The session was not marked watched. Refresh before trying again.");
-    applySessionRow(activeSession, row);
+    applySessionRow(session, row);
     watchedAt = row.watched_at || watchedAt;
   }
-  const watchedSession = { ...activeSession, status: "WATCHED", watchedAt };
+  session.sessionDate = watchedOn;
+  session.hostId = host.id;
+  session.hostName = host.name;
+  session.participantIds = chosen.map(({ id }) => id);
+  session.participants = chosen.map(({ id, name }) => ({ id, name }));
+  session.members = chosen.map(({ name }) => name);
+  const watchedSession = { ...session, status: "WATCHED", watchedAt };
   if (film) {
     const listed = movieList.find((item) => item.id === film.id);
     if (listed) {
       listed.watched = true;
       listed.watchCount = (Number.isInteger(listed.watchCount) ? listed.watchCount : 0) + 1;
+      listed.lastWatchedOn = watchedOn;
     }
   }
   sessionHistory = [watchedSession, ...sessionHistory];
   activeSession = null;
   rouletteState = null;
-  discordDraft = null;
-  sessionDetailsEditing = false;
+  discordDraft = createDiscordDraft(watchedSession, film);
+  sessionDetailsEditing = null;
   journalSessionId = watchedSession.id;
   persistDesignPreviewWorkspace();
   return watchedSession;
@@ -1369,12 +1534,11 @@ async function endMovieSession() {
     await updateActiveMovieSession({ status: "ENDED", game_state: serialiseRouletteState() });
     await loadWorkspace();
   } else {
-    sessionHistory.unshift({ ...activeSession, status: "ENDED", endedAt: new Date().toISOString() });
     activeSession = null;
     rouletteState = null;
     discordDraft = null;
     journalSessionId = null;
-    sessionDetailsEditing = false;
+    sessionDetailsEditing = null;
     persistDesignPreviewWorkspace();
   }
 }
@@ -1476,6 +1640,8 @@ async function loadWorkspace() {
   sessionHistory = [];
   rouletteState = null;
   discordDraft = null;
+  journalSessionId = null;
+  sessionDetailsEditing = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
@@ -1490,7 +1656,7 @@ async function loadWorkspace() {
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult, watchedResult] = await Promise.all([
+  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
@@ -1498,9 +1664,11 @@ async function loadWorkspace() {
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).order("started_at", { ascending: false }).limit(20),
     supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true }),
-    supabase.rpc("group_watch_counts", { p_group_id: activeGroup.id })
+    supabase.rpc("group_watch_counts", { p_group_id: activeGroup.id }),
+    supabase.from("journal_entries").select("*").eq("group_id", activeGroup.id).order("watched_at", { ascending: false }),
+    supabase.from("entry_viewers").select("entry_id,profile_id")
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error, watchedResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
@@ -1544,6 +1712,24 @@ async function loadWorkspace() {
     current.push({ id: participant.profile_id, name: participant.display_name_snapshot });
     participantsBySession.set(participant.session_id, current);
   }
+  const viewerIdsByEntry = new Map();
+  for (const viewer of entryViewersResult.data || []) {
+    const current = viewerIdsByEntry.get(viewer.entry_id) || [];
+    current.push(viewer.profile_id);
+    viewerIdsByEntry.set(viewer.entry_id, current);
+  }
+  const journalBySession = new Map((journalResult.data || [])
+    .filter((entry) => entry.movie_session_id)
+    .map((entry) => [entry.movie_session_id, {
+      id: entry.id,
+      entryNumber: entry.entry_number,
+      title: entry.title,
+      year: entry.release_year,
+      watchedAt: entry.watched_at,
+      status: entry.status,
+      comment: entry.comment || "",
+      viewerIds: viewerIdsByEntry.get(entry.id) || [],
+    }]));
   const sessions = (sessionsResult.data || []).map((session) => {
     const participants = participantsBySession.get(session.id) || [];
     const selectedFromList = movieList.find((item) => item.id === session.selected_queue_item_id);
@@ -1560,11 +1746,13 @@ async function loadWorkspace() {
       watched: false,
       createdAt: session.started_at,
     } : null);
+    const journalEntry = journalBySession.get(session.id) || null;
     return {
       id: session.id,
       groupId: session.group_id,
       createdById: session.created_by,
-      hostName: profileMap.get(session.created_by)?.display_name || "Former member",
+      hostId: session.host_id,
+      hostName: profileMap.get(session.host_id)?.display_name || "Former member",
       mode: session.mode,
       status: session.status,
       candidateCount: session.candidate_count,
@@ -1577,9 +1765,10 @@ async function loadWorkspace() {
       startedAt: session.started_at,
       confirmedAt: session.confirmed_at,
       endedAt: session.ended_at,
-      sessionDate: session.planned_for || isoDateOnly(session.started_at),
+      sessionDate: session.watch_date || isoDateOnly(session.started_at),
       watchedAt: session.watched_at || null,
       journalDraft: session.journal_draft && Object.keys(session.journal_draft).length ? session.journal_draft : null,
+      journalEntry,
     };
   });
   // A film's viewing count is the number of watched sessions that chose it, so
@@ -1588,17 +1777,23 @@ async function loadWorkspace() {
   // so a film deleted from the list does not lose the viewings it already has.
   const watchRows = watchedResult.data || [];
   for (const item of movieList) {
-    item.watchCount = watchRows.reduce((total, row) => {
+    const matchedRows = watchRows.filter((row) => {
       const sameItem = row.queue_item_id && row.queue_item_id === item.id;
       const sameTmdb = !row.queue_item_id && row.tmdb_id && item.tmdbId && Number(row.tmdb_id) === Number(item.tmdbId);
       const sameTitle = !row.queue_item_id && !row.tmdb_id
         && String(row.title || "").trim().toLowerCase() === String(item.title || "").trim().toLowerCase()
         && Number(row.release_year || 0) === Number(item.year || 0);
-      return total + (sameItem || sameTmdb || sameTitle ? Number(row.watch_count) || 0 : 0);
-    }, 0);
+      return sameItem || sameTmdb || sameTitle;
+    });
+    item.watchCount = matchedRows.reduce((total, row) => total + (Number(row.watch_count) || 0), 0);
+    item.lastWatchedOn = matchedRows
+      .map((row) => row.last_watched_on)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null;
   }
   activeSession = sessions.find((session) => ["ACTIVE", "CONFIRMED"].includes(session.status)) || null;
-  sessionHistory = sessions.filter((session) => ["WATCHED", "ENDED"].includes(session.status));
+  sessionHistory = sessions.filter((session) => session.status === "WATCHED");
   if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
   if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
 }
@@ -1617,6 +1812,8 @@ async function syncSession(session) {
   sessionHistory = [];
   rouletteState = null;
   discordDraft = null;
+  journalSessionId = null;
+  sessionDetailsEditing = null;
   selectedFilmId = null;
   shortlistedFilmIds.clear();
   render();
@@ -1640,17 +1837,32 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!event.target.reportValidity()) return;
     const form = new FormData(event.target);
+    const session = sessionForId(String(form.get("session_id") || ""));
+    const intent = String(form.get("intent") || "save");
     const submit = event.target.querySelector("[type=submit]");
     submit.disabled = true;
     try {
-      await saveSessionDetails({
-        sessionDate: String(form.get("session_date")),
+      const details = {
+        sessionDate: String(form.get("watch_date")),
+        hostId: String(form.get("host_id")),
         participantIds: form.getAll("participant").map(String),
-      });
-      sessionDetailsEditing = false;
+      };
+      if (intent === "watch") {
+        const watched = await markSessionWatched(session, details);
+        currentView = "sessions";
+        window.history.replaceState(null, "", "#sessions");
+        sessionDetailsEditing = null;
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        showToast(`${watched.selectedFilm?.title || "The film"} is marked watched. The optional Journal is ready now or later.`);
+        return;
+      }
+      await saveSessionDetails(session, details);
+      sessionDetailsEditing = null;
       render();
       showToast("Session details saved.");
     } catch (error) {
+      console.error("Session details update failed", error);
       submit.disabled = false;
       showToast(`Session details were not saved: ${error.message}`);
     }
@@ -1663,32 +1875,30 @@ document.addEventListener("submit", async (event) => {
     const session = journalSession();
     discordDraft = {
       sessionId: session?.id || discordDraft?.sessionId || null,
-      entryNumber: String(form.get("entry_number")).trim(),
+      entryNumber: String(form.get("entry_number") || "").trim(),
       title: String(form.get("title")).trim(),
       year: String(form.get("year")).trim(),
-      viewers: String(form.get("viewers")).trim(),
+      viewerIds: [...(session?.participantIds || [])],
+      viewers: session?.members.join(", ") || "",
       status: String(form.get("status")) === "DNF" ? "DNF" : "Finished",
       comment: String(form.get("comment")).trim(),
     };
-    if (session) {
-      session.journalDraft = discordDraft;
-      try {
-        await updateActiveMovieSession({ journal_draft: discordDraft }, session);
-      } catch (error) {
-        showToast(`The Journal draft was not saved: ${error.message}`);
-      }
-    }
-    persistDesignPreviewWorkspace();
-    const template = buildDiscordTemplate(discordDraft);
+    const submit = event.target.querySelector("button[type=submit]");
+    if (submit) submit.disabled = true;
     try {
-      await navigator.clipboard.writeText(template);
-      showToast("Discord Journal template copied. Nothing was posted automatically.");
-    } catch {
       const preview = event.target.querySelector("#discord-template-preview");
-      preview.value = template;
-      preview.focus();
-      preview.select();
-      showToast("Automatic copy was blocked. The template is selected so you can copy it manually.");
+      const savedDraft = await saveJournalEntry(session, discordDraft);
+      const entryField = event.target.querySelector("[name=entry_number]");
+      if (entryField) entryField.value = savedDraft.entryNumber;
+      if (preview) preview.value = buildDiscordTemplate(savedDraft);
+      const copied = await copyJournalToClipboard(savedDraft, preview);
+      showToast(copied
+        ? `Journal entry #${savedDraft.entryNumber} saved and copied. Nothing was posted automatically.`
+        : `Journal entry #${savedDraft.entryNumber} was saved. Automatic copy was blocked, so the template is selected.`);
+    } catch (error) {
+      showToast(`The Journal entry was not saved: ${error.message}`);
+    } finally {
+      if (submit) submit.disabled = false;
     }
     return;
   }
@@ -2022,35 +2232,44 @@ document.addEventListener("click", async (event) => {
   if (journalButton) {
     journalSessionId = journalButton.dataset.openJournal;
     const session = journalSession();
+    if (!session || (!canManageSession(session) && !session.journalEntry)) return;
     discordDraft = session?.journalDraft ? { ...session.journalDraft, sessionId: session.id } : null;
     render();
     window.requestAnimationFrame(() => document.querySelector("#discord-copy-title")?.scrollIntoView({ block: "center", behavior: "smooth" }));
     return;
   }
-  if (event.target.closest("[data-edit-session-details]")) {
-    sessionDetailsEditing = true;
+  if (event.target.closest("[data-copy-saved-journal]")) {
+    const session = journalSession();
+    if (!session?.journalEntry) return;
+    const draft = ensureDiscordDraft(session, selectedFilmForSession(session));
+    const preview = document.querySelector("#discord-template-preview");
+    const copied = await copyJournalToClipboard(draft, preview);
+    showToast(copied ? "Journal post copied. Nothing was posted automatically." : "Automatic copy was blocked. The Journal post is selected for manual copying.");
+    return;
+  }
+  const editSessionButton = event.target.closest("[data-edit-session-details]");
+  if (editSessionButton) {
+    const session = sessionForId(editSessionButton.dataset.editSessionDetails);
+    if (!canManageSession(session)) return;
+    journalSessionId = null;
+    sessionDetailsEditing = { sessionId: session.id, mode: "edit" };
     render();
-    window.requestAnimationFrame(() => document.querySelector("#session-details-form [name=session_date]")?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => document.querySelector("#session-details-form [name=watch_date]")?.focus({ preventScroll: true }));
     return;
   }
   if (event.target.closest("[data-cancel-session-edit]")) {
-    sessionDetailsEditing = false;
+    sessionDetailsEditing = null;
     render();
     return;
   }
-  if (event.target.closest("[data-mark-session-watched]")) {
-    const button = event.target.closest("[data-mark-session-watched]");
-    button.disabled = true;
-    try {
-      const watched = await markSessionWatched();
-      currentView = "sessions";
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      showToast(`${watched.selectedFilm?.title || "The film"} is marked watched. The Journal post is ready whenever you are.`);
-    } catch (error) {
-      button.disabled = false;
-      showToast(`The session was not marked watched: ${error.message}`);
-    }
+  const reviewWatchedButton = event.target.closest("[data-review-session-watched]");
+  if (reviewWatchedButton) {
+    const session = sessionForId(reviewWatchedButton.dataset.reviewSessionWatched);
+    if (!canManageSession(session) || session?.status !== "CONFIRMED") return;
+    journalSessionId = null;
+    sessionDetailsEditing = { sessionId: session.id, mode: "watch" };
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#session-details-form [name=watch_date]")?.focus({ preventScroll: true }));
     return;
   }
   if (event.target.closest("[data-toggle-journal-details]")) {
@@ -2093,30 +2312,20 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
-  if (event.target.closest("[data-new-roulette]")) {
-    if (!canManageSession()) return;
-    try {
-      await resetMovieSessionRoulette();
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      showToast("A new round is ready. The previous choice was not sent to Discord.");
-    } catch (error) { showToast(`The new round was not started: ${error.message}`); }
-    return;
-  }
   if (event.target.closest("[data-continue-roulette]")) { navigate(activeSession?.mode === "Queue Roulette" ? "pick" : "sessions"); return; }
   if (event.target.closest("[data-close-roulette]")) {
-    if (!canManageSession() || !window.confirm("End this Queue Roulette session? Its saved history will remain, and the movie list and Discord will not change.")) return;
+    if (!canManageSession() || !window.confirm("Cancel this Queue Roulette session? It will disappear from the normal session list. The movie list and Discord will not change.")) return;
     try {
       await endMovieSession();
       navigate("sessions");
-      showToast("Queue Roulette ended and was kept in session history. Discord was not changed.");
-    } catch (error) { showToast(`The session was not ended: ${error.message}`); }
+      showToast("Queue Roulette cancelled. Discord was not changed.");
+    } catch (error) { showToast(`The session was not cancelled: ${error.message}`); }
     return;
   }
   if (event.target.closest("[data-end-session]")) {
-    if (!canManageSession() || !window.confirm("End this movie-night session? Its saved history will remain.")) return;
-    try { await endMovieSession(); render(); showToast("Session ended and saved to history. Discord was not changed."); }
-    catch (error) { showToast(`The session was not ended: ${error.message}`); }
+    if (!canManageSession() || !window.confirm("Cancel this movie-night session? It will disappear from the normal session list.")) return;
+    try { await endMovieSession(); render(); showToast("Session cancelled. Discord was not changed."); }
+    catch (error) { showToast(`The session was not cancelled: ${error.message}`); }
   }
 });
 
