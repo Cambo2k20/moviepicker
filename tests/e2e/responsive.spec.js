@@ -36,17 +36,21 @@ test("list actions and desktop film artwork remain clear", async ({ page }, test
   await page.locator("[data-select-film]").first().click();
   const detailPoster = page.locator(".detail-poster");
   await expect(detailPoster).toBeVisible();
+  const detailPosterImage = detailPoster.locator("img");
+  await expect(detailPosterImage).toBeVisible();
+  await expect.poll(
+    () => detailPosterImage.evaluate((image) => image.complete && image.naturalWidth > 0),
+    { message: "detail poster image should finish loading" },
+  ).toBe(true);
   const posterMetrics = await detailPoster.evaluate((element) => {
     const image = element.querySelector("img");
     const box = element.getBoundingClientRect();
     return {
       width: Math.round(box.width),
       height: Math.round(box.height),
-      imageLoaded: image.complete && image.naturalWidth > 0,
       objectFit: getComputedStyle(image).objectFit,
     };
   });
-  expect(posterMetrics.imageLoaded).toBe(true);
   expect(posterMetrics.objectFit).toBe("contain");
   expect(posterMetrics.width).toBeLessThanOrEqual(280);
   expect(posterMetrics.height / posterMetrics.width).toBeCloseTo(1.5, 1);
