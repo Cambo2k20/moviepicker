@@ -3999,10 +3999,11 @@ legend,
 
 .roulette-result-layout {
   display: grid;
-  grid-template-columns: minmax(620px, 1.45fr) minmax(330px, 0.55fr);
-  gap: clamp(28px, 4vw, 58px);
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 300px);
+  column-gap: clamp(24px, 2.5vw, 36px);
+  row-gap: 18px;
   align-items: start;
-  padding-top: 20px;
+  padding-top: 0;
 }
 
 .roulette-result-stage {
@@ -4110,6 +4111,15 @@ legend,
 .roulette-result-copy {
   min-width: 0;
   padding-top: 13px;
+}
+
+.roulette-result-handoff {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.roulette-result-handoff .discord-copy-card {
+  margin-top: 0;
 }
 
 .roulette-winner-heading {
@@ -4261,6 +4271,24 @@ legend,
   margin-top: 22px;
 }
 
+.roulette-decision-actions [data-request-reroll] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-right: 0;
+  padding-left: 0;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.roulette-decision-actions [data-request-reroll] .material-symbols-outlined {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .roulette-reroll-confirm {
   padding: 13px;
   border: 1px solid rgba(228, 124, 145, 0.38);
@@ -4312,9 +4340,47 @@ legend,
   font-size: 10px;
 }
 
+.roulette-confirmed-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.roulette-confirmed-actions .primary-button,
+.roulette-confirmed-actions .secondary-button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 10px;
+}
+
 .session-actions {
   flex: 0 0 auto;
   gap: 10px;
+}
+
+@media (min-width: 1600px) and (min-height: 900px) {
+  .roulette-game.has-result .roulette-header > div {
+    margin-left: -86px;
+  }
+
+  .roulette-game.has-result .roulette-result-wheel .roulette-wheel-stage {
+    width: 437px;
+    margin: 80px -100px 0 -90px;
+  }
+
+  .roulette-game.has-result .roulette-winning-poster {
+    margin: 30px 0 0 70px;
+  }
+
+  .roulette-game.has-result .roulette-result-wheel .roulette-landed-callout.is-summary {
+    width: calc(100% - 42px);
+    max-width: none;
+    justify-content: center;
+    margin: 10px 21px 0;
+  }
 }
 
 @media (max-width: 1180px) {
@@ -4702,6 +4768,94 @@ legend,
 
 .discord-copy-actions small {
   color: var(--muted);
+}
+
+@media (min-width: 1181px) {
+  .roulette-result-handoff .discord-copy-card {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1.66fr);
+    gap: 24px;
+    padding: 20px 22px;
+  }
+
+  .roulette-result-handoff .discord-copy-heading {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+    margin-bottom: 0;
+  }
+
+  .roulette-result-handoff .discord-copy-heading h3 {
+    font-size: 26px;
+  }
+
+  .roulette-result-handoff .discord-copy-heading p {
+    font-size: 11px;
+  }
+
+  .roulette-result-handoff .copy-only-badge {
+    justify-self: start;
+  }
+
+  .roulette-result-handoff .discord-template-form {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .roulette-result-handoff .discord-template-form > label:nth-of-type(1) {
+    grid-column: span 2;
+  }
+
+  .roulette-result-handoff .discord-template-form > label:nth-of-type(2) {
+    grid-column: span 4;
+  }
+
+  .roulette-result-handoff .discord-template-form > label:nth-of-type(3),
+  .roulette-result-handoff .discord-viewers-field,
+  .roulette-result-handoff .discord-template-form > label:nth-of-type(5) {
+    grid-column: span 2;
+  }
+
+  .roulette-result-handoff .discord-comment-field,
+  .roulette-result-handoff .discord-preview-field {
+    grid-column: span 5;
+  }
+
+  .roulette-result-handoff .discord-copy-actions {
+    display: grid;
+    grid-column: span 2;
+    align-content: end;
+    justify-content: stretch;
+    gap: 8px;
+  }
+
+  .roulette-result-handoff .discord-template-form input,
+  .roulette-result-handoff .discord-template-form select {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  .roulette-result-handoff .discord-comment-field textarea,
+  .roulette-result-handoff .discord-preview-field textarea {
+    height: 112px;
+    min-height: 112px;
+    padding: 10px 12px;
+    font-size: 10px;
+  }
+
+  .roulette-result-handoff .discord-copy-actions .primary-button {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+    padding: 0 10px;
+    font-size: 10px;
+  }
+
+  .roulette-result-handoff .discord-copy-actions small {
+    font-size: 9px;
+    line-height: 1.4;
+  }
 }
 
 .session-feature.has-film {
