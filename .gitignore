@@ -4,3 +4,6 @@ playwright-report/
 test-results/
 supabase/.temp/
 .DS_Store
+
+# Local design-tool export bundles (source brief is kept in docs/).
+/docs/Codex Implementation Brief/

@@ -5,6 +5,7 @@ import {
   calculateRouletteWeights,
   createRouletteState,
   filterRouletteCandidates,
+  pickRouletteLandingAngle,
   pickWeightedRouletteCandidate,
   restoreRouletteState,
   serialiseRouletteState,
@@ -46,6 +47,24 @@ test("age weighting gives the oldest film four chances and the newest one", () =
   assert.equal(pickWeightedRouletteCandidate(films, weights, () => 0.999), films[2]);
 });
 
+test("roulette landing points stay inside the winner slice and away from its label", () => {
+  const entry = { startAngle: -90, endAngle: -30 };
+  const leftLanding = pickRouletteLandingAngle(entry, () => 0.25);
+  const rightLanding = pickRouletteLandingAngle(entry, () => 0.75);
+  const middleAngle = -60;
+
+  assert.ok(leftLanding > entry.startAngle && leftLanding < middleAngle);
+  assert.ok(rightLanding > middleAngle && rightLanding < entry.endAngle);
+  assert.ok(Math.abs(leftLanding - middleAngle) >= 4.8);
+  assert.ok(Math.abs(rightLanding - middleAngle) >= 4.8);
+
+  const state = createRouletteState([]);
+  state.winnerId = "old";
+  state.landingAngle = rightLanding;
+  const restored = restoreRouletteState({ status: "ACTIVE", gameState: serialiseRouletteState(state) });
+  assert.equal(restored.landingAngle, rightLanding);
+});
+
 test("vetoes use participant ids so duplicate display names stay independent", () => {
   const state = createRouletteState([{ id: "one", name: "Alex" }, { id: "two", name: "Alex" }]);
   state.usedVetoes.push("one");
@@ -73,4 +92,13 @@ test("legacy name vetoes restore once and interrupted spins resume at reveal", (
     gameState: { phase: "settling", winnerId: "old" },
   });
   assert.equal(settling.phase, "reveal");
+});
+
+test("legacy collapsible-pool state is ignored and no longer persisted", () => {
+  const restored = restoreRouletteState({
+    status: "ACTIVE",
+    gameState: { poolOpen: false },
+  });
+  assert.equal("poolOpen" in restored, false);
+  assert.equal("poolOpen" in serialiseRouletteState(restored), false);
 });
