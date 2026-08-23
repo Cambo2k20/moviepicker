@@ -82,6 +82,7 @@ let discordDraft = null;
 let journalDetailsOpen = false;
 let sessionDetailsEditing = false;
 let journalSessionId = null;
+let journalDraftTimer = 0;
 let listQuery = "";
 let listFilter = "all";
 let listSort = "votes";
@@ -378,7 +379,7 @@ function renderDiscordTemplate(session, film) {
             <label class="discord-status-field"><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
           </div>
         </details>
-        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
+        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button><small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
       </form>
     </section>`;
 }
@@ -400,6 +401,29 @@ function updateDiscordDraftPreview(form) {
   form.querySelector("#discord-template-preview").value = buildDiscordTemplate(discordDraft);
   session.journalDraft = discordDraft;
   persistDesignPreviewWorkspace();
+  scheduleJournalDraftSave(session);
+}
+
+// Typing should not fire a write per keystroke, and a draft should not depend on
+// remembering to press Copy. Save shortly after typing stops, and on the way out.
+function scheduleJournalDraftSave(session) {
+  if (designPreviewMode || !session) return;
+  window.clearTimeout(journalDraftTimer);
+  journalDraftTimer = window.setTimeout(() => { saveJournalDraft(session).catch(() => {}); }, 1200);
+}
+
+async function saveJournalDraft(session = journalSession()) {
+  if (designPreviewMode || !session || !discordDraft) return;
+  const snapshot = { ...discordDraft };
+  const { error } = await supabase
+    .from("movie_sessions")
+    .update({ journal_draft: snapshot })
+    .eq("id", session.id)
+    .eq("group_id", activeGroup.id)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  session.journalDraft = snapshot;
 }
 
 function getRouletteCandidates() {
@@ -1139,10 +1163,26 @@ async function updateActiveMovieSession(patch, session = activeSession) {
     .update(patch)
     .eq("id", session.id)
     .eq("group_id", activeGroup.id)
-    .select("id")
+    .select("*")
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("No session row was updated. Refresh before trying again.");
+  applySessionRow(session, data);
+  return data;
+}
+
+// Keeps the in-memory session honest about what the database actually stored,
+// rather than assuming the patch we sent is what landed.
+function applySessionRow(session, row) {
+  if (!session || !row) return session;
+  session.status = row.status;
+  session.gameState = row.game_state || {};
+  session.confirmedAt = row.confirmed_at;
+  session.endedAt = row.ended_at;
+  session.sessionDate = row.planned_for || session.sessionDate;
+  session.watchedAt = row.watched_at || null;
+  session.journalDraft = row.journal_draft && Object.keys(row.journal_draft).length ? row.journal_draft : null;
+  return session;
 }
 
 async function persistRouletteState() {
@@ -1262,8 +1302,17 @@ async function resetMovieSessionRoulette() {
 async function saveSessionDetails({ sessionDate, participantIds }) {
   if (!activeSession) throw new Error("There is no session to update.");
   const chosen = members.filter((member) => participantIds.includes(member.id));
-  await updateActiveMovieSession({ planned_for: sessionDate }, activeSession);
-  await replaceSessionParticipants(activeSession.id, chosen);
+  if (!designPreviewMode) {
+    // One transaction, so the date and the participant list cannot diverge.
+    const { data, error } = await supabase.rpc("save_movie_session_details", {
+      p_session_id: activeSession.id,
+      p_session_date: sessionDate,
+      p_participant_ids: chosen.map(({ id }) => id),
+    });
+    if (error) throw error;
+    if (!data) throw new Error("The session was not saved. Refresh before trying again.");
+    applySessionRow(activeSession, Array.isArray(data) ? data[0] : data);
+  }
   activeSession.sessionDate = sessionDate;
   activeSession.participantIds = chosen.map(({ id }) => id);
   activeSession.participants = chosen.map(({ id, name }) => ({ id, name }));
@@ -1275,27 +1324,25 @@ async function saveSessionDetails({ sessionDate, participantIds }) {
   persistDesignPreviewWorkspace();
 }
 
-async function replaceSessionParticipants(sessionId, chosen) {
-  if (designPreviewMode) return;
-  const { error: deleteError } = await supabase.from("movie_session_participants").delete().eq("session_id", sessionId);
-  if (deleteError) throw deleteError;
-  if (!chosen.length) return;
-  const { error: insertError } = await supabase.from("movie_session_participants").insert(chosen.map((member) => ({
-    session_id: sessionId,
-    profile_id: member.id,
-    display_name_snapshot: member.name,
-  })));
-  if (insertError) throw insertError;
-}
-
 async function markSessionWatched() {
   if (!activeSession) throw new Error("There is no session to mark watched.");
   const film = selectedFilmForSession(activeSession);
-  const watchedAt = new Date().toISOString();
-  await updateActiveMovieSession({ status: "WATCHED", watched_at: watchedAt, planned_for: activeSession.sessionDate });
-  if (film && !designPreviewMode) {
-    const { error } = await supabase.from("queue_items").update({ watched: true }).eq("id", film.id).eq("group_id", activeGroup.id);
+  // The night the group actually watched, not the moment the button was pressed.
+  const watchedOn = activeSession.sessionDate || isoDateOnly(activeSession.startedAt);
+  let watchedAt = `${watchedOn}T00:00:00.000Z`;
+  if (!designPreviewMode) {
+    // One transaction covers the status, the participants and the queue item, so
+    // a host who did not suggest the film cannot leave the two out of step.
+    const { data, error } = await supabase.rpc("mark_movie_session_watched", {
+      p_session_id: activeSession.id,
+      p_watched_on: watchedOn,
+      p_participant_ids: (activeSession.participantIds || []).filter(Boolean),
+    });
     if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("The session was not marked watched. Refresh before trying again.");
+    applySessionRow(activeSession, row);
+    watchedAt = row.watched_at || watchedAt;
   }
   const watchedSession = { ...activeSession, status: "WATCHED", watchedAt };
   if (film) {
@@ -1451,7 +1498,7 @@ async function loadWorkspace() {
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).order("started_at", { ascending: false }).limit(20),
     supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true }),
-    supabase.from("movie_sessions").select("selected_queue_item_id").eq("group_id", activeGroup.id).eq("status", "WATCHED")
+    supabase.rpc("group_watch_counts", { p_group_id: activeGroup.id })
   ]);
   const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error, watchedResult.error].find(Boolean);
   if (firstError) throw firstError;
@@ -1537,11 +1584,19 @@ async function loadWorkspace() {
   });
   // A film's viewing count is the number of watched sessions that chose it, so
   // sessions stay the single source of truth rather than a counter that drifts.
-  const watchCounts = new Map();
-  for (const filmId of (watchedResult.data || []).map((row) => row.selected_queue_item_id).filter(Boolean)) {
-    watchCounts.set(filmId, (watchCounts.get(filmId) || 0) + 1);
+  // Rows are matched by queue item first, then by the snapshot the session kept,
+  // so a film deleted from the list does not lose the viewings it already has.
+  const watchRows = watchedResult.data || [];
+  for (const item of movieList) {
+    item.watchCount = watchRows.reduce((total, row) => {
+      const sameItem = row.queue_item_id && row.queue_item_id === item.id;
+      const sameTmdb = !row.queue_item_id && row.tmdb_id && item.tmdbId && Number(row.tmdb_id) === Number(item.tmdbId);
+      const sameTitle = !row.queue_item_id && !row.tmdb_id
+        && String(row.title || "").trim().toLowerCase() === String(item.title || "").trim().toLowerCase()
+        && Number(row.release_year || 0) === Number(item.year || 0);
+      return total + (sameItem || sameTmdb || sameTitle ? Number(row.watch_count) || 0 : 0);
+    }, 0);
   }
-  for (const item of movieList) item.watchCount = watchCounts.get(item.id) || 0;
   activeSession = sessions.find((session) => ["ACTIVE", "CONFIRMED"].includes(session.status)) || null;
   sessionHistory = sessions.filter((session) => ["WATCHED", "ENDED"].includes(session.status));
   if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
@@ -1572,6 +1627,13 @@ async function syncSession(session) {
   isLoading = false;
   render();
 }
+
+window.addEventListener("beforeunload", () => {
+  if (designPreviewMode || !discordDraft || !journalDraftTimer) return;
+  window.clearTimeout(journalDraftTimer);
+  const session = journalSession();
+  if (session) saveJournalDraft(session).catch(() => {});
+});
 
 document.addEventListener("submit", async (event) => {
   if (event.target.matches("#session-details-form")) {
@@ -1941,6 +2003,21 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-save-journal-draft]")) {
+    const button = event.target.closest("[data-save-journal-draft]");
+    const form = document.querySelector("#discord-template-form");
+    if (form) updateDiscordDraftPreview(form);
+    button.disabled = true;
+    try {
+      window.clearTimeout(journalDraftTimer);
+      await saveJournalDraft();
+      showToast("Journal draft saved. Nothing was posted to Discord.");
+    } catch (error) {
+      showToast(`The Journal draft was not saved: ${error.message}`);
+    }
+    button.disabled = false;
+    return;
+  }
   const journalButton = event.target.closest("[data-open-journal]");
   if (journalButton) {
     journalSessionId = journalButton.dataset.openJournal;
