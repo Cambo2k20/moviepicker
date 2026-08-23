@@ -7,6 +7,13 @@ import {
   restoreRouletteState,
   serialiseRouletteState as serialiseRouletteStateValue,
 } from "./roulette-core.js";
+import {
+  buildAuthRedirectUrl,
+  discordProviderEnabled,
+  oauthCallbackError,
+  preferredAuthDisplayName,
+  withoutOAuthError,
+} from "./auth-core.js";
 
 const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
@@ -16,6 +23,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 });
 const designPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("design-preview");
+const discordAuthPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
+  && new URLSearchParams(window.location.search).has("discord-auth-preview");
 
 const imageAssets = {
   cameron: new URL("./assets/avatar-cameron.png", import.meta.url).href,
@@ -83,6 +92,7 @@ let rouletteSpinToken = 0;
 let filmEditingId = null;
 let pendingFilmDraft = null;
 let authMode = "signin";
+let discordAuthEnabled = false;
 let isLoading = true;
 let toastTimer;
 
@@ -454,6 +464,23 @@ function showToast(message) {
   toastTimer = setTimeout(() => { toast.hidden = true; }, 3600);
 }
 
+async function loadAuthProviderAvailability() {
+  if (discordAuthPreviewMode) {
+    discordAuthEnabled = true;
+    return;
+  }
+  if (designPreviewMode) return;
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: SUPABASE_PUBLISHABLE_KEY },
+    });
+    if (!response.ok) return;
+    discordAuthEnabled = discordProviderEnabled(await response.json());
+  } catch {
+    discordAuthEnabled = false;
+  }
+}
+
 function renderLoading() {
   return `<section class="access-view" aria-live="polite"><span class="eyebrow">Shared movie list</span><h1>Opening Cine-Cord…</h1><p>Checking your invite and loading The List.</p></section>`;
 }
@@ -465,15 +492,25 @@ function renderLogin() {
       <div class="access-card">
         <span class="eyebrow">The Discordians · ${isSignup ? "Request access" : "Private access"}</span>
         <h1 id="login-title">${isSignup ? "Join the waiting list." : "Enter Cine-Cord."}</h1>
-        <p>${isSignup ? "Create an account, confirm your email if asked, then request approval from a Cine-Cord administrator." : "Sign in to use the shared movie list and decision room. The website works even when the Discord bot is offline."}</p>
-        <form id="auth-form" class="access-form" data-auth-mode="${isSignup ? "signup" : "signin"}">
+        <p>${isSignup ? "Use Discord or create an email account, then request approval from a Cine-Cord administrator." : "Sign in to use the shared movie list and decision room. Discord login does not grant group access by itself."}</p>
+        ${discordAuthEnabled ? `
+          <div class="oauth-access">
+            <button class="discord-auth-button" type="button" data-auth-discord>
+              <span class="material-symbols-outlined discord-auth-icon" aria-hidden="true">forum</span>
+              <span class="discord-auth-copy"><strong>Continue with Discord</strong><small>Approval is still required</small></span>
+              <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+            </button>
+          </div>
+          <div class="auth-divider" aria-hidden="true"><span>or use email</span></div>
+        ` : ""}
+        <form id="auth-form" class="access-form ${discordAuthEnabled ? "has-oauth" : ""}" data-auth-mode="${isSignup ? "signup" : "signin"}">
           ${isSignup ? `<label><span>Display name</span><input name="display_name" required maxlength="40" autocomplete="nickname" placeholder="How your friends know you" /></label>` : ""}
           <label><span>Email</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
           <label><span>Password</span><input name="password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="${isSignup ? "8" : "6"}" /></label>
           <button class="primary-button full-width" type="submit">${isSignup ? "Create account" : "Sign in"} <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
         </form>
         <button class="auth-mode-toggle" type="button" data-toggle-auth-mode>${isSignup ? "Already have an account? Sign in" : "New Discordian? Create an account"}</button>
-        <span class="access-note">Approval protects the private group list. Creating an account alone reveals no group data.</span>
+        <span class="access-note">Approval protects the private group list. Authentication alone reveals no group data.</span>
       </div>
     </section>`;
 }
@@ -1132,7 +1169,7 @@ async function loadWorkspace() {
   ]);
   const accessError = [selfProfileResult.error, selfMembershipResult.error, selfRequestResult.error].find(Boolean);
   if (accessError) throw accessError;
-  currentProfile = { id: authUser.id, displayName: selfProfileResult.data?.display_name || authUser.email?.split("@")[0] || "Discordian", role: selfMembershipResult.data?.role || null };
+  currentProfile = { id: authUser.id, displayName: selfProfileResult.data?.display_name || preferredAuthDisplayName(authUser), role: selfMembershipResult.data?.role || null };
   accessRequest = selfRequestResult.data || null;
   if (!selfMembershipResult.data) return;
 
@@ -1375,6 +1412,22 @@ document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) { navigate(viewButton.dataset.view); return; }
   if (event.target.closest("[data-toggle-auth-mode]")) { authMode = authMode === "signin" ? "signup" : "signin"; render(); return; }
+  const discordButton = event.target.closest("[data-auth-discord]");
+  if (discordButton) {
+    if (!discordAuthEnabled) return;
+    discordButton.disabled = true;
+    discordButton.querySelector("strong").textContent = "Opening Discord…";
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "discord",
+      options: { redirectTo: buildAuthRedirectUrl(window.location) },
+    });
+    if (error) {
+      discordButton.disabled = false;
+      discordButton.querySelector("strong").textContent = "Continue with Discord";
+      showToast(`Discord sign-in could not start: ${error.message}`);
+    }
+    return;
+  }
   if (event.target.closest("[data-nav='list']")) { event.preventDefault(); navigate("list"); return; }
   if (event.target.closest("[data-sign-out]")) { await supabase.auth.signOut(); await syncSession(null); showToast("Signed out of Cine-Cord."); return; }
 
@@ -1727,10 +1780,16 @@ if (designPreviewMode) {
   loadDesignPreviewWorkspace();
   render();
 } else {
+  await loadAuthProviderAvailability();
+  const callbackError = oauthCallbackError(window.location);
   supabase.auth.onAuthStateChange((_event, session) => {
     window.setTimeout(() => { if (session?.user?.id !== authUser?.id) syncSession(session); }, 0);
   });
 
   const { data: sessionData } = await supabase.auth.getSession();
   await syncSession(sessionData.session);
+  if (callbackError) {
+    window.history.replaceState({}, "", withoutOAuthError(window.location.href));
+    showToast(`Discord sign-in failed: ${callbackError}`);
+  }
 }

@@ -4,7 +4,7 @@ A private, membership-gated movie list and movie-night companion for the Discord
 
 ## Current product boundary
 
-- Email/password authentication with administrator-approved group membership.
+- Email/password authentication plus optional Discord OAuth, both protected by administrator-approved group membership.
 - A persistent poster-led movie list with metadata lookup, voting and watched status.
 - Persistent movie-night sessions with participants, selected-film snapshots and resumable state.
 - Queue Roulette with truthful runtime/genre filters, age weighting and one veto per participant.
@@ -14,7 +14,7 @@ A private, membership-gated movie list and movie-night companion for the Discord
 
 Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. The database contains Journal tables and secure write functions, but the active frontend does not currently provide a Journal screen or Journal write flow. Wrapped/challenge calculations also remain future work.
 
-There is deliberately no Discord bot, webhook, OAuth connection or automatic posting.
+Discord OAuth is limited to sign-in. There is deliberately no Discord bot, webhook, automatic posting, guild-membership check or server permission request.
 
 ## Local development
 
@@ -32,6 +32,8 @@ http://localhost:5173/moviepicker/?design-preview
 ```
 
 The `design-preview` query loads representative local data without using a live account.
+
+To review the optional Discord sign-in UI before the provider is enabled, open `http://localhost:5173/moviepicker/?discord-auth-preview`. The flag only works on local hostnames; it does not bypass authentication or prove that the Discord provider and callback credentials are configured.
 
 ## Validation
 

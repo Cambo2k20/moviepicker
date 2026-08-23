@@ -2,7 +2,7 @@
 
 Project: `tbmxxdodprmynyiiaofj`
 
-The schema in `schema.sql` backs the private Journal. It deliberately contains no Discord integration, webhooks, bot tokens or OAuth permissions.
+The schema in `schema.sql` backs the private Journal. Discord OAuth may authenticate a user, but the schema contains no Discord webhooks, bot tokens, posting integration or server permissions.
 
 ## Access model
 
@@ -30,12 +30,28 @@ The schema in `schema.sql` backs the private Journal. It deliberately contains n
 
 Apply `member_management.sql` after the base schema. It adds the access-request table, secure member-management functions and the policies used by the Members screen.
 
-1. A friend creates an account on the website and confirms their email if email confirmation is enabled.
+1. A friend signs in with Discord or creates an email/password account and confirms their email if required.
 2. They request access with the display name they use in the Journal.
 3. An administrator opens **Members** and approves or declines the request.
 4. Approval creates the profile/membership and removes the pending request in one database transaction.
 
-Creating an account does not grant Journal access. A removed member immediately loses access through RLS. The flow does not contact Discord and requires no Discord permissions.
+Authentication does not grant Journal access. A removed member immediately loses access through RLS. Discord OAuth identifies the user only; the same administrator approval and RLS boundary applies to every provider.
+
+## Discord OAuth sign-in
+
+The login screen checks Supabase's public Auth settings and shows **Continue with Discord** only when the provider is genuinely enabled. Email/password remains available. Discord sign-in does not inspect guild membership and does not bypass the access-request waiting room.
+
+The live Discord application is **DiscCompanion** with public client ID `1540885444076638308`. Its client secret is stored only in the Supabase Auth provider configuration and must never be added to this repository.
+
+1. Create a Discord Application in the Discord Developer Portal.
+2. Add this redirect URI to its OAuth2 settings:
+
+   `https://tbmxxdodprmynyiiaofj.supabase.co/auth/v1/callback`
+
+3. In Supabase, open **Authentication → Sign In / Providers → Discord**, enable it, and enter the Discord Client ID and Client Secret.
+4. Keep the website URL below in **Authentication → URL Configuration** as both the Site URL and an allowed redirect URL.
+
+Never place the Discord Client Secret in `app.js`, a local screenshot, a committed environment file or GitHub Pages. Supabase stores the secret server-side. Supabase automatically links an OAuth identity to an existing user when the provider returns the same verified email; otherwise it creates a new Auth user that must request approval.
 
 In **Authentication → URL Configuration**, set the Site URL and an allowed redirect URL to:
 

@@ -59,7 +59,7 @@ A selected result can be copied manually into Discord. The editable output follo
 ————————————————————————————————————————————————————————
 ```
 
-Keep this manual copy path even if a later Discord integration is considered. Do not add automatic posting or request Discord permissions without an explicit decision.
+Keep this manual copy path. Discord OAuth may be used for sign-in, but it does not authorize automatic posting, guild inspection or server permissions.
 
 ### Journal
 
@@ -94,6 +94,7 @@ Wrapped/statistics screens exist, but their final persistent calculation model i
 Persistent:
 
 - authentication and profiles;
+- optional Discord OAuth sign-in with the same manual membership approval gate;
 - group membership and access requests;
 - Journal entries and viewers at the database layer only;
 - movie list, metadata and voting;
@@ -117,7 +118,7 @@ These are backlog directions, not permission to implement all of them in one cha
 4. Design persistent server-wide and personal statistics/challenges.
 5. Expand automated coverage around Supabase mapping and authenticated multi-user behavior.
 6. Continue splitting the growing `app.js` and `styles.css` into focused modules without replacing working behavior.
-7. Consider Discord synchronisation only after defining credentials, permissions, conflict handling and the source of truth.
+7. Consider Discord posting or synchronisation only after defining credentials, permissions, conflict handling and the source of truth. OAuth sign-in alone is not synchronisation.
 
 ## Definition of done for a change
 
