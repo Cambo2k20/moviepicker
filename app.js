@@ -80,6 +80,8 @@ let activeSession = null;
 let sessionHistory = [];
 let discordDraft = null;
 let journalDetailsOpen = false;
+let sessionDetailsEditing = false;
+let journalSessionId = null;
 let listQuery = "";
 let listFilter = "all";
 let listSort = "votes";
@@ -104,9 +106,57 @@ const ROULETTE_SETTLE_DURATION_MS = 2600;
 const ROULETTE_REDUCED_SPIN_DURATION_MS = 80;
 const ROULETTE_REDUCED_SETTLE_DURATION_MS = 1400;
 
+const DESIGN_PREVIEW_STORAGE_KEY = "cine-cord-design-preview-state";
+
+// Preview mode has no database. Persisting here is what lets the confirm ->
+// edit -> save -> mark watched flow be assessed across a refresh.
+function persistDesignPreviewWorkspace() {
+  if (!designPreviewMode) return;
+  try {
+    window.localStorage.setItem(DESIGN_PREVIEW_STORAGE_KEY, JSON.stringify({
+      activeSession,
+      sessionHistory,
+      rouletteState: rouletteState ? serialiseRouletteStateValue(rouletteState) : null,
+      journalSessionId,
+      discordDraft,
+      watchState: movieList.map(({ id, watched, watchCount }) => ({ id, watched, watchCount })),
+    }));
+  } catch { /* a full or blocked store must not break the preview */ }
+}
+
+function restoreDesignPreviewWorkspace() {
+  if (!designPreviewMode) return;
+  let saved = null;
+  try { saved = JSON.parse(window.localStorage.getItem(DESIGN_PREVIEW_STORAGE_KEY) || "null"); } catch { saved = null; }
+  if (!saved) return;
+  for (const entry of saved.watchState || []) {
+    const item = movieList.find((film) => film.id === entry.id);
+    if (item) { item.watched = Boolean(entry.watched); item.watchCount = Number(entry.watchCount) || 0; }
+  }
+  activeSession = saved.activeSession || null;
+  sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
+  journalSessionId = null;
+  discordDraft = saved.discordDraft || null;
+  const draftSession = discordDraft && sessionHistory.find((session) => session.id === discordDraft.sessionId);
+  if (draftSession) draftSession.journalDraft = discordDraft;
+  if (activeSession?.mode === "Queue Roulette") {
+    rouletteState = saved.rouletteState
+      ? restoreRouletteState({ ...activeSession, gameState: saved.rouletteState })
+      : restoreRouletteState(activeSession);
+  }
+}
+
+function clearDesignPreviewWorkspace() {
+  if (!designPreviewMode) return;
+  try { window.localStorage.removeItem(DESIGN_PREVIEW_STORAGE_KEY); } catch { /* ignore */ }
+}
+
 function loadDesignPreviewWorkspace() {
   authUser = { id: "preview-cameron", email: "preview@cine-cord.local" };
-  currentProfile = { id: "preview-cameron", displayName: "Cameron", role: "admin" };
+  // ?design-preview=member renders the app as a plain member, so host-only and
+  // admin-only controls can be checked without a second account.
+  const previewRole = new URLSearchParams(window.location.search).get("design-preview") === "member" ? "member" : "admin";
+  currentProfile = { id: "preview-cameron", displayName: "Cameron", role: previewRole };
   activeGroup = { id: "preview-group", name: "The Discordians", slug: "discordians" };
   members = [
     { id: "preview-cameron", name: "Cameron", role: "admin", avatar: knownAvatars.cameron },
@@ -125,7 +175,9 @@ function loadDesignPreviewWorkspace() {
     { id: "preview-inception", title: "Inception", year: 2010, posterUrl: "https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", runtime: 148, genres: ["Action", "Science Fiction", "Thriller"], overview: "A skilled extractor is offered a chance to erase his past crimes by planting an idea in another person's mind.", createdAt: "2026-07-24T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 3, votedByMe: false, watched: false, tmdbId: 27205 },
     { id: "preview-martian", title: "The Martian", year: 2015, posterUrl: "https://image.tmdb.org/t/p/w500/5BHuvQ6p9kfc091Z8RiFNhCwL4b.jpg", runtime: 144, genres: ["Adventure", "Drama", "Science Fiction"], overview: "An astronaut stranded on Mars must rely on ingenuity and determination while Earth works to bring him home.", createdAt: "2026-08-20T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 286217 },
   ];
+  for (const item of movieList) item.watchCount = 0;
   isLoading = false;
+  restoreDesignPreviewWorkspace();
 }
 
 function escapeHTML(value) {
@@ -222,6 +274,14 @@ function createDiscordDraft(session, film) {
   };
 }
 
+function journalSession() {
+  if (journalSessionId) {
+    const fromHistory = sessionHistory.find((session) => session.id === journalSessionId);
+    if (fromHistory) return fromHistory;
+  }
+  return activeSession;
+}
+
 function ensureDiscordDraft(session, film) {
   if (!discordDraft || discordDraft.sessionId !== session.id) discordDraft = createDiscordDraft(session, film);
   return discordDraft;
@@ -250,6 +310,43 @@ function journalDetailsNeedAttention(draft) {
     || year > 2200;
 }
 
+function renderSessionSummary(session, { editing }) {
+  const canManage = canManageSession();
+  const date = session.sessionDate || isoDateOnly(session.startedAt);
+  const participants = session.participants || [];
+  if (editing && canManage) {
+    return `
+      <section class="session-summary is-editing" aria-labelledby="session-summary-title">
+        <div class="session-summary-head"><div><span class="eyebrow">Session details</span><h3 id="session-summary-title">Edit this session</h3></div></div>
+        <form id="session-details-form" class="session-details-form">
+          <label class="session-date-field"><span>Session date</span><input name="session_date" type="date" required value="${escapeHTML(date)}" /><small>Change this if you watch it another night.</small></label>
+          <div class="session-host-field"><span class="session-field-label">Host</span><p>${escapeHTML(session.hostName)}</p><small>The host is whoever started the session.</small></div>
+          <fieldset class="session-participants-field">
+            <legend class="session-field-label">Participants</legend>
+            <div>${members.map((member) => `<label class="session-participant-toggle"><input type="checkbox" name="participant" value="${escapeHTML(member.id)}" ${participants.some((participant) => participant.id === member.id) ? "checked" : ""} /><img src="${escapeHTML(member.avatar)}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("")}</div>
+          </fieldset>
+          <div class="session-summary-actions">
+            <button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">save</span>Save session details</button>
+            <button class="secondary-button" type="button" data-cancel-session-edit>Cancel</button>
+          </div>
+        </form>
+      </section>`;
+  }
+  return `
+    <section class="session-summary" aria-labelledby="session-summary-title">
+      <div class="session-summary-head">
+        <div><span class="eyebrow">Session details</span><h3 id="session-summary-title">${escapeHTML(session.selectedFilm?.title || "Tonight's film")} is confirmed ${escapeHTML(sessionDateLabel(date))}.</h3></div>
+        ${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
+      </div>
+      <dl class="session-summary-grid">
+        <div><dt>Session date</dt><dd>${escapeHTML(new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</dd></div>
+        <div><dt>Host</dt><dd>${escapeHTML(session.hostName)}</dd></div>
+        <div><dt>Participants</dt><dd>${participants.length ? escapeHTML(participants.map(({ name }) => name).join(", ")) : "No one added yet"}</dd></div>
+      </dl>
+      ${canManage ? `<div class="session-summary-actions"><button class="primary-button" type="button" data-mark-session-watched><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button><small>Do this after the film. The Journal post opens once you do, and can be finished later from Sessions.</small></div>` : `<p class="session-summary-note">${escapeHTML(session.hostName)} can mark this session watched once you have all seen it.</p>`}
+    </section>`;
+}
+
 function renderDiscordTemplate(session, film) {
   const draft = ensureDiscordDraft(session, film);
   // The drawer opens on request, and on its own when a session-filled value is
@@ -259,8 +356,7 @@ function renderDiscordTemplate(session, film) {
     <section class="discord-copy-card" aria-labelledby="discord-copy-title">
       <div class="discord-copy-heading">
         <div><span class="eyebrow">Optional Discord handoff</span><h3 id="discord-copy-title">Prepare the Journal post</h3><p>Check the post below, then copy it into Discord yourself.</p></div>
-        <span class="copy-only-badge"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy only</span>
-      </div>
+        </div>
       <form id="discord-template-form" class="discord-template-form">
         <div class="discord-post-row">
           <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
@@ -282,16 +378,18 @@ function renderDiscordTemplate(session, film) {
             <label class="discord-status-field"><span>Status</span><select name="status"><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
           </div>
         </details>
-        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><small>Nothing is posted automatically.</small></div>
+        <div class="discord-copy-actions"><button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button><small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
       </form>
     </section>`;
 }
 
 function updateDiscordDraftPreview(form) {
-  if (!form || !activeSession) return;
+  // The Journal is often written after the session stops being the active one.
+  const session = journalSession();
+  if (!form || !session) return;
   const values = new FormData(form);
   discordDraft = {
-    sessionId: activeSession.id,
+    sessionId: session.id,
     entryNumber: String(values.get("entry_number") || ""),
     title: String(values.get("title") || ""),
     year: String(values.get("year") || ""),
@@ -300,6 +398,8 @@ function updateDiscordDraftPreview(form) {
     comment: String(values.get("comment") || ""),
   };
   form.querySelector("#discord-template-preview").value = buildDiscordTemplate(discordDraft);
+  session.journalDraft = discordDraft;
+  persistDesignPreviewWorkspace();
 }
 
 function getRouletteCandidates() {
@@ -323,6 +423,22 @@ function rouletteWaitLabel(item) {
   return remainingMonths
     ? `${years}y ${remainingMonths}m waiting`
     : `${years} ${years === 1 ? "year" : "years"} waiting`;
+}
+
+function isoDateOnly(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function sessionDateLabel(value) {
+  const today = isoDateOnly(new Date());
+  if (value === today) return "tonight";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "tonight";
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  if (value === isoDateOnly(yesterday)) return "last night";
+  return `on ${date.toLocaleDateString(undefined, { day: "numeric", month: "long" })}`;
 }
 
 function rouletteWeightSummary(weight, item, { weighted }) {
@@ -816,7 +932,7 @@ function renderRouletteReveal(candidates, winner) {
         <div class="roulette-winner-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(winner))}</span>${winner.genres.slice(0, 3).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}<span title="${escapeHTML(weightExplanation)}"><span class="material-symbols-outlined" aria-hidden="true">weight</span>${escapeHTML(weightSummary)}</span></div>
         <div class="roulette-overview-block"><p class="roulette-winner-overview ${rouletteState.overviewOpen ? "is-expanded" : ""}">${escapeHTML(overview)}</p>${overview.length > 150 ? `<button class="roulette-overview-toggle" type="button" data-toggle-roulette-overview aria-expanded="${rouletteState.overviewOpen}">${rouletteState.overviewOpen ? "Show less" : "Read more"}</button>` : ""}</div>
         ${confirmed ? `
-          <div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Choice confirmed and saved</strong><p>This session will survive refresh. The movie list and Discord have not been changed.</p></div></div>` : canManage ? `
+          <div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Session confirmed</strong><p>Check the details below. Nothing has been posted to Discord, and the Journal post comes after you watch.</p></div></div>` : canManage ? `
           <section class="roulette-result-vetoes" aria-labelledby="result-veto-title"><span class="eyebrow" id="result-veto-title">Use a veto to spin again</span><div>${rouletteState.participants.map(({ id, name }) => { const used = rouletteState.usedVetoes.includes(id); return `<button type="button" data-veto-member="${escapeHTML(id)}" ${used ? "disabled" : ""} aria-label="${used ? `${escapeHTML(name)} has used their veto` : `${escapeHTML(name)} vetoes ${escapeHTML(winner.title)}`}" title="${escapeHTML(name)}${used ? " · veto used" : " · one veto available"}"><img src="${escapeHTML(avatarForName(name))}" alt="" /><span><strong>${escapeHTML(name)}</strong><small>${used ? "Veto already used" : "One veto available"}</small></span><em>${used ? "Used" : "1"}</em></button>`; }).join("")}</div></section>
           <div class="roulette-decision-actions">
             <button class="primary-button roulette-wide-action" type="button" data-confirm-roulette><span class="material-symbols-outlined" aria-hidden="true">check</span>Confirm Movie and Create Session</button>
@@ -825,7 +941,7 @@ function renderRouletteReveal(candidates, winner) {
           </div>` : `<div class="roulette-confirmed-note" role="status"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span><div><strong>Waiting for the host</strong><p>${escapeHTML(activeSession.hostName)} can confirm this result or spin again.</p></div></div>`}
       </section>
       ${confirmed ? `
-      <div class="roulette-result-handoff">${renderDiscordTemplate(activeSession, winner)}</div>
+      <div class="roulette-result-handoff">${renderSessionSummary(activeSession, { editing: sessionDetailsEditing })}</div>
       <div class="roulette-session-actions">
         <span class="roulette-session-note">Session saved · Hosted by ${escapeHTML(activeSession.hostName)}</span>
         ${canManage ? `<button class="ghost-button" type="button" data-new-roulette><span class="material-symbols-outlined" aria-hidden="true">refresh</span>Start another round</button>` : ""}
@@ -863,11 +979,17 @@ function renderPick() {
 function renderSessions() {
   const rouletteWinner = selectedFilmForSession(activeSession);
   const canManage = canManageSession();
+  const watched = sessionHistory.filter((session) => session.status === "WATCHED");
+  const cancelled = sessionHistory.filter((session) => session.status !== "WATCHED");
+  const openJournalFor = journalSession();
+  const journalIsWatched = Boolean(openJournalFor && openJournalFor.status === "WATCHED");
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Movie-night choices now survive refresh. Discord remains a separate, manual handoff.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
-      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Active")} · ${escapeHTML(activeSession.mode)} · Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed for tonight.` : "The wheel is ready when you are.") : "This legacy session uses a mode that is not implemented."}</h3><p class="session-members">${activeSession.members.map(escapeHTML).join(", ")}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View result" : "Continue Roulette"}</button>` : ""}${canManage ? `<button class="secondary-button" type="button" data-end-session>End Session</button>` : ""}</div></div></article>${rouletteWinner ? renderDiscordTemplate(activeSession, rouletteWinner) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No active session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Start Queue Roulette</button></div>`}
-      ${sessionHistory.length ? `<section class="session-history" aria-labelledby="session-history-title"><div class="section-heading"><div><span class="eyebrow">Saved history</span><h2 id="session-history-title">Previous sessions</h2></div><span class="request-count">${sessionHistory.length}</span></div><div class="session-history-list">${sessionHistory.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.startedAt))} · ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ")}</small></div><span class="status-pill watched">Ended</span></article>`; }).join("")}</div></section>` : ""}
+      <header class="page-header"><div><span class="eyebrow">Persistent decision rooms</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, watch it, then write the Journal post whenever suits. Discord stays a manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open Active Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>New Session <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${activeSession ? `<article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}<div class="active-session-head"><div><span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "In progress")} &middot; ${escapeHTML(activeSession.mode)} &middot; Hosted by ${escapeHTML(activeSession.hostName)}</span><h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed ${escapeHTML(sessionDateLabel(activeSession.sessionDate || isoDateOnly(activeSession.startedAt)))}.` : "The wheel is ready when you are.") : "This legacy session uses a mode that is not implemented."}</h3><p class="session-members">${activeSession.participants?.length ? activeSession.members.map(escapeHTML).join(", ") : "No participants added yet"}</p><p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film" : "films"} available when this session started.</p></div><div class="session-actions">${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}${canManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-mark-session-watched><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}${canManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}</div></div></article>` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No session in progress.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Start Queue Roulette</button></div>`}
+      ${journalIsWatched ? `<section class="session-journal-open" aria-label="Journal post for ${escapeHTML(openJournalFor.selectedFilm?.title || "this session")}">${renderDiscordTemplate(openJournalFor, selectedFilmForSession(openJournalFor))}</section>` : ""}
+      ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Watched</span><h2 id="watched-history-title">Previous watch nights</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.watchedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${journalSessionId === session.id ? "" : `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${session.journalDraft ? "Continue Journal post" : "Write Journal post"}</button>`}</div></article>`; }).join("")}</div></section>` : ""}
+      ${cancelled.length ? `<section class="session-history" aria-labelledby="cancelled-history-title"><div class="section-heading"><div><span class="eyebrow">Cancelled</span><h2 id="cancelled-history-title">Sessions that did not happen</h2></div><span class="request-count">${cancelled.length}</span></div><div class="session-history-list">${cancelled.map((session) => { const film = selectedFilmForSession(session); return `<article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.endedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)}</span><strong>${film ? escapeHTML(film.title) : "Session ended without a confirmed film"}</strong><small>${session.members.map(escapeHTML).join(", ")}</small></div><span class="status-pill">Cancelled</span></article>`; }).join("")}</div></section>` : ""}
     </section>`;
 }
 
@@ -1007,15 +1129,15 @@ function cloneRouletteState(state = rouletteState) {
   };
 }
 
-async function updateActiveMovieSession(patch) {
-  if (!activeSession || !activeGroup) throw new Error("There is no active session to update.");
+async function updateActiveMovieSession(patch, session = activeSession) {
+  if (!session || !activeGroup) throw new Error("There is no active session to update.");
   if (!canManageSession()) throw new Error("Only the session host or a website administrator can change this session.");
   if (designPreviewMode) return;
 
   const { data, error } = await supabase
     .from("movie_sessions")
     .update(patch)
-    .eq("id", activeSession.id)
+    .eq("id", session.id)
     .eq("group_id", activeGroup.id)
     .select("id")
     .maybeSingle();
@@ -1028,6 +1150,7 @@ async function persistRouletteState() {
   const gameState = serialiseRouletteState();
   await updateActiveMovieSession({ game_state: gameState });
   activeSession.gameState = gameState;
+  persistDesignPreviewWorkspace();
 }
 
 async function createMovieSession(participantIds, mode) {
@@ -1053,8 +1176,13 @@ async function createMovieSession(participantIds, mode) {
       selectedFilm: null,
       gameState,
       startedAt: new Date().toISOString(),
+      sessionDate: isoDateOnly(new Date()),
+      watchedAt: null,
+      journalDraft: null,
     };
     rouletteState = initialRoulette;
+    journalSessionId = null;
+    persistDesignPreviewWorkspace();
     return;
   }
 
@@ -1080,6 +1208,7 @@ async function confirmMovieSession(winner) {
   try {
     await updateActiveMovieSession({
       status: "CONFIRMED",
+      planned_for: activeSession.sessionDate || isoDateOnly(new Date()),
       selected_queue_item_id: winner.id,
       selected_title: winner.title,
       selected_release_year: winner.year || null,
@@ -1099,7 +1228,10 @@ async function confirmMovieSession(winner) {
   activeSession.selectedFilm = { ...winner };
   activeSession.gameState = gameState;
   activeSession.confirmedAt = new Date().toISOString();
+  activeSession.sessionDate = activeSession.sessionDate || isoDateOnly(new Date());
+  sessionDetailsEditing = false;
   discordDraft = createDiscordDraft(activeSession, winner);
+  persistDesignPreviewWorkspace();
 }
 
 async function resetMovieSessionRoulette() {
@@ -1127,6 +1259,62 @@ async function resetMovieSessionRoulette() {
   discordDraft = null;
 }
 
+async function saveSessionDetails({ sessionDate, participantIds }) {
+  if (!activeSession) throw new Error("There is no session to update.");
+  const chosen = members.filter((member) => participantIds.includes(member.id));
+  await updateActiveMovieSession({ planned_for: sessionDate }, activeSession);
+  await replaceSessionParticipants(activeSession.id, chosen);
+  activeSession.sessionDate = sessionDate;
+  activeSession.participantIds = chosen.map(({ id }) => id);
+  activeSession.participants = chosen.map(({ id, name }) => ({ id, name }));
+  activeSession.members = chosen.map(({ name }) => name);
+  if (rouletteState) {
+    rouletteState.participants = activeSession.participants.map(({ id, name }) => ({ id, name }));
+    rouletteState.usedVetoes = rouletteState.usedVetoes.filter((id) => activeSession.participantIds.includes(id));
+  }
+  persistDesignPreviewWorkspace();
+}
+
+async function replaceSessionParticipants(sessionId, chosen) {
+  if (designPreviewMode) return;
+  const { error: deleteError } = await supabase.from("movie_session_participants").delete().eq("session_id", sessionId);
+  if (deleteError) throw deleteError;
+  if (!chosen.length) return;
+  const { error: insertError } = await supabase.from("movie_session_participants").insert(chosen.map((member) => ({
+    session_id: sessionId,
+    profile_id: member.id,
+    display_name_snapshot: member.name,
+  })));
+  if (insertError) throw insertError;
+}
+
+async function markSessionWatched() {
+  if (!activeSession) throw new Error("There is no session to mark watched.");
+  const film = selectedFilmForSession(activeSession);
+  const watchedAt = new Date().toISOString();
+  await updateActiveMovieSession({ status: "WATCHED", watched_at: watchedAt, planned_for: activeSession.sessionDate });
+  if (film && !designPreviewMode) {
+    const { error } = await supabase.from("queue_items").update({ watched: true }).eq("id", film.id).eq("group_id", activeGroup.id);
+    if (error) throw error;
+  }
+  const watchedSession = { ...activeSession, status: "WATCHED", watchedAt };
+  if (film) {
+    const listed = movieList.find((item) => item.id === film.id);
+    if (listed) {
+      listed.watched = true;
+      listed.watchCount = (Number.isInteger(listed.watchCount) ? listed.watchCount : 0) + 1;
+    }
+  }
+  sessionHistory = [watchedSession, ...sessionHistory];
+  activeSession = null;
+  rouletteState = null;
+  discordDraft = null;
+  sessionDetailsEditing = false;
+  journalSessionId = watchedSession.id;
+  persistDesignPreviewWorkspace();
+  return watchedSession;
+}
+
 async function endMovieSession() {
   if (!activeSession) return;
   stopRouletteSpin();
@@ -1138,6 +1326,9 @@ async function endMovieSession() {
     activeSession = null;
     rouletteState = null;
     discordDraft = null;
+    journalSessionId = null;
+    sessionDetailsEditing = false;
+    persistDesignPreviewWorkspace();
   }
 }
 
@@ -1252,16 +1443,17 @@ async function loadWorkspace() {
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult] = await Promise.all([
+  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult, watchedResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).order("started_at", { ascending: false }).limit(20),
-    supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true })
+    supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true }),
+    supabase.from("movie_sessions").select("selected_queue_item_id").eq("group_id", activeGroup.id).eq("status", "WATCHED")
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error, watchedResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
@@ -1338,10 +1530,20 @@ async function loadWorkspace() {
       startedAt: session.started_at,
       confirmedAt: session.confirmed_at,
       endedAt: session.ended_at,
+      sessionDate: session.planned_for || isoDateOnly(session.started_at),
+      watchedAt: session.watched_at || null,
+      journalDraft: session.journal_draft && Object.keys(session.journal_draft).length ? session.journal_draft : null,
     };
   });
+  // A film's viewing count is the number of watched sessions that chose it, so
+  // sessions stay the single source of truth rather than a counter that drifts.
+  const watchCounts = new Map();
+  for (const filmId of (watchedResult.data || []).map((row) => row.selected_queue_item_id).filter(Boolean)) {
+    watchCounts.set(filmId, (watchCounts.get(filmId) || 0) + 1);
+  }
+  for (const item of movieList) item.watchCount = watchCounts.get(item.id) || 0;
   activeSession = sessions.find((session) => ["ACTIVE", "CONFIRMED"].includes(session.status)) || null;
-  sessionHistory = sessions.filter((session) => session.status === "ENDED");
+  sessionHistory = sessions.filter((session) => ["WATCHED", "ENDED"].includes(session.status));
   if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
   if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
 }
@@ -1372,12 +1574,33 @@ async function syncSession(session) {
 }
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.matches("#session-details-form")) {
+    event.preventDefault();
+    if (!event.target.reportValidity()) return;
+    const form = new FormData(event.target);
+    const submit = event.target.querySelector("[type=submit]");
+    submit.disabled = true;
+    try {
+      await saveSessionDetails({
+        sessionDate: String(form.get("session_date")),
+        participantIds: form.getAll("participant").map(String),
+      });
+      sessionDetailsEditing = false;
+      render();
+      showToast("Session details saved.");
+    } catch (error) {
+      submit.disabled = false;
+      showToast(`Session details were not saved: ${error.message}`);
+    }
+    return;
+  }
   if (event.target.matches("#discord-template-form")) {
     event.preventDefault();
     if (!event.target.reportValidity()) return;
     const form = new FormData(event.target);
+    const session = journalSession();
     discordDraft = {
-      sessionId: activeSession.id,
+      sessionId: session?.id || discordDraft?.sessionId || null,
       entryNumber: String(form.get("entry_number")).trim(),
       title: String(form.get("title")).trim(),
       year: String(form.get("year")).trim(),
@@ -1385,6 +1608,15 @@ document.addEventListener("submit", async (event) => {
       status: String(form.get("status")) === "DNF" ? "DNF" : "Finished",
       comment: String(form.get("comment")).trim(),
     };
+    if (session) {
+      session.journalDraft = discordDraft;
+      try {
+        await updateActiveMovieSession({ journal_draft: discordDraft }, session);
+      } catch (error) {
+        showToast(`The Journal draft was not saved: ${error.message}`);
+      }
+    }
+    persistDesignPreviewWorkspace();
     const template = buildDiscordTemplate(discordDraft);
     try {
       await navigator.clipboard.writeText(template);
@@ -1709,6 +1941,41 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  const journalButton = event.target.closest("[data-open-journal]");
+  if (journalButton) {
+    journalSessionId = journalButton.dataset.openJournal;
+    const session = journalSession();
+    discordDraft = session?.journalDraft ? { ...session.journalDraft, sessionId: session.id } : null;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#discord-copy-title")?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    return;
+  }
+  if (event.target.closest("[data-edit-session-details]")) {
+    sessionDetailsEditing = true;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#session-details-form [name=session_date]")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-cancel-session-edit]")) {
+    sessionDetailsEditing = false;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-mark-session-watched]")) {
+    const button = event.target.closest("[data-mark-session-watched]");
+    button.disabled = true;
+    try {
+      const watched = await markSessionWatched();
+      currentView = "sessions";
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      showToast(`${watched.selectedFilm?.title || "The film"} is marked watched. The Journal post is ready whenever you are.`);
+    } catch (error) {
+      button.disabled = false;
+      showToast(`The session was not marked watched: ${error.message}`);
+    }
+    return;
+  }
   if (event.target.closest("[data-toggle-journal-details]")) {
     event.preventDefault();
     journalDetailsOpen = !journalDetailsOpen;

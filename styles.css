@@ -5086,3 +5086,187 @@ legend,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- session summary (shown once a film is confirmed) ---------- */
+
+.session-summary {
+  padding: clamp(18px, 2.2vw, 26px);
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, rgba(31, 28, 47, 0.92), rgba(17, 18, 24, 0.98));
+  box-shadow: 0 22px 55px rgba(4, 5, 9, 0.34);
+}
+
+.session-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.session-summary-head h3 {
+  margin: 8px 0 0;
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 600;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.session-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.session-summary-grid dt {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.session-summary-grid dd {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.session-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.session-summary-actions .primary-button {
+  min-height: 50px;
+}
+
+.session-summary-actions small,
+.session-summary-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 52ch;
+}
+
+.session-details-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.session-details-form .session-participants-field,
+.session-details-form .session-summary-actions {
+  grid-column: 1 / -1;
+}
+
+.session-field-label,
+.session-details-form label > span {
+  display: block;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.session-details-form input[type="date"] {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: rgba(10, 11, 16, 0.78);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.session-details-form small {
+  display: block;
+  margin-top: 8px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.session-host-field p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.session-participants-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.session-participants-field > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.session-participant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--border);
+  background: rgba(10, 11, 16, 0.5);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.session-participant-toggle:has(input:checked) {
+  border-color: var(--purple-light);
+  background: rgba(109, 90, 230, 0.12);
+}
+
+.session-participant-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--purple-light);
+  outline-offset: 2px;
+}
+
+.session-participant-toggle img {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.session-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-journal-open {
+  margin-top: 24px;
+}
+
+@media (max-width: 640px) {
+  .session-summary-head {
+    flex-direction: column;
+  }
+
+  .session-summary-actions .primary-button {
+    width: 100%;
+    justify-content: center;
+  }
+}

@@ -301,9 +301,15 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   });
   await posterSettled();
   const beforeConfirm = await boxes();
+  const winnerTitle = (await page.locator("#roulette-winner-title").textContent()).trim();
 
   await page.getByRole("button", { name: "Confirm Movie and Create Session" }).click();
-  await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
+
+  // Confirming creates an editable session, not a finished Journal entry.
+  await expect(page.locator(".session-summary")).toBeVisible();
+  await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toHaveCount(0);
+  await expect(page.locator(".session-summary-grid dt")).toHaveText(["Session date", "Host", "Participants"]);
+  await expect(page.getByRole("button", { name: "Mark as watched" })).toBeVisible();
 
   await posterSettled();
   const afterConfirm = await boxes();
@@ -313,13 +319,34 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(Math.abs(afterConfirm[part].y - beforeConfirm[part].y), `${part}.y ${shiftMessage}`).toBeLessThanOrEqual(4);
     expect(Math.abs(afterConfirm[part].width - beforeConfirm[part].width), `${part}.width ${shiftMessage}`).toBeLessThanOrEqual(4);
   }
-  await expect(page.locator(".roulette-result-copy .discord-copy-card")).toHaveCount(0);
-  await expect(page.locator(".roulette-result-handoff .discord-copy-card")).toBeVisible();
 
   await expect(page.locator(".roulette-result-wheel")).toHaveCount(0);
   await expect(page.locator(".roulette-landed-callout")).toHaveCount(0);
-  await expect(page.locator(".roulette-session-actions")).toBeVisible();
   await expect(page.locator("#roulette-winner-title")).toBeFocused();
+
+  // The session date stays editable, in case the film is watched another night.
+  await page.locator("[data-edit-session-details]").click();
+  const dateField = page.locator("#session-details-form [name=session_date]");
+  await expect(dateField).toBeVisible();
+  await dateField.fill("2026-09-05");
+  await page.locator("#session-details-form [name=participant]").last().check();
+  await page.getByRole("button", { name: "Save session details" }).click();
+  // Formatted with the viewer's locale, so match the parts rather than an order.
+  await expect(page.locator(".session-summary-grid dd").first()).toHaveText(/September.*5|5.*September/);
+
+  await page.locator("[data-mark-session-watched]").click();
+
+  // Watching reveals the Journal post, on the Sessions screen, still copy-only.
+  await expect(page.getByRole("heading", { name: "Prepare the Journal post" })).toBeVisible();
+  await expect(page.locator(".copy-only-badge")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(page.locator(".discord-copy-actions small")).toContainText("Nothing is posted automatically");
+  await expect(page.locator(".session-history-actions .status-pill").first()).toHaveText("Watched");
+
+  // The viewing count is derived from watched sessions, so the list updates.
+  await page.locator('[data-view="list"]').click();
+  await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
+  await page.locator('[data-view="sessions"]').click();
 
   // The session fills these in, so they start folded away.
   const entryDetails = page.locator(".discord-entry-details");
@@ -328,27 +355,13 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await page.locator("[data-toggle-journal-details]").click();
   await expect(entryDetails).toHaveAttribute("open", /.*/);
   await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeVisible();
-  // The drawer is state, not DOM, so leaving the view and coming back must not close it.
-  await page.locator('[data-view="sessions"]').click();
-  await page.getByRole("button", { name: "View result" }).click();
-  await expect(entryDetails).toHaveAttribute("open", /.*/);
 
   if (testInfo.project.name === "desktop") {
     await page.setViewportSize({ width: 1553, height: 938 });
-    const confirmedGeometry = await page.evaluate(() => {
-      const layout = document.querySelector(".roulette-result-layout")?.getBoundingClientRect();
-      const stage = document.querySelector(".roulette-result-stage")?.getBoundingClientRect();
-      const copy = document.querySelector(".roulette-result-copy")?.getBoundingClientRect();
-      const handoff = document.querySelector(".roulette-result-handoff")?.getBoundingClientRect();
-      const actions = document.querySelector(".roulette-session-actions")?.getBoundingClientRect();
+    const journalGeometry = await page.evaluate(() => {
       const preview = document.querySelector("#discord-template-preview");
-      const buttons = [".discord-copy-actions .primary-button", ".roulette-session-actions .ghost-button", ".roulette-session-actions .secondary-button"];
+      const buttons = [".discord-copy-actions .primary-button", "[data-open-journal]"];
       return {
-        paddingTop: layout ? parseFloat(getComputedStyle(document.querySelector(".roulette-result-layout")).paddingTop) : Number.NaN,
-        copyWidth: copy?.width || 0,
-        handoffSpansLayout: Boolean(layout && handoff && Math.abs(handoff.left - layout.left) <= 1 && Math.abs(handoff.right - layout.right) <= 1),
-        handoffBelowResult: Boolean(stage && copy && handoff && handoff.top >= Math.max(stage.bottom, copy.bottom) - 1),
-        actionsBelowHandoff: Boolean(handoff && actions && actions.top >= handoff.bottom - 1),
         // The post you are about to paste must be fully visible, not scrolled.
         previewClippedVertically: Boolean(preview && preview.scrollHeight > preview.clientHeight + 1),
         previewClippedHorizontally: Boolean(preview && preview.scrollWidth > preview.clientWidth + 1),
@@ -356,14 +369,9 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
         tallestButton: Math.max(...buttons.map((selector) => document.querySelector(selector)?.getBoundingClientRect().height || 0)),
       };
     });
-    expect(confirmedGeometry.paddingTop).toBe(0);
-    expect(confirmedGeometry.copyWidth).toBeGreaterThanOrEqual(420);
-    expect(confirmedGeometry.handoffSpansLayout).toBe(true);
-    expect(confirmedGeometry.handoffBelowResult).toBe(true);
-    expect(confirmedGeometry.actionsBelowHandoff).toBe(true);
-    expect(confirmedGeometry.previewClippedVertically).toBe(false);
-    expect(confirmedGeometry.previewClippedHorizontally).toBe(false);
-    expect(confirmedGeometry.tallestButton).toBeLessThanOrEqual(60);
+    expect(journalGeometry.previewClippedVertically).toBe(false);
+    expect(journalGeometry.previewClippedHorizontally).toBe(false);
+    expect(journalGeometry.tallestButton).toBeLessThanOrEqual(60);
   }
 
   const overflowState = await page.evaluate(() => ({
