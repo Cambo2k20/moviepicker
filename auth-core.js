@@ -1,10 +1,19 @@
 const OAUTH_ERROR_KEYS = ["error", "error_code", "error_description"];
+export const DISCORD_SERVER_PROFILE_SCOPE = "guilds.members.read";
 
 export function buildAuthRedirectUrl(locationLike) {
   const origin = String(locationLike?.origin || "").trim();
   const pathname = String(locationLike?.pathname || "/");
   if (!/^https?:\/\//i.test(origin)) throw new Error("A valid website origin is required for OAuth.");
   return `${origin}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+}
+
+export function discordOAuthOptions(locationLike, { forceConsent = false } = {}) {
+  return {
+    redirectTo: buildAuthRedirectUrl(locationLike),
+    scopes: DISCORD_SERVER_PROFILE_SCOPE,
+    ...(forceConsent ? { queryParams: { prompt: "consent" } } : {}),
+  };
 }
 
 export function discordProviderEnabled(settings) {

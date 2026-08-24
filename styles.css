@@ -207,6 +207,28 @@ select:focus-visible {
   text-transform: none;
 }
 
+.session-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.session-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.session-identity-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
 .session-name {
   overflow: hidden;
   color: var(--text);
@@ -214,7 +236,19 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.session-identity-source {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.discord-profile-refresh,
 .session-sign-out {
+  display: inline-flex;
   width: fit-content;
   padding: 0;
   border: 0;
@@ -222,6 +256,20 @@ select:focus-visible {
   color: var(--purple-light);
   cursor: pointer;
   font: inherit;
+}
+
+.discord-profile-refresh {
+  align-items: center;
+  gap: 4px;
+}
+
+.discord-profile-refresh .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.discord-profile-refresh:hover,
+.session-sign-out:hover {
+  color: var(--text);
 }
 
 .main-view {
@@ -1990,8 +2038,23 @@ legend,
     border: 0;
   }
 
+  .session-identity {
+    gap: 6px;
+  }
+
+  .session-avatar {
+    width: 24px;
+    height: 24px;
+    flex-basis: 24px;
+  }
+
+  .session-identity-source,
+  .discord-profile-refresh-label {
+    display: none;
+  }
+
   .session-name {
-    max-width: 120px;
+    max-width: 82px;
   }
 
   .brand {

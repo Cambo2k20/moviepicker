@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DISCORD_SERVER_PROFILE_SCOPE,
   buildAuthRedirectUrl,
+  discordOAuthOptions,
   discordProviderEnabled,
   oauthCallbackError,
   preferredAuthDisplayName,
@@ -17,6 +19,19 @@ test("Discord availability is enabled only by the public Auth provider setting",
 
 test("OAuth redirects preserve the GitHub Pages base path and drop query state", () => {
   assert.equal(buildAuthRedirectUrl({ origin: "https://cambo2k20.github.io", pathname: "/moviepicker/", search: "?x=1", hash: "#list" }), "https://cambo2k20.github.io/moviepicker/");
+});
+
+test("Discord OAuth requests only the server-member scope and can force re-consent", () => {
+  const location = { origin: "https://cambo2k20.github.io", pathname: "/moviepicker/" };
+  assert.deepEqual(discordOAuthOptions(location), {
+    redirectTo: "https://cambo2k20.github.io/moviepicker/",
+    scopes: DISCORD_SERVER_PROFILE_SCOPE,
+  });
+  assert.deepEqual(discordOAuthOptions(location, { forceConsent: true }), {
+    redirectTo: "https://cambo2k20.github.io/moviepicker/",
+    scopes: "guilds.members.read",
+    queryParams: { prompt: "consent" },
+  });
 });
 
 test("Discord metadata supplies a safe request display name", () => {

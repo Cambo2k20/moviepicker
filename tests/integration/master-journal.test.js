@@ -134,12 +134,34 @@ test("set up current, archive and Discord identity records", async () => {
   `);
 });
 
-test("Discord identity sync trusts auth.identities, not browser input", async () => {
-  const { data, error } = await creator.client.rpc("sync_my_discord_identity");
-  assert.equal(error, null);
-  assert.equal(data.length, 1);
-  assert.equal(data[0].display_name, "Dean from Discord");
-  assert.equal(data[0].avatar_url, "https://cdn.discordapp.com/avatars/666/avatar.png");
+test("Discord identity cache accepts only a server profile and remains browser read-only", async () => {
+  assert.deepEqual(sqlRow(`
+    select
+      to_regprocedure('public.sync_my_discord_identity()') is null as public_rpc_removed,
+      to_regprocedure('private.sync_my_discord_identity()') is null as private_rpc_removed,
+      (select count(*)::integer from public.discord_identities) as cached_identities
+  `), {
+    public_rpc_removed: true,
+    private_rpc_removed: true,
+    cached_identities: 0,
+  });
+
+  runSql(`
+    set role service_role;
+    select * from public.upsert_discord_server_identity(
+      '${creator.id}',
+      '666666666666666666',
+      'Dean in The Discordians',
+      'https://cdn.discordapp.com/guilds/272427070779293697/users/666666666666666666/avatars/server.png'
+    );
+    select * from public.upsert_discord_server_identity(
+      '${creator.id}',
+      '666666666666666666',
+      'Dean in The Discordians',
+      'https://cdn.discordapp.com/guilds/272427070779293697/users/666666666666666666/avatars/server.png'
+    );
+    reset role;
+  `);
 
   const { data: visibleCards, error: cardError } = await member.client
     .from("discord_identities")
@@ -147,10 +169,11 @@ test("Discord identity sync trusts auth.identities, not browser input", async ()
   assert.equal(cardError, null);
   assert.equal(visibleCards.length, 1);
   assert.equal(visibleCards[0].profile_id, creator.id);
+  assert.equal(visibleCards[0].display_name, "Dean in The Discordians");
 
   const { error: idReadError } = await creator.client
     .from("discord_identities")
-    .select("discord_user_id");
+    .select("discord_user_id,discord_guild_id");
   assert.match(idReadError?.message || "", /permission denied/i);
 
   const { error: forgedWriteError } = await creator.client
@@ -158,6 +181,27 @@ test("Discord identity sync trusts auth.identities, not browser input", async ()
     .update({ display_name: "Forged" })
     .eq("profile_id", creator.id);
   assert.match(forgedWriteError?.message || "", /permission denied/i);
+
+  const { error: forgedRpcError } = await creator.client.rpc("upsert_discord_server_identity", {
+    p_profile_id: creator.id,
+    p_discord_user_id: "999999999999999999",
+    p_display_name: "Forged",
+    p_avatar_url: null,
+  });
+  assert.match(forgedRpcError?.message || "", /permission denied/i);
+
+  assert.deepEqual(sqlRow(`
+    select
+      has_column_privilege('service_role', 'public.discord_identities', 'discord_user_id', 'INSERT') as service_id_insert,
+      has_column_privilege('service_role', 'public.discord_identities', 'display_name', 'UPDATE') as service_name_update,
+      has_table_privilege('service_role', 'public.discord_identities', 'DELETE') as service_delete,
+      has_column_privilege('authenticated', 'public.discord_identities', 'display_name', 'UPDATE') as member_name_update
+  `), {
+    service_id_insert: true,
+    service_name_update: true,
+    service_delete: false,
+    member_name_update: false,
+  });
 });
 
 test("the master catalog combines current and archived entries for members only", async () => {

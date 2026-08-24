@@ -7,6 +7,7 @@ import {
   namedSupabaseKey,
   safeDiscordWebhookUrl,
 } from "../_shared/discord-journal.js";
+import { DISCORDIANS_GUILD_ID } from "../_shared/discord-server-profile.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -141,12 +142,11 @@ Deno.serve(async (req: Request) => {
     const entry = first(entries);
     if (!entry?.movie_session_id) return respond({ error: "That saved Journal entry is not linked to a watch session." }, 404);
 
-    const [sessions, memberships, viewerRows, profileRows, identityRows, existingRows] = await Promise.all([
+    const [sessions, memberships, viewerRows, identityRows, existingRows] = await Promise.all([
       restRows(supabaseUrl, `movie_sessions?select=id,group_id,status,selected_title,selected_runtime_minutes,selected_genres,selected_poster_path&id=eq.${entry.movie_session_id}&limit=1`, serviceKey, serviceAuthorization),
       restRows(supabaseUrl, `group_memberships?select=role&group_id=eq.${entry.group_id}&user_id=eq.${user.id}&limit=1`, serviceKey, serviceAuthorization),
       restRows(supabaseUrl, `entry_viewers?select=profile_id&entry_id=eq.${entry.id}`, serviceKey, serviceAuthorization),
-      restRows(supabaseUrl, `profiles?select=id,display_name&id=eq.${user.id}&limit=1`, serviceKey, serviceAuthorization),
-      restRows(supabaseUrl, `discord_identities?select=profile_id,display_name,avatar_url&profile_id=eq.${user.id}&limit=1`, serviceKey, serviceAuthorization),
+      restRows(supabaseUrl, `discord_identities?select=profile_id,discord_guild_id,display_name,avatar_url&profile_id=eq.${user.id}&discord_guild_id=eq.${DISCORDIANS_GUILD_ID}&limit=1`, serviceKey, serviceAuthorization),
       restRows(supabaseUrl, `discord_publications?select=*&journal_entry_id=eq.${journalEntryId}&limit=1`, serviceKey, serviceAuthorization),
     ]);
     const session = first(sessions);
@@ -167,10 +167,7 @@ Deno.serve(async (req: Request) => {
     const viewers = viewerIds
       .map((id) => ({ display_name: viewerNameById.get(id) || "Former member" }))
       .sort((left, right) => left.display_name.localeCompare(right.display_name));
-    const profile = first(profileRows);
     const discordIdentity = first(identityRows);
-    const posterDisplayName = discordIdentity?.display_name || profile?.display_name || "A Discordian";
-    const posterAvatarUrl = discordIdentity?.avatar_url || null;
     const webhook = safeDiscordWebhookUrl(Deno.env.get("DISCORD_JOURNAL_WEBHOOK_URL"));
     let publication = first(existingRows);
     const hasDiscordMessage = Boolean(
@@ -288,6 +285,11 @@ Deno.serve(async (req: Request) => {
       return respond({ error: uncertain }, 409);
     }
 
+    if (!discordIdentity?.display_name) {
+      return respond({ error: "Refresh your The Discordians server profile before posting to Discord." }, 409);
+    }
+    const posterDisplayName = discordIdentity.display_name;
+    const posterAvatarUrl = discordIdentity.avatar_url || null;
     const payload = buildDiscordJournalPayload({
       entry,
       session,
