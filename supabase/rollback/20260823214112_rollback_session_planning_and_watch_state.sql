@@ -1,4 +1,4 @@
--- Rollback for 20260823160000_add_session_planning_and_watch_state.
+-- Rollback for 20260823214112_add_session_planning_and_watch_state.
 --
 -- Destructive effects:
 -- - WATCHED sessions become ENDED because restoring them as CONFIRMED could
