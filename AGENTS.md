@@ -10,7 +10,9 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 - Never commit directly to `main`. Work on a focused `feature/`, `fix/` or `codex/` branch.
 - Before editing, inspect the active branch and compare it with `main`; this repository may contain important unmerged work.
 - Keep changes focused. Do not refactor or replace unrelated working behaviour.
-- Run `npm run build` before treating an implementation task as complete.
+- Run the relevant validation described in `README.md` — unit tests, build,
+  end-to-end tests and database tests for database changes — before treating
+  an implementation task as complete.
 - Report the files changed, validation performed and any unresolved risks.
 
 ## Branches and worktrees
@@ -30,6 +32,16 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 
 ## Product constraints
 
+- Before planning or implementing future product work, read the
+  [product direction](docs/PRODUCT_DIRECTION.md) and state which approved
+  decision and release phase the task belongs to.
+- Distinguish shipped behaviour from approved direction. A roadmap item or
+  approved product decision is not permission to implement, migrate, deploy or
+  merge it.
+- Treat approved decisions as the best current route towards the vision, not
+  immutable rules. If Cameron changes their mind or evidence shows a better
+  approach, surface it and update the direction deliberately; never let the
+  documents drift silently.
 - Preserve the Discordians purple, grey and white identity.
 - Preserve clear movie-poster artwork on phone layouts and in selected-film views.
 - Do not add Discord bot, webhook, OAuth or server permissions unless Cameron explicitly requests that integration.
@@ -40,11 +52,20 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 
 ## Validation
 
-Install and build with:
+Install and run the baseline checks with:
 
 ```bash
 npm install
+npm run test:unit
 npm run build
+npm run test:e2e
 ```
 
-For UI changes, also inspect representative phone, tablet and desktop sizes, including approximately `390 × 844`, `768 × 1024` and `1440 × 900`. Check loading, empty, error and signed-out states where relevant. There is not yet an automated test suite, so state which manual checks were completed.
+For UI changes, also inspect representative phone, tablet and desktop sizes,
+including approximately `390 × 844`, `768 × 1024` and `1440 × 900`. Check
+loading, empty, error and signed-out states where relevant. Also run the
+relevant unit, database integration and Playwright suites described in
+`README.md`. State which automated and manual checks were completed.
+
+Repository documentation uses portable `npm` commands. On Windows PowerShell,
+use `npm.cmd` when command resolution requires it.
