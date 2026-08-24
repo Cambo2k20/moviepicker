@@ -70,12 +70,14 @@ The optional Journal appears only after a session is watched. Drafts are saved o
 
 `20260824031315_add_discord_journal_publications.sql` adds an explicit publication record for the optional **Post to Discord** action. The browser never receives the webhook: `publish-journal-to-discord` authenticates the caller again, requires the saved Journal to belong to a watched session, checks that the caller is its host or an administrator, and builds the embed from canonical database values. Runtime, genres, viewers, status and the optional comment are included; Discord mentions are disabled. A unique row per Journal entry prevents ordinary duplicate posts. Manual **Copy for Discord** remains available.
 
-Set the webhook in the hosted project's Edge Function secrets, then deploy the function with JWT verification enabled:
+Set the webhook in the hosted project's Edge Function secrets, then deploy the function with the platform JWT gateway disabled:
 
 ```bash
 supabase secrets set DISCORD_JOURNAL_WEBHOOK_URL="https://discord.com/api/webhooks/..." --project-ref tbmxxdodprmynyiiaofj
-supabase functions deploy publish-journal-to-discord --project-ref tbmxxdodprmynyiiaofj
+supabase functions deploy publish-journal-to-discord --no-verify-jwt --project-ref tbmxxdodprmynyiiaofj
 ```
+
+This does not make Journal publishing anonymous. The handler rejects requests without a valid Supabase user session, reloads that user through `/auth/v1/user`, and then requires the caller to be the session host or a website administrator. The gateway is disabled because `sb_publishable_...` API keys are not JWTs; the browser keeps the publishable key in `apikey` and sends the signed-in user's token in `Authorization`.
 
 Do not place the webhook URL in `app.js`, a committed environment file, GitHub Actions output or screenshots. A failed Discord request leaves the Journal entry intact and makes the publication retryable. Editing an entry after it has posted does not edit the Discord message in this phase.
 
