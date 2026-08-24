@@ -13,9 +13,19 @@ A private, membership-gated movie list and movie-night companion for the Discord
 - Responsive phone, tablet and desktop layouts.
 - List-based statistics that are explicitly not Journal statistics.
 
-Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. Historical Discord entries remain read-only, and Phase 1 does not add `/journal edit` or Discord modals. Wrapped/challenge calculations also remain future work.
+Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. Historical Discord entries remain read-only, and the Journal delivery does not add `/journal edit` or Discord modals. Wrapped/challenge calculations also remain future work.
 
-Discord OAuth does not inspect guild membership or request server permissions. The only Discord write integration is the server-side Journal webhook, and it runs solely after an authorised member presses a posting or update button.
+Discord OAuth does not grant website membership or request bot/server permissions. An authenticated profile sync reads only the signed-in member's own Discordians server display record, while administrator approval remains the website access gate. The only Discord write integration is the server-side Journal webhook, and it runs solely after an authorised member presses a posting or update button.
+
+## Product documentation
+
+- [Project context](docs/PROJECT_CONTEXT.md) records the current architecture
+  and implemented product boundary in this checkout.
+- [Product direction](docs/PRODUCT_DIRECTION.md) records the approved future
+  direction for My Cinema, Discover and curated profiles.
+
+Approved direction is not shipped behaviour and is not blanket permission to
+implement, migrate, deploy or merge the roadmap.
 
 ## Local development
 
@@ -45,7 +55,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-- `test:unit` covers Roulette rules, Discord Journal payload safety and the historical Journal parser.
+- `test:unit` covers Roulette rules, the Discord OAuth and sign-in boundary,
+  Discord server-profile safety, Discord Journal payload safety and the
+  historical Journal parser.
 - `build` creates `dist/` and fails if a bundled local asset is missing or an unbundled source path remains.
 - `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`. It runs entirely in `?design-preview`, so it proves the interface, not the database.
 - `test:db` runs the Supabase integration suite. It needs a local database and is therefore not part of `npm test` or CI:
@@ -99,7 +111,7 @@ For a fresh Supabase environment, apply everything in `supabase/migrations/` in 
 
 The canonical files (`supabase/schema.sql`, `member_management.sql`, `movie_metadata.sql`, `movie_sessions.sql`) remain as readable documentation of how the schema was first assembled. They predate the session-planning work and are **not** sufficient to run the current frontend on their own; see `supabase/README.md` for what they are missing.
 
-The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The Phase 1 master-Journal migration, historical import and updated Edge Function in this branch are not applied to production by a build, test or GitHub Pages deployment.
+The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The master-Journal migration, historical import and updated Edge Function in this branch are not applied to production by a build, test or GitHub Pages deployment.
 
 Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the browser bundle.
 

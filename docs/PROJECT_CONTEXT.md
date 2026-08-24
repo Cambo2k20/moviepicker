@@ -1,130 +1,246 @@
 # Project context
 
+## Purpose
+
+This document describes the implemented product and architecture in the
+current checkout. It is current-state evidence, not the future roadmap.
+
+Read the [product direction](PRODUCT_DIRECTION.md) for the approved direction
+for My Cinema, Discover and curated member profiles. Approved direction is not
+shipped behaviour or implementation permission.
+
 ## Product intent
 
-Discordians / Cine-Cord is a private website for a small group of friends who maintain a shared movie list and watch films together. It should replace scattered manual tracking without losing the informal Discord-based routine the group already uses.
+Discordians / Cine-Cord is a private website for a small Discord group that
+maintains a shared movie list, chooses films together and keeps a long-running
+Journal.
 
-The product is broader than a random movie picker. Its main areas are:
+It replaces scattered manual tracking without discarding the group's existing
+Discord routine. The site remains membership-gated even when a person can
+authenticate successfully.
 
-- the shared movie list and votes;
-- movie-night setup and decision games;
-- persistent, resumable movie-night sessions;
-- the long-running Journal of watched films;
-- group and personal statistics, achievements and challenges;
-- member administration.
+## Current implemented boundary
 
-## Audience and access
+This section describes the committed feature/session-journal-handoff checkout
+at commit f2ddd4f. A build or commit does not prove that matching migrations,
+Edge Functions or frontend assets have been deployed to production.
 
-- The audience is a known private group, not the public.
-- Creating or signing into an account must not by itself grant access to private group data.
-- Membership approval and Supabase Row Level Security are part of the product model, not optional implementation details.
-- Administrators manage access and roles from the website.
+### Authentication and membership
 
-## Product language
-
-- **Discordians** is the overall group/companion identity.
-- **Cine-Cord** is the movie-list and movie-night area.
-- **Journal** is the historical record of watched films.
-- **Movie-night session** is the persistent room containing participants, decision-game state and the selected film.
-
-## Current experience
+- Email/password and optional Discord OAuth sign-in are supported.
+- Authentication alone does not grant access.
+- Administrators approve group membership through the website.
+- Membership and Row Level Security protect private group records.
+- Discord profile synchronisation stores the verified server display name and
+  avatar needed by the site without exposing the Discord account ID to the
+  browser.
+- Discord sign-in never bypasses the website approval gate.
 
 ### Shared movie list
 
-Members can browse a poster-led movie collection, search and filter it, inspect full film details, vote and add films through a protected metadata lookup. The selected-film presentation must preserve the full poster aspect ratio on phones rather than cropping away recognisable artwork.
+Approved members can:
+
+- Browse a poster-led shared list
+- Search and filter it
+- Inspect film details
+- Vote
+- Add films through the protected movie-lookup Edge Function
+- Track shared watched status
+
+External movie-database credentials remain in the Edge Function environment.
+The browser receives safe film results only.
 
 ### Queue Roulette
 
-Queue Roulette chooses from eligible list entries. Current controls include runtime, genre, watched status, age weighting and member vetoes. The wheel should communicate real film divisions clearly:
+Queue Roulette is the only implemented movie-night decision game.
 
-- visible boundaries between film portions;
-- readable film labels;
-- correct poster/background scaling;
-- no misleading decorative segments;
-- usable controls and result presentation on narrow phone screens.
+It supports:
 
-### Persistent movie-night sessions
+- Runtime and genre constraints
+- Watched-state eligibility
+- Age weighting
+- One veto per participant
+- Visible film divisions and truthful odds
+- Persistent, resumable game state
+- A selected-film result that can continue into a saved session
 
-A session records the host, approved participants, decision mode, resumable game state and selected-film snapshot. A refresh should not silently destroy an active session. The website maintains session history separately from Journal entries.
+Consensus Sprint and Reel Bracket are disabled Coming soon placeholders. They
+must not be described as functional.
 
-A selected result can be copied manually into Discord. The editable output follows this general shape:
+### Movie-night sessions
 
-```text
-- Entry #307
-- Men
-- 2022
-- Viewers: Adam, Dean
-- Status: Finished
-- I wish I had a comment to make but I don't know what the fuck I just saw. Don't watch this movie
-————————————————————————————————————————————————————————
-```
+A session stores:
 
-Keep this manual copy path. Discord OAuth may be used for sign-in, but it does not authorize automatic posting, guild inspection or server permissions.
+- Host and approved participants
+- Decision mode
+- Resumable game state
+- Selected-film snapshot
+- Planning and watch status
+- Watch date
+- Journal draft
+
+Confirming a film does not mark it watched. The authorised watch-completion
+flow records the final viewers and creates or updates the corresponding
+Journal relationship.
+
+Once a session's Journal entry is saved, the session moves into the Journal.
+Watched sessions without a saved entry remain in Sessions until their entry is
+written.
 
 ### Journal
 
-Journal entries, viewers and secure write functions exist in the Supabase backend. The active frontend currently has no Journal route, reader or write form, so Journal persistence is backend capability rather than a user-facing feature. Do not describe it as shipped until that UI is implemented and validated.
+The Journal is an implemented top-level frontend area in this checkout.
+
+It combines:
+
+- Current Cine-Cord Journal entries
+- Read-only historical entries imported from the three preserved Discord
+  Journal channels
+- Search across the combined catalog
+- Creator/admin editing for current entries
+- Guarded deletion for current entries
+- Viewer records
+- Session-linked entry handling
+
+Historical imported entries remain read-only.
+
+Copy for Discord remains available. Posting is a separate explicit action.
+Post to Discord and Update Discord post call an authenticated server-side Edge
+Function that uses stored webhook credentials. Saving or copying never posts
+automatically, and an existing publication is updated rather than silently
+duplicated.
+
+The current manual Copy for Discord output follows this shape:
+
+```text
+- Entry #307
+- Film title
+- 2022
+- Viewers: Adam, Dean
+- Status: Finished
+- Optional comment
+————————————————————————————————————————————————————————
+```
+
+Current-entry deletion removes a confirmed Discord webhook message first when
+one exists. If Discord refuses that deletion, Supabase data is left untouched.
 
 ### Statistics and challenges
 
-Wrapped/statistics screens exist, but their final persistent calculation model is not complete. A desired future direction is a challenge system with both server-wide and personal progress, for example genre milestones such as watching 100 comedies. Treat challenge definitions, rewards and anti-gaming rules as product design work rather than inventing them silently inside an unrelated task.
+The current statistics are based on the shared list and must not be described
+as Journal statistics.
+
+Final persistent Wrapped calculations, personal statistics, achievements and
+challenge progress are not implemented.
+
+### Member administration
+
+Administrators can review access requests and manage approved membership and
+roles. Removing membership revokes group access through Row Level Security.
+Application membership administration is distinct from any future curated
+member-profile directory.
+
+## Product language
+
+- **Discordians** — overall private group identity
+- **Cine-Cord** — shared movie-list, movie-night and Journal area
+- **The List** — the shared movie queue
+- **Journal** — current and imported historical watched-film record
+- **Movie-night session** — persistent room containing participants, game
+  state, selected film and watch handoff
+- **My Cinema** — approved future private personal-library area; not shipped
+- **Discover** — approved future private recommendation area; not shipped
+
+## Current persistence
+
+Implemented persistence includes:
+
+- Auth users and site profiles
+- Group memberships and access requests
+- Verified Discord server display fields
+- Shared queue films, metadata and votes
+- Movie-night sessions, participants, game state and selected-film snapshots
+- Watch completion and Journal drafts
+- Current Journal entries and viewers
+- Read-only imported Journal volumes and archive entries
+- Explicit Discord publication records
+
+Not implemented:
+
+- Personal My Cinema records, states, ratings, Favourites and lists
+- Personal viewing-event history
+- Curated profile publications and group profile directory
+- Discover feedback or recommendation profiles
+- Archive-entry claims
+- Personal export and self-service account deletion
+- Live multiplayer presence
+- Final Wrapped, achievement or challenge persistence
 
 ## Visual direction
 
-- Purple, grey and white Discordians identity.
-- Dark, polished interface with strong poster imagery.
-- Clear hierarchy rather than dense dashboard clutter.
-- Mobile is a first-class layout, not a compressed desktop fallback.
-- Poster art should stay visible on movie cards and selected-film screens.
-- Dialogs, wheels and result panels must fit within the phone viewport without unusable clipping.
-- Maintain accessible contrast, visible focus states and meaningful button labels.
+- Purple, grey and white Discordians identity
+- Dark polished interface with strong poster imagery
+- Clear hierarchy rather than dense dashboard clutter
+- Full poster aspect ratio on phones and selected-film screens
+- Mobile-first behaviour at narrow viewports
+- Accessible contrast, visible focus and meaningful labels
+
+Dialogs, wheels and result panels must remain usable without horizontal
+overflow or clipped primary actions.
 
 ## Technical boundaries
 
-- Active frontend: `index.html`, `app.js` and `styles.css`.
-- Build tool: Vite.
-- Backend: Supabase Auth, Postgres, RLS, database functions and Edge Functions.
-- Deployment: static GitHub Pages frontend plus Supabase backend.
-- `support.js` is generated legacy runtime code and should not be hand-edited.
-- `Movie Picker.dc.html` is a legacy design reference, not the active application.
-- The browser may use the Supabase publishable key. Service-role keys and external movie-database credentials must remain server-side.
+- Frontend: Vite with active index.html, app.js and styles.css
+- Backend: Supabase Auth, Postgres, Row Level Security, database functions and
+  Edge Functions
+- Hosting: static GitHub Pages frontend plus Supabase services
+- Protected film metadata: supabase/functions/movie-lookup
+- Discord server profile sync: authenticated Edge Function
+- Explicit Journal publishing: authenticated Edge Function and server-held
+  webhook credential
 
-## Persistence boundary at handoff
+Movie Picker.dc.html and support.js are legacy/generated references and are not
+active implementation targets.
 
-Persistent:
+The browser may hold a Supabase publishable key. It must never contain a
+service-role key, Supabase secret key, TMDB credential, Discord client secret or
+webhook credential.
 
-- authentication and profiles;
-- optional Discord OAuth sign-in with the same manual membership approval gate;
-- group membership and access requests;
-- Journal entries and viewers at the database layer only;
-- movie list, metadata and voting;
-- movie-night sessions, participants, selected-film snapshots and resumable Queue Roulette state.
+The readable canonical SQL files under supabase predate some later migrations.
+Build databases from the ordered migration chain and consult
+the [Supabase notes](../supabase/README.md) rather than assuming the original
+schema files are complete.
 
-Not yet persistent or integrated:
+## Validation boundary
 
-- active Journal reading and writing in the frontend;
-- Discord posting or synchronisation;
-- live multiplayer presence;
-- final Wrapped calculations;
-- server-wide and personal challenge progress.
+Available checks:
 
-## Candidate future work
+- npm run test:unit
+- npm run test:db with a local Supabase stack
+- npm run build
+- npm run test:e2e
 
-These are backlog directions, not permission to implement all of them in one change:
+On Windows PowerShell, use npm.cmd when command resolution requires it.
 
-1. Review and apply the staged least-privilege migration, then verify live grants and session writes.
-2. Design and implement the active Journal reader/write flow against the existing secure backend.
-3. Add decision games such as Consensus Sprint and Reel Bracket only when their full interaction and persistence rules are defined.
-4. Design persistent server-wide and personal statistics/challenges.
-5. Expand automated coverage around Supabase mapping and authenticated multi-user behavior.
-6. Continue splitting the growing `app.js` and `styles.css` into focused modules without replacing working behavior.
-7. Consider Discord posting or synchronisation only after defining credentials, permissions, conflict handling and the source of truth. OAuth sign-in alone is not synchronisation.
+Playwright design-preview checks prove browser presentation and interaction
+against preview data. They do not prove authenticated database writes, RLS,
+Edge Function deployment or production state.
 
-## Definition of done for a change
+Database integration checks use several authenticated identities and must cover
+ownership, membership and cross-member denial when a change affects private
+data.
 
-- The requested behaviour is implemented on a focused branch.
-- Existing private-access and RLS assumptions remain intact.
-- `npm run build` succeeds.
-- Relevant phone, tablet and desktop states are manually checked.
-- Database changes are documented and do not expose secrets.
-- No branch is merged unless Cameron explicitly asks for it.
+Representative UI checks include approximately 390 × 844, 768 × 1024 and
+1440 × 900 plus loading, empty, error and signed-out states where relevant.
+
+## Handoff rule
+
+Before changing this product:
+
+1. Verify the exact checkout, branch and worktree.
+2. Compare the active branch with main and inspect uncommitted changes.
+3. Read the [product direction](PRODUCT_DIRECTION.md) for approved future
+   behaviour.
+4. Distinguish inspection, proposal, implementation and deployment.
+5. Obtain explicit permission for the focused change.
+6. Never describe unvalidated or undeployed work as live.
