@@ -388,6 +388,12 @@ deno_version = 2
 # project's sb_publishable key as a JWT, so authentication lives in the handler.
 verify_jwt = false
 
+[functions.sync-discord-server-profile]
+# This handler follows the same authenticated /auth/v1/user boundary, then
+# checks approved group membership before sending the one-use provider token to
+# Discord. The token is never persisted by the function or database.
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

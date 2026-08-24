@@ -121,6 +121,19 @@ test("local application images resolve in the browser", async ({ page }) => {
   expect(viewportOverflow).toBeLessThanOrEqual(1);
 });
 
+test("the signed-in shell shows the Discord server profile without overflowing", async ({ page }) => {
+  await expect(page.locator("#session-name")).toHaveText("Basil Brush");
+  await expect(page.locator("#session-identity-source")).toHaveText("The Discordians profile");
+  const avatar = page.locator("#session-avatar");
+  await expect(avatar).toBeVisible();
+  expect(await avatar.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+
+  await page.getByRole("button", { name: "Refresh The Discordians server profile" }).click();
+  await expect(page.locator("#toast")).toContainText("test Discord server-profile data");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("the master Journal keeps archives read-only and current entries actionable", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Journal" }).click();
   await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
@@ -451,6 +464,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   // The fancy card adds runtime and genres while manual copy remains available.
   const embedPreview = page.locator(".discord-embed-preview");
   await expect(embedPreview).toContainText(/\d+ min/);
+  await expect(embedPreview).toContainText("Submitted by Basil Brush via Cine-Cord");
   await expect(embedPreview.locator("[data-discord-preview-genres]")).not.toHaveText("Genres unavailable");
   await expect(page.getByText("Manual copy preview")).toBeVisible();
 

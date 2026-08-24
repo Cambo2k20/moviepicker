@@ -10,7 +10,7 @@ import {
   serialiseRouletteState as serialiseRouletteStateValue,
 } from "./roulette-core.js";
 import {
-  buildAuthRedirectUrl,
+  discordOAuthOptions,
   discordProviderEnabled,
   oauthCallbackError,
   preferredAuthDisplayName,
@@ -64,6 +64,9 @@ const filmManualAdd = document.querySelector("#film-manual-add");
 const toast = document.querySelector("#toast");
 const sessionPanel = document.querySelector("#session-panel");
 const sessionName = document.querySelector("#session-name");
+const sessionAvatar = document.querySelector("#session-avatar");
+const sessionIdentitySource = document.querySelector("#session-identity-source");
+const discordProfileRefresh = document.querySelector("#discord-profile-refresh");
 
 const legacyViewMap = { home: "list", queue: "list", tonight: "pick", wrapped: "stats" };
 const initialHash = window.location.hash.replace("#", "");
@@ -88,6 +91,9 @@ let journalDraftTimer = 0;
 let journalPublishPendingId = null;
 let journalEditingId = null;
 let journalSyncPendingId = null;
+let discordProfileSyncInFlight = null;
+let discordProfileSyncError = "";
+let discordProfileSyncNotice = "";
 let journalQuery = "";
 let journalSourceFilter = "all";
 let journalStatusFilter = "all";
@@ -113,6 +119,11 @@ let isLoading = true;
 let toastTimer;
 
 const DISCORD_ENTRY_DIVIDER = "————————————————————————————————————————————————————————————————————————————————————";
+const DISCORD_PROFILE_SYNC_MARKER = "cine-cord-discord-server-profile-sync";
+let discordProfileSyncRequested = (() => {
+  try { return window.sessionStorage.getItem(DISCORD_PROFILE_SYNC_MARKER) === "requested"; }
+  catch { return false; }
+})();
 const ROULETTE_SPIN_DURATION_MS = 4200;
 const ROULETTE_SETTLE_DURATION_MS = 2600;
 const ROULETTE_REDUCED_SPIN_DURATION_MS = 80;
@@ -170,6 +181,7 @@ function clearDesignPreviewWorkspace() {
 }
 
 function loadDesignPreviewWorkspace() {
+  discordAuthEnabled = true;
   const previewVariant = new URLSearchParams(window.location.search).get("design-preview");
   const previewObserver = previewVariant === "observer";
   const previewIdentity = previewObserver
@@ -179,7 +191,14 @@ function loadDesignPreviewWorkspace() {
   // member is a non-admin host; observer is a non-admin participant. The same
   // saved preview session can therefore exercise both permission surfaces.
   const previewRole = ["member", "observer"].includes(previewVariant) ? "member" : "admin";
-  currentProfile = { id: previewIdentity.id, displayName: previewIdentity.displayName, role: previewRole };
+  currentProfile = {
+    id: previewIdentity.id,
+    displayName: previewIdentity.displayName,
+    discordServerDisplayName: previewObserver ? "Dean" : "Basil Brush",
+    discordServerAvatar: previewObserver ? knownAvatars.dean : knownAvatars.cameron,
+    discordServerProfileSyncedAt: "2026-08-24T14:00:00.000Z",
+    role: previewRole,
+  };
   activeGroup = { id: "preview-group", name: "The Discordians", slug: "discordians" };
   members = [
     { id: "preview-cameron", name: "Cameron", role: "admin", avatar: knownAvatars.cameron },
@@ -480,7 +499,7 @@ function renderDiscordFancyPreview(session, film, draft) {
           <div><dt>Status</dt><dd data-discord-preview-status>${escapeHTML(draft.status)}</dd></div>
         </dl>
         <blockquote data-discord-preview-comment ${comment ? "" : "hidden"}>${escapeHTML(comment)}</blockquote>
-        <small>Submitted by ${escapeHTML(currentProfile?.discordDisplayName || currentProfile?.displayName || "a Discordian")} via Cine-Cord</small>
+        <small>Submitted by ${escapeHTML(currentProfile?.discordServerDisplayName || "server profile not synced")} via Cine-Cord</small>
       </div>
       ${poster ? `<img src="${escapeHTML(poster)}" alt="" />` : ""}
     </section>`;
@@ -510,6 +529,9 @@ function renderDiscordPublicationActions(session) {
     return `<div class="discord-publication-state has-warning" role="alert"><span class="material-symbols-outlined" aria-hidden="true">warning</span><div><strong>Discord delivery is uncertain</strong><small>${escapeHTML(publication.last_error || "Check the Journal channel. Posting again is blocked so the entry is not duplicated.")}</small></div></div>`;
   }
   if (!canPublish) return "";
+  if (!currentProfile?.discordServerDisplayName) {
+    return `<div class="discord-publication-state has-warning" role="alert"><span class="material-symbols-outlined" aria-hidden="true">account_circle</span><div><strong>Discord server profile required</strong><small>Connect your The Discordians profile to post with your server name and avatar. Copy for Discord still works.</small></div><button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect profile</button></div>`;
+  }
   const failed = publication?.status === "FAILED";
   const pending = journalPublishPendingId === session.id || syncing;
   return `<div class="discord-publish-action ${failed ? "has-failed" : ""}">${failed ? `<p role="alert"><strong>Discord post failed.</strong> ${escapeHTML(publication.last_error || "The saved Journal entry is safe; try posting it again.")}</p>` : ""}<button class="primary-button discord-post-button" type="button" data-post-journal ${pending ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">${pending ? "progress_activity" : "send"}</span>${pending ? "Posting…" : failed ? "Retry Discord post" : "Post to Discord"}</button><small>This is explicit: it saves the Journal entry, then sends one embed to the configured Journal channel.</small></div>`;
@@ -799,7 +821,7 @@ async function publishJournalToDiscord(session, action = "publish") {
         discord_message_id: `preview-${session.journalEntry.entryNumber}`,
         posted_at: now,
         posted_by: currentProfile.id,
-        poster_display_name: currentProfile.discordDisplayName || currentProfile.displayName,
+        poster_display_name: currentProfile.discordServerDisplayName,
         last_synced_by: currentProfile.id,
         last_synced_at: now,
         discord_out_of_date: false,
@@ -848,7 +870,7 @@ async function syncCatalogJournalToDiscord(entry, action) {
         discord_message_id: `preview-${entry.entryLabel}`,
         posted_at: now,
         posted_by: currentProfile.id,
-        poster_display_name: currentProfile.discordDisplayName || currentProfile.displayName,
+        poster_display_name: currentProfile.discordServerDisplayName,
         discord_out_of_date: false,
       };
     entry.publicationStatus = "POSTED";
@@ -1252,6 +1274,49 @@ function showToast(message) {
   toastTimer = setTimeout(() => { toast.hidden = true; }, 3600);
 }
 
+function requestDiscordProfileSync() {
+  discordProfileSyncRequested = true;
+  try { window.sessionStorage.setItem(DISCORD_PROFILE_SYNC_MARKER, "requested"); }
+  catch { /* the in-memory flag still survives until navigation */ }
+}
+
+function clearDiscordProfileSyncRequest() {
+  discordProfileSyncRequested = false;
+  try { window.sessionStorage.removeItem(DISCORD_PROFILE_SYNC_MARKER); }
+  catch { /* no stored marker to clear */ }
+}
+
+async function syncDiscordServerProfile(providerToken) {
+  const token = String(providerToken || "").trim();
+  if (!token) throw new Error("Reconnect Discord to refresh your server profile.");
+  if (discordProfileSyncInFlight) return discordProfileSyncInFlight;
+
+  discordProfileSyncInFlight = (async () => {
+    const { data, error } = await supabase.functions.invoke("sync-discord-server-profile", {
+      body: { providerToken: token },
+    });
+    if (error) {
+      let message = error.message || "Your Discord server profile could not be refreshed.";
+      try {
+        const payload = await error.context?.json();
+        if (payload?.error) message = payload.error;
+      } catch { /* keep the safe function error */ }
+      throw new Error(message);
+    }
+    if (!data?.identity?.displayName) throw new Error("Discord did not return a usable server profile.");
+    return data.identity;
+  })();
+
+  try {
+    return await discordProfileSyncInFlight;
+  } finally {
+    // Never keep a second application copy of Discord's provider token or retry
+    // it silently on later page loads. The user can explicitly refresh again.
+    clearDiscordProfileSyncRequest();
+    discordProfileSyncInFlight = null;
+  }
+}
+
 async function loadAuthProviderAvailability() {
   if (discordAuthPreviewMode) {
     discordAuthEnabled = true;
@@ -1285,7 +1350,7 @@ function renderLogin() {
           <div class="oauth-access">
             <button class="discord-auth-button" type="button" data-auth-discord>
               <span class="material-symbols-outlined discord-auth-icon" aria-hidden="true">forum</span>
-              <span class="discord-auth-copy"><strong>Continue with Discord</strong><small>Approval is still required</small></span>
+              <span class="discord-auth-copy"><strong>Continue with Discord</strong><small>Uses your server name/avatar · approval is still required</small></span>
               <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
             </button>
           </div>
@@ -1734,7 +1799,7 @@ function renderJournalCard(entry) {
         <div>
           ${!isArchive ? `<button class="secondary-button compact" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
           ${entry.canEdit ? `<button class="secondary-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
-          ${entry.canEdit && !hasDiscordMessage ? `<button class="primary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : ""}
+          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="primary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
           ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
           ${entry.discordUrl ? `<a class="secondary-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer">${isArchive ? "Open original" : "View in Discord"}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}
         </div>
@@ -1796,6 +1861,7 @@ function renderMembers() {
 
 function updateShellState() {
   const hasWorkspace = Boolean(authUser && activeGroup);
+  const hasDiscordServerProfile = Boolean(currentProfile?.discordServerDisplayName);
   const isAdmin = hasWorkspace && isCurrentAdmin();
   document.body.classList.toggle("is-locked", !hasWorkspace);
   document.body.classList.toggle("is-admin", isAdmin);
@@ -1806,7 +1872,15 @@ function updateShellState() {
     button.classList.toggle("is-active", hasWorkspace && button.dataset.view === currentView);
   });
   if (sessionPanel) sessionPanel.hidden = !authUser;
-  if (sessionName) sessionName.textContent = currentProfile?.displayName || authUser?.email || "Signed in";
+  if (sessionName) sessionName.textContent = currentProfile?.discordServerDisplayName || currentProfile?.displayName || authUser?.email || "Signed in";
+  if (sessionIdentitySource) sessionIdentitySource.textContent = hasDiscordServerProfile ? "The Discordians profile" : "Discord profile needs refresh";
+  if (sessionAvatar) {
+    const avatarUrl = currentProfile?.discordServerAvatar || "";
+    sessionAvatar.hidden = !avatarUrl;
+    if (avatarUrl) sessionAvatar.src = avatarUrl;
+    else sessionAvatar.removeAttribute("src");
+  }
+  if (discordProfileRefresh) discordProfileRefresh.hidden = !hasWorkspace || !discordAuthEnabled;
 }
 
 function bindListSearch() {
@@ -2254,7 +2328,7 @@ function closeFilmModal() {
   clearFilmMatches();
 }
 
-async function loadWorkspace() {
+async function loadWorkspace(providerToken = null) {
   const { data: groups, error: groupError } = await supabase.from("groups").select("id,name,slug").eq("slug", "the-discordians").limit(1);
   if (groupError) throw groupError;
   availableGroup = groups?.[0] || null;
@@ -2276,20 +2350,27 @@ async function loadWorkspace() {
   journalSyncPendingId = null;
   if (!availableGroup) return;
 
-  const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
+  const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name").eq("id", authUser.id).maybeSingle(),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", availableGroup.id).eq("user_id", authUser.id).maybeSingle(),
-    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", availableGroup.id).eq("user_id", authUser.id).maybeSingle()
+    supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", availableGroup.id).eq("user_id", authUser.id).maybeSingle(),
+    supabase.from("discord_identities").select("profile_id,display_name,avatar_url,synced_at").eq("profile_id", authUser.id).maybeSingle(),
   ]);
-  const accessError = [selfProfileResult.error, selfMembershipResult.error, selfRequestResult.error].find(Boolean);
+  const accessError = [selfProfileResult.error, selfMembershipResult.error, selfRequestResult.error, selfDiscordIdentityResult.error].find(Boolean);
   if (accessError) throw accessError;
   currentProfile = { id: authUser.id, displayName: selfProfileResult.data?.display_name || preferredAuthDisplayName(authUser), role: selfMembershipResult.data?.role || null };
   accessRequest = selfRequestResult.data || null;
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const { error: identitySyncError } = await supabase.rpc("sync_my_discord_identity");
-  if (identitySyncError) console.warn("Discord identity sync failed", identitySyncError);
+  if (providerToken && (discordProfileSyncRequested || !selfDiscordIdentityResult.data)) {
+    try {
+      const identity = await syncDiscordServerProfile(providerToken);
+      discordProfileSyncNotice = `The Discordians profile refreshed as ${identity.displayName}.`;
+    } catch (error) {
+      discordProfileSyncError = error.message;
+    }
+  }
   const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
@@ -2315,14 +2396,15 @@ async function loadWorkspace() {
   currentProfile = {
     id: authUser.id,
     displayName: profileMap.get(authUser.id)?.display_name || currentProfile.displayName,
-    discordDisplayName: selfDiscordIdentity?.display_name || null,
-    discordAvatar: selfDiscordIdentity?.avatar_url || null,
+    discordServerDisplayName: selfDiscordIdentity?.display_name || null,
+    discordServerAvatar: selfDiscordIdentity?.avatar_url || null,
+    discordServerProfileSyncedAt: selfDiscordIdentity?.synced_at || null,
     role: selfMembershipResult.data.role,
   };
   members = (membershipsResult.data || []).map((membership) => {
     const name = profileMap.get(membership.user_id)?.display_name || "Discordian";
     const identity = discordIdentityMap.get(membership.user_id);
-    return { id: membership.user_id, name, discordName: identity?.display_name || null, role: membership.role, avatar: identity?.avatar_url || avatarForName(name) };
+    return { id: membership.user_id, name, discordServerName: identity?.display_name || null, role: membership.role, avatar: identity?.avatar_url || avatarForName(name) };
   });
   joinRequests = isCurrentAdmin() ? (requestsResult.data || []) : [];
   const votesByItem = new Map();
@@ -2481,15 +2563,19 @@ async function syncSession(session) {
   journalPublishPendingId = null;
   journalEditingId = null;
   journalSyncPendingId = null;
+  discordProfileSyncError = "";
+  discordProfileSyncNotice = "";
   selectedFilmId = null;
   clearJournalDraftSaveTimer();
   render();
   if (authUser) {
-    try { await loadWorkspace(); }
+    try { await loadWorkspace(session?.provider_token || null); }
     catch (error) { showToast(`Could not load The List: ${error.message}`); }
   }
   isLoading = false;
   render();
+  if (discordProfileSyncError) showToast(`Discord server profile was not refreshed: ${discordProfileSyncError}`);
+  else if (discordProfileSyncNotice) showToast(discordProfileSyncNotice);
 }
 
 window.addEventListener("beforeunload", () => {
@@ -2697,14 +2783,39 @@ document.addEventListener("click", async (event) => {
     if (!discordAuthEnabled) return;
     discordButton.disabled = true;
     discordButton.querySelector("strong").textContent = "Opening Discord…";
+    requestDiscordProfileSync();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "discord",
-      options: { redirectTo: buildAuthRedirectUrl(window.location) },
+      options: discordOAuthOptions(window.location),
     });
     if (error) {
+      clearDiscordProfileSyncRequest();
       discordButton.disabled = false;
       discordButton.querySelector("strong").textContent = "Continue with Discord";
       showToast(`Discord sign-in could not start: ${error.message}`);
+    }
+    return;
+  }
+  const refreshDiscordProfileButton = event.target.closest("[data-refresh-discord-profile]");
+  if (refreshDiscordProfileButton) {
+    if (designPreviewMode) {
+      showToast("This preview uses test Discord server-profile data; no Discord account was contacted.");
+      return;
+    }
+    if (!discordAuthEnabled) {
+      showToast("Discord sign-in is not currently enabled.");
+      return;
+    }
+    refreshDiscordProfileButton.disabled = true;
+    requestDiscordProfileSync();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "discord",
+      options: discordOAuthOptions(window.location, { forceConsent: true }),
+    });
+    if (error) {
+      clearDiscordProfileSyncRequest();
+      refreshDiscordProfileButton.disabled = false;
+      showToast(`Discord profile refresh could not start: ${error.message}`);
     }
     return;
   }

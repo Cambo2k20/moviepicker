@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260824-phase1-journal-v32" />
+  <link rel="stylesheet" href="./styles.css?v=20260824-discord-server-profile-v33" />
 </head>
 <body>
   <div class="app-shell">
@@ -48,7 +48,16 @@
         <span>The Discordian</span>
         <span>Companion App</span>
         <div id="session-panel" class="session-panel" hidden>
-          <span id="session-name" class="session-name"></span>
+          <div class="session-identity">
+            <img id="session-avatar" class="session-avatar" alt="" hidden />
+            <span class="session-identity-copy">
+              <span id="session-name" class="session-name"></span>
+              <small id="session-identity-source" class="session-identity-source"></small>
+            </span>
+          </div>
+          <button id="discord-profile-refresh" class="discord-profile-refresh" type="button" data-refresh-discord-profile hidden aria-label="Refresh The Discordians server profile" title="Refresh The Discordians server profile">
+            <span class="material-symbols-outlined" aria-hidden="true">sync</span><span class="discord-profile-refresh-label">Refresh Discord profile</span>
+          </button>
           <button class="session-sign-out" type="button" data-sign-out>Sign out</button>
         </div>
       </div>
@@ -119,6 +128,6 @@
       }
     }
   </script>
-  <script type="module" src="./app.js?v=20260824-phase1-journal-v32"></script>
+  <script type="module" src="./app.js?v=20260824-discord-server-profile-v33"></script>
 </body>
 </html>
