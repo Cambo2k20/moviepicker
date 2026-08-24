@@ -14,7 +14,7 @@
   --dim: #898c98;
   --success: #71c9a1;
   --danger: #e47c91;
-  --sidebar: 248px;
+  --sidebar: 280px;
   color-scheme: dark;
   font-family: "Space Grotesk", system-ui, sans-serif;
   font-synthesis: none;
@@ -95,25 +95,22 @@ select:focus-visible {
 
 .brand {
   display: block;
-  width: 178px;
-  height: 38px;
-  overflow: hidden;
+  width: 220px;
+  aspect-ratio: 3 / 1;
   text-decoration: none;
 }
 
 .brand-logo {
   display: block;
-  width: 214px;
-  max-width: none;
+  width: 100%;
   height: auto;
-  transform: translate(-20px, -16px);
 }
 
 .brand-rule {
   display: block;
-  width: 178px;
+  width: 220px;
   height: 1px;
-  margin: 29px 0 30px;
+  margin: 18px 0 30px;
   background: var(--border-soft);
 }
 
@@ -2040,13 +2037,18 @@ legend,
   font-size: 26px;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1200px) {
   :root {
-    --sidebar: 216px;
+    --sidebar: 232px;
   }
 
   .sidebar {
     padding-left: 24px;
+  }
+
+  .brand,
+  .brand-rule {
+    width: 184px;
   }
 
   .home-hero {
@@ -2134,13 +2136,11 @@ legend,
   }
 
   .brand {
-    width: 148px;
-    height: 32px;
+    width: 160px;
   }
 
   .brand-logo {
-    width: 178px;
-    transform: translate(-17px, -13px);
+    width: 100%;
   }
 
   .primary-nav {
