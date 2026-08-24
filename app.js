@@ -25,6 +25,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 });
 const designPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("design-preview");
+const designPreviewVariant = designPreviewMode
+  ? new URLSearchParams(window.location.search).get("design-preview")
+  : null;
 const discordAuthPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("discord-auth-preview");
 
@@ -192,7 +195,7 @@ function clearDesignPreviewWorkspace() {
 
 function loadDesignPreviewWorkspace() {
   discordAuthEnabled = true;
-  const previewVariant = new URLSearchParams(window.location.search).get("design-preview");
+  const previewVariant = designPreviewVariant;
   const previewObserver = previewVariant === "observer";
   const previewIdentity = previewObserver
     ? { id: "preview-dean", displayName: "Dean", email: "dean@cine-cord.local" }
@@ -814,11 +817,30 @@ async function saveJournalEntry(session, draft) {
   return discordDraft;
 }
 
+function moveSavedSessionToJournal(session) {
+  if (!session?.journalEntry?.id) return;
+  journalSessionId = null;
+  discordDraft = null;
+  journalDetailsOpen = false;
+  sessionDetailsEditing = null;
+  journalEditingId = null;
+  journalQuery = "";
+  journalSourceFilter = "all";
+  journalStatusFilter = "all";
+  journalYearFilter = "all";
+  journalViewerFilter = "all";
+  journalVisibleLimit = 60;
+  upsertCurrentJournalCatalogEntry(session);
+  persistDesignPreviewWorkspace();
+  navigate("journal");
+}
+
 async function publishJournalToDiscord(session, action = "publish") {
   if (!session?.journalEntry?.id) throw new Error("Save the Journal entry before posting it to Discord.");
   if (!canManageJournalEntry(session.journalEntry, session)) throw new Error("Only the entry creator or a website administrator can post or update this Journal entry.");
   if (action === "publish" && session.journalPublication?.discord_message_id) return session.journalPublication;
   if (designPreviewMode) {
+    if (designPreviewVariant === "discord-error") throw new Error("Preview Discord delivery failed.");
     const now = new Date().toISOString();
     const publication = action === "update" && session.journalPublication
       ? { ...session.journalPublication, status: "POSTED", discord_out_of_date: false, last_synced_by: currentProfile.id, last_synced_at: now, discord_updated_at: now, last_error: null }
@@ -1740,14 +1762,14 @@ function renderPick() {
 
 function renderSessions() {
   const rouletteWinner = selectedFilmForSession(activeSession);
-  const watched = sessionHistory.filter((session) => session.status === "WATCHED");
+  const watched = sessionHistory.filter((session) => session.status === "WATCHED" && !session.journalEntry);
   const openJournalFor = journalSession();
   const journalIsWatched = Boolean(openJournalFor && openJournalFor.status === "WATCHED");
   const activeCanManage = canManageSession(activeSession);
   const activeEditor = sessionEditorMode(activeSession);
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then save the optional Journal whenever it suits. Post its card to Discord explicitly, or keep using manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then finish its Journal handoff. Once an entry is saved, the session moves to The Journal.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
       ${activeSession ? `
         <article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">
           ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
@@ -1767,7 +1789,7 @@ function renderSessions() {
         </article>
         ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Pick a Movie</button></div>`}
       ${journalIsWatched ? `<section class="session-journal-open" aria-label="Journal post for ${escapeHTML(openJournalFor.selectedFilm?.title || "this session")}">${renderDiscordTemplate(openJournalFor, selectedFilmForSession(openJournalFor))}</section>` : ""}
-      ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Watched</span><h2 id="watched-history-title">Previous watch nights</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
+      ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Journal outstanding</span><h2 id="watched-history-title">Watched sessions awaiting an entry</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
         const film = selectedFilmForSession(session);
         const canManage = canManageSession(session);
         const canEditDetails = canEditSessionDetails(session);
@@ -2757,7 +2779,8 @@ document.addEventListener("submit", async (event) => {
       const copied = await copyJournalToClipboard(savedDraft, preview);
       showToast(copied
         ? `Journal entry #${savedDraft.entryNumber} saved and copied. Nothing was posted automatically.`
-        : `Journal entry #${savedDraft.entryNumber} was saved. Automatic copy was blocked, so the template is selected.`);
+        : `Journal entry #${savedDraft.entryNumber} was saved. Automatic copy was blocked; use Copy for Discord from the saved entry.`);
+      moveSavedSessionToJournal(session);
     } catch (error) {
       showToast(`The Journal entry was not saved: ${error.message}`);
     } finally {
@@ -3247,8 +3270,11 @@ document.addEventListener("click", async (event) => {
     } finally {
       journalPublishPendingId = null;
       journalSyncPendingId = null;
-      persistDesignPreviewWorkspace();
-      render();
+      if (journalSaved) moveSavedSessionToJournal(session);
+      else {
+        persistDesignPreviewWorkspace();
+        render();
+      }
     }
     return;
   }

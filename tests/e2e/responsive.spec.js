@@ -194,7 +194,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await page.getByRole("button", { name: /Start a Session/ }).click();
   await page.getByRole("button", { name: /Create Watch Party/ }).click();
   await page.getByRole("button", { name: "Close Queue Roulette" }).click();
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sessions", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel session" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
   await page.getByRole("button", { name: /Open current session/ }).click();
@@ -454,52 +454,26 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect.poll(() => page.evaluate(() => window.__previewWorkspaceWrites)).toBeGreaterThan(writesBeforeTabHide);
   await page.getByRole("button", { name: "Save draft" }).click();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sessions", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue Journal post" })).toBeVisible();
   await page.getByRole("button", { name: "Continue Journal post" }).click();
   await expect(page.locator("[name=comment]")).toHaveValue("Still thinking about that ending.");
   await expect(page.locator("[name=entry_number]")).toHaveValue("");
 
-  // Copy first saves the one real entry and receives its automatic number.
-  await page.getByRole("button", { name: "Copy for Discord" }).click();
-  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
-  await page.reload();
-  await expect(page.getByRole("button", { name: "Edit Journal post" })).toBeVisible();
-  await page.getByRole("button", { name: "Edit Journal post" }).click();
-  await expect(page.locator("[name=entry_number]")).toHaveValue("1317");
-
-  // Watched sessions remain editable, and the saved Journal stays linked.
+  // The watched session remains editable until a real Journal entry is saved.
   await page.getByRole("button", { name: "Edit session" }).click();
   await expect(page.getByRole("heading", { name: "Edit watched session" })).toBeVisible();
   await page.locator("#session-details-form [name=watch_date]").fill("2026-09-06");
   await page.getByRole("button", { name: "Save session details" }).click();
   await expect(page.locator(".session-history-row").first()).toContainText(/6 Sept? 2026/);
+  await page.getByRole("button", { name: "Continue Journal post" }).click();
 
-  // The viewing count is derived from watched sessions, so the list updates.
-  await page.locator('[data-view="list"]').click();
-  await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
-  await page.locator('[data-view="sessions"]').click();
-  await page.getByRole("button", { name: "Edit Journal post" }).click();
-
-  // The fancy card adds runtime and genres while manual copy remains available.
+  // The fancy card adds runtime and genres while the Journal is outstanding.
   const embedPreview = page.locator(".discord-embed-preview");
   await expect(embedPreview).toContainText(/\d+ min/);
   await expect(embedPreview).toContainText("Submitted by Basil Brush via Cine-Cord");
   await expect(embedPreview.locator("[data-discord-preview-genres]")).not.toHaveText("Genres unavailable");
   await expect(page.getByText("Manual copy preview")).toBeVisible();
-
-  // Publishing is an explicit, confirmed action and survives a refresh.
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Post to Discord" }).click();
-  await expect(page.locator(".discord-publication-state").getByText("Discord copy is current", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /View in Discord/ })).toHaveAttribute(
-    "href",
-    /^https:\/\/discord\.com\/channels\/preview-guild\/preview-channel\/preview-\d+$/,
-  );
-  await page.reload();
-  await page.getByRole("button", { name: "Edit Journal post" }).click();
-  await expect(page.locator(".discord-publication-state").getByText("Discord copy is current", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
 
   // The session fills these in, so they start folded away.
   const entryDetails = page.locator(".discord-entry-details");
@@ -528,6 +502,46 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     expect(journalGeometry.previewClippedHorizontally).toBe(false);
     expect(journalGeometry.tallestButton).toBeLessThanOrEqual(60);
   }
+
+  // Copy saves the one real entry, removes the session from the Sessions inbox,
+  // and takes the writer to the saved Journal card.
+  await page.getByRole("button", { name: "Copy for Discord" }).click();
+  await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
+  await expect(page.locator("#toast")).toContainText(/Journal entry #1317 (?:saved and copied|was saved)/);
+  let savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+  await expect(savedCard).toContainText("Entry #1317");
+  await page.locator('[data-view="sessions"]').click();
+  await expect(page.locator(".session-history-row", { hasText: winnerTitle })).toHaveCount(0);
+
+  // The viewing count still comes from the retained watched-session row.
+  await page.locator('[data-view="list"]').click();
+  await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
+  await page.locator('[data-view="journal"]').click();
+  savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+
+  // Publishing remains an explicit action on the Journal card and survives a refresh.
+  page.once("dialog", (dialog) => dialog.accept());
+  await savedCard.getByRole("button", { name: "Post to Discord" }).click();
+  await expect(savedCard).toContainText("Discord copy current");
+  await expect(savedCard.getByRole("link", { name: /View in Discord/ })).toHaveAttribute(
+    "href",
+    /^https:\/\/discord\.com\/channels\/preview-guild\/preview-channel\/preview-\d+$/,
+  );
+  await page.reload();
+  savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+  await expect(savedCard).toContainText("Discord copy current");
+  await expect(savedCard.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
+
+  // Deleting the entry leaves the watch history intact and returns the session
+  // to the outstanding Sessions inbox with a clean Journal form.
+  await savedCard.getByRole("button", { name: "Edit" }).click();
+  await savedCard.getByRole("button", { name: "Delete entry" }).click();
+  await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
+  await expect(page.locator("#toast")).toContainText("and its Discord post were deleted");
+  await page.locator('[data-view="sessions"]').click();
+  const restoredSession = page.locator(".session-history-row", { hasText: winnerTitle });
+  await expect(restoredSession).toBeVisible();
+  await expect(restoredSession.getByRole("button", { name: "Write Journal post" })).toBeVisible();
 
   const overflowState = await page.evaluate(() => ({
     pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
@@ -575,17 +589,50 @@ test("a participant cannot edit another host's sessions but can copy a saved Jou
   });
 
   await page.goto("/moviepicker/?design-preview=observer#sessions");
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
-  await expect(page.locator(".session-history-row").first()).toContainText("20 Aug 2026");
-  await expect(page.getByText("Hosted by Cameron").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sessions", exact: true })).toBeVisible();
+  await expect(page.locator(".session-history-row", { hasText: "Home Alone" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark as watched" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Cancel session" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit session" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Write Journal post" })).toHaveCount(0);
-  await page.getByRole("button", { name: "View Journal post" }).click();
-  await expect(page.getByRole("heading", { name: "Journal post" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
-  await expect(page.locator("[name=entry_number]")).toHaveAttribute("readonly", "");
+  await page.locator('[data-view="journal"]').click();
+  const savedEntry = page.locator(".journal-entry-card.is-current", { hasText: "Home Alone" });
+  await expect(savedEntry).toBeVisible();
+  await expect(savedEntry.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(savedEntry.getByRole("button", { name: "Edit" })).toHaveCount(0);
+  await expect(savedEntry.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
+});
+
+test("a Discord failure still moves the saved session into the Journal", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The saved-before-post failure path is covered once.");
+  await page.evaluate(() => {
+    const alien = { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "A deadly lifeform.", tmdbId: 348 };
+    localStorage.setItem("cine-cord-design-preview-state", JSON.stringify({
+      activeSession: null,
+      sessionHistory: [{
+        id: "discord-failure-session", groupId: "preview-group", createdById: "preview-cameron", hostId: "preview-cameron", hostName: "Cameron", mode: "Queue Roulette", status: "WATCHED", candidateCount: 8,
+        participantIds: ["preview-cameron", "preview-dean"], participants: [{ id: "preview-cameron", name: "Cameron" }, { id: "preview-dean", name: "Dean" }], members: ["Cameron", "Dean"],
+        selectedFilmId: alien.id, selectedFilm: alien, gameState: {}, startedAt: "2026-08-24T18:00:00.000Z", confirmedAt: "2026-08-24T18:05:00.000Z", sessionDate: "2026-08-24", watchedAt: "2026-08-24T00:00:00.000Z", journalDraft: null, journalEntry: null,
+      }],
+      rouletteState: null,
+      discordDraft: null,
+      previewNextEntryNumber: 1317,
+      watchState: [{ id: alien.id, watched: true, watchCount: 1, lastWatchedOn: "2026-08-24" }],
+    }));
+  });
+
+  await page.goto("/moviepicker/?design-preview=discord-error#sessions");
+  const pendingSession = page.locator(".session-history-row", { hasText: "Alien" });
+  await expect(pendingSession).toBeVisible();
+  await pendingSession.getByRole("button", { name: "Write Journal post" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Post to Discord" }).click();
+
+  await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
+  await expect(page.locator("#toast")).toContainText("The Journal was saved, but Discord was not posted to");
+  const savedEntry = page.locator(".journal-entry-card.is-current", { hasText: "Alien" });
+  await expect(savedEntry).toContainText("Entry #1317");
+  await expect(savedEntry.getByRole("button", { name: "Post to Discord" })).toBeVisible();
+  await page.locator('[data-view="sessions"]').click();
+  await expect(page.locator(".session-history-row", { hasText: "Alien" })).toHaveCount(0);
 });
