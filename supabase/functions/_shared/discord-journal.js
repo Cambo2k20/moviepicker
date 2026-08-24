@@ -2,6 +2,33 @@ const EMBED_DESCRIPTION_LIMIT = 4096;
 const EMBED_FIELD_LIMIT = 1024;
 const EMBED_TITLE_LIMIT = 256;
 
+export function namedSupabaseKey(raw, name = "default") {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(String(raw))?.[name];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function bearerForSupabaseApiKey(key) {
+  const value = String(key || "").trim();
+  if (!value || value.startsWith("sb_secret_") || value.startsWith("sb_publishable_")) return null;
+  return `Bearer ${value}`;
+}
+
+export function discordGuildIdForMessage(message, webhookMetadata) {
+  const directGuildId = String(message?.guild_id || "").trim();
+  if (directGuildId) return directGuildId;
+  const messageChannelId = String(message?.channel_id || "").trim();
+  const metadataChannelId = String(webhookMetadata?.channelId || "").trim();
+  const metadataGuildId = String(webhookMetadata?.guildId || "").trim();
+  return messageChannelId && messageChannelId === metadataChannelId && metadataGuildId
+    ? metadataGuildId
+    : null;
+}
+
 function clipped(value, maximum) {
   const text = String(value ?? "").trim();
   if (text.length <= maximum) return text;
@@ -59,17 +86,16 @@ export function buildDiscordJournalPayload({ entry, session, viewers, submitter 
   if (comment) embeds.push({ color: 0x20183a, title: "COMMENT", description: comment });
 
   return {
-    username: "The Discordians Journal",
     allowed_mentions: { parse: [] },
     embeds,
   };
 }
 
 export function discordMessageUrl(publication) {
+  const guild = String(publication?.discord_guild_id || "").trim();
   const channel = String(publication?.discord_channel_id || "").trim();
   const message = String(publication?.discord_message_id || "").trim();
-  if (!channel || !message) return null;
-  const guild = String(publication?.discord_guild_id || "@me").trim();
+  if (!guild || !channel || !message) return null;
   return `https://discord.com/channels/${encodeURIComponent(guild)}/${encodeURIComponent(channel)}/${encodeURIComponent(message)}`;
 }
 

@@ -347,10 +347,10 @@ function buildDiscordTemplate(draft) {
 }
 
 function discordPublicationUrl(publication) {
+  const guild = String(publication?.discord_guild_id || "").trim();
   const channel = String(publication?.discord_channel_id || "").trim();
   const message = String(publication?.discord_message_id || "").trim();
-  if (!channel || !message) return null;
-  const guild = String(publication?.discord_guild_id || "@me").trim();
+  if (!guild || !channel || !message) return null;
   return `https://discord.com/channels/${encodeURIComponent(guild)}/${encodeURIComponent(channel)}/${encodeURIComponent(message)}`;
 }
 

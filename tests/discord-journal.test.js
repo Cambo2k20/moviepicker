@@ -2,8 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  bearerForSupabaseApiKey,
   buildDiscordJournalPayload,
+  discordGuildIdForMessage,
   discordMessageUrl,
+  namedSupabaseKey,
   safeDiscordWebhookUrl,
 } from "../supabase/functions/_shared/discord-journal.js";
 
@@ -30,6 +33,7 @@ test("builds a fancy Journal payload without Discord mentions", () => {
     submitter: "Cameron",
   });
   assert.deepEqual(payload.allowed_mentions, { parse: [] });
+  assert.equal(payload.username, undefined);
   assert.equal(payload.embeds[0].author.name, "ENTRY #1325");
   assert.equal(payload.embeds[0].title, "Alien");
   assert.equal(payload.embeds[0].fields[0].value, "1979 · 117 min");
@@ -58,5 +62,36 @@ test("accepts only real Discord webhook URLs and adds wait=true", () => {
 
 test("builds the direct Discord message URL from stored public identifiers", () => {
   assert.equal(discordMessageUrl({ discord_guild_id: "1", discord_channel_id: "2", discord_message_id: "3" }), "https://discord.com/channels/1/2/3");
+  assert.equal(discordMessageUrl({ discord_channel_id: "2", discord_message_id: "3" }), null);
   assert.equal(discordMessageUrl({ discord_channel_id: "2" }), null);
+});
+
+test("reads only an explicitly named modern Supabase key", () => {
+  assert.equal(namedSupabaseKey('{"default":"sb_secret_default","worker":"sb_secret_worker"}'), "sb_secret_default");
+  assert.equal(namedSupabaseKey('{"worker":"sb_secret_worker"}'), null);
+  assert.equal(namedSupabaseKey("not-json"), null);
+});
+
+test("does not put modern Supabase API keys in Authorization", () => {
+  assert.equal(bearerForSupabaseApiKey("sb_secret_example"), null);
+  assert.equal(bearerForSupabaseApiKey("sb_publishable_example"), null);
+  assert.equal(bearerForSupabaseApiKey("legacy.jwt.key"), "Bearer legacy.jwt.key");
+});
+
+test("uses webhook guild metadata only for the message's channel", () => {
+  assert.equal(
+    discordGuildIdForMessage(
+      { channel_id: "2" },
+      { guildId: "1", channelId: "2" },
+    ),
+    "1",
+  );
+  assert.equal(
+    discordGuildIdForMessage(
+      { channel_id: "different" },
+      { guildId: "1", channelId: "2" },
+    ),
+    null,
+  );
+  assert.equal(discordGuildIdForMessage({ guild_id: "direct", channel_id: "2" }, null), "direct");
 });

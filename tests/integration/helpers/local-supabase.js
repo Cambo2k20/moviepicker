@@ -8,10 +8,9 @@
 // Requires `npx supabase start` in this repository first.
 //
 // Fixture setup and ground-truth reads go through psql as `postgres` rather
-// than through a service-role PostgREST client. Supabase's local baseline gives
-// service_role only TRUNCATE/REFERENCES/TRIGGER on postgres-owned tables in the
-// public schema, and granting it more here would change the very privilege
-// surface these tests exist to check.
+// than through a service-role PostgREST client. The Discord publisher migration
+// deliberately gives service_role a narrow read/publication-write surface, but
+// not the broad fixture privileges required across the whole application schema.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
