@@ -141,6 +141,7 @@ test("the master Journal keeps archives read-only and current entries actionable
   await expect(page.locator(".journal-totals")).toContainText("1 editable");
   await expect(page.locator(".journal-entry-card")).toHaveCount(3);
   await expect(page.locator(".journal-entry-card.is-archive [data-edit-journal-entry]")).toHaveCount(0);
+  await expect(page.locator(".journal-entry-card.is-archive [data-delete-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-journal-entry-form]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-copy-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive").first()).toContainText("Original Discord message");
@@ -153,6 +154,18 @@ test("the master Journal keeps archives read-only and current entries actionable
   await expect(page.locator(".journal-entry-card")).toHaveCount(1);
   await expect(page.locator(".journal-entry-card")).toContainText("Discord copy out of date");
 
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("button", { name: "Delete entry" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete entry" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete Journal entry?" });
+  await expect(deleteDialog).toBeVisible();
+  await expect(deleteDialog).toContainText("Filth");
+  await expect(deleteDialog).toContainText("existing Discord message");
+  await expect(deleteDialog.getByRole("button", { name: "Delete entry and Discord post" })).toBeVisible();
+  expect(await deleteDialog.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  await deleteDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.locator("[data-journal-entry-form]").getByRole("button", { name: "Cancel" }).click();
+
   if (testInfo.project.name === "desktop") {
     await page.getByRole("button", { name: "Edit" }).click();
     await page.locator("[data-journal-entry-form] [name=comment]").fill("Corrected from the website.");
@@ -162,6 +175,13 @@ test("the master Journal keeps archives read-only and current entries actionable
     await page.getByRole("button", { name: "Update Discord post" }).click();
     await expect(page.locator(".journal-entry-card")).toContainText("Discord copy current");
     await expect(page.getByRole("button", { name: "Update Discord post" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("button", { name: "Delete entry" }).click();
+    await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
+    await expect(page.locator("#toast")).toContainText("and its Discord post were deleted");
+    await expect(page.locator(".journal-totals")).toContainText("0 editable");
+    await expect(page.locator(".journal-entry-card")).toHaveCount(0);
   }
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

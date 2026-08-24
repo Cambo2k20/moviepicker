@@ -145,3 +145,7 @@ export function discordWebhookMessageUrl(webhook, messageId) {
   url.pathname = `${url.pathname.replace(/\/$/, "")}/messages/${messageId}`;
   return url;
 }
+
+export function discordWebhookDeleteAccepted(status) {
+  return status === 204 || status === 404;
+}

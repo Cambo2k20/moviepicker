@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260824-discord-server-profile-v33" />
+  <link rel="stylesheet" href="./styles.css?v=20260824-journal-delete-v34" />
 </head>
 <body>
   <div class="app-shell">
@@ -120,6 +120,28 @@
     </section>
   </div>
 
+  <div id="journal-delete-modal" class="modal-layer" hidden>
+    <section class="modal journal-delete-modal" role="dialog" aria-modal="true" aria-labelledby="journal-delete-title" aria-describedby="journal-delete-description">
+      <button class="icon-button modal-close" type="button" data-close-journal-delete aria-label="Cancel deleting this Journal entry">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+      <p class="eyebrow">Permanent deletion</p>
+      <h2 id="journal-delete-title">Delete Journal entry?</h2>
+      <p id="journal-delete-description" class="modal-intro"></p>
+      <div class="journal-delete-summary" aria-label="Journal entry selected for deletion">
+        <span id="journal-delete-number"></span>
+        <strong id="journal-delete-film"></strong>
+        <small id="journal-delete-date"></small>
+      </div>
+      <p id="journal-delete-discord-note" class="journal-delete-discord-note" hidden><span class="material-symbols-outlined" aria-hidden="true">delete_forever</span><span>The existing Discord message will be deleted first. If Discord refuses, the Cine-Cord entry will remain untouched.</span></p>
+      <p id="journal-delete-error" class="journal-delete-error" role="alert" hidden></p>
+      <div class="journal-delete-actions">
+        <button class="secondary-button" type="button" data-close-journal-delete>Cancel</button>
+        <button id="journal-delete-confirm" class="journal-delete-confirm" type="button" data-confirm-journal-delete><span class="material-symbols-outlined" aria-hidden="true">delete</span><span>Delete entry</span></button>
+      </div>
+    </section>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script type="importmap">
     {
@@ -128,6 +150,6 @@
       }
     }
   </script>
-  <script type="module" src="./app.js?v=20260824-discord-server-profile-v33"></script>
+  <script type="module" src="./app.js?v=20260824-journal-delete-v34"></script>
 </body>
 </html>

@@ -53,6 +53,14 @@ const decisionModes = [
 const root = document.querySelector("#view-root");
 const partyModal = document.querySelector("#party-modal");
 const filmModal = document.querySelector("#film-modal");
+const journalDeleteModal = document.querySelector("#journal-delete-modal");
+const journalDeleteDescription = document.querySelector("#journal-delete-description");
+const journalDeleteNumber = document.querySelector("#journal-delete-number");
+const journalDeleteFilm = document.querySelector("#journal-delete-film");
+const journalDeleteDate = document.querySelector("#journal-delete-date");
+const journalDeleteDiscordNote = document.querySelector("#journal-delete-discord-note");
+const journalDeleteError = document.querySelector("#journal-delete-error");
+const journalDeleteConfirm = document.querySelector("#journal-delete-confirm");
 const partyMembers = document.querySelector("#party-members");
 const partyForm = document.querySelector("#party-form");
 const filmForm = document.querySelector("#film-form");
@@ -91,6 +99,8 @@ let journalDraftTimer = 0;
 let journalPublishPendingId = null;
 let journalEditingId = null;
 let journalSyncPendingId = null;
+let journalDeletePendingId = null;
+let journalDeleteReturnFocus = null;
 let discordProfileSyncInFlight = null;
 let discordProfileSyncError = "";
 let discordProfileSyncNotice = "";
@@ -934,6 +944,75 @@ async function saveCatalogJournalEntry(form) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+function journalEntryHasDiscordMessage(entry) {
+  return Boolean(entry?.discordUrl || entry?.publication?.discord_message_id);
+}
+
+function openJournalDeleteModal(entry, opener) {
+  if (!entry?.canEdit || entry.sourceType !== "CINE_CORD" || !entry.journalEntryId) return;
+  const hasDiscordMessage = journalEntryHasDiscordMessage(entry);
+  journalDeleteModal.dataset.entryId = entry.journalEntryId;
+  journalDeleteReturnFocus = opener || document.activeElement;
+  journalDeleteNumber.textContent = `Entry #${entry.entryLabel}`;
+  journalDeleteFilm.textContent = entry.title;
+  journalDeleteDate.textContent = entry.watchedAt ? formatAddedDate(entry.watchedAt) : "Watch date not recorded";
+  journalDeleteDescription.textContent = hasDiscordMessage
+    ? "This permanently removes the Cine-Cord entry and its existing Discord message. The watched session will remain."
+    : "This permanently removes the Cine-Cord entry. The watched session will remain.";
+  journalDeleteDiscordNote.hidden = !hasDiscordMessage;
+  journalDeleteError.hidden = true;
+  journalDeleteError.textContent = "";
+  journalDeleteConfirm.disabled = false;
+  journalDeleteConfirm.querySelector("span:last-child").textContent = hasDiscordMessage ? "Delete entry and Discord post" : "Delete entry";
+  journalDeleteModal.hidden = false;
+  document.body.style.overflow = "hidden";
+  journalDeleteModal.querySelector(".journal-delete-actions [data-close-journal-delete]")?.focus();
+}
+
+function closeJournalDeleteModal({ restoreFocus = true } = {}) {
+  if (journalDeletePendingId) return;
+  journalDeleteModal.hidden = true;
+  journalDeleteModal.removeAttribute("data-entry-id");
+  document.body.style.overflow = "";
+  if (restoreFocus && journalDeleteReturnFocus?.isConnected) journalDeleteReturnFocus.focus({ preventScroll: true });
+  journalDeleteReturnFocus = null;
+}
+
+function removeDeletedJournalEntryFromLocalState(entry) {
+  const session = journalSessionForEntry(entry);
+  journalCatalog = journalCatalog.filter((candidate) => candidate.journalEntryId !== entry.journalEntryId);
+  if (!session) return;
+  session.journalEntry = null;
+  session.journalPublication = null;
+  session.journalDraft = null;
+  if (journalSessionId === session.id) discordDraft = null;
+}
+
+async function deleteCatalogJournalEntry(entry) {
+  if (!entry?.canEdit || entry.sourceType !== "CINE_CORD" || !entry.journalEntryId) {
+    throw new Error("Only current Cine-Cord entries can be deleted by their creator or a website administrator.");
+  }
+  if (designPreviewMode) {
+    removeDeletedJournalEntryFromLocalState(entry);
+    persistDesignPreviewWorkspace();
+    return { status: "deleted", discordDeleted: journalEntryHasDiscordMessage(entry) };
+  }
+
+  const { data, error } = await supabase.functions.invoke("publish-journal-to-discord", {
+    body: { journalEntryId: entry.journalEntryId, action: "delete" },
+  });
+  if (error) {
+    let message = error.message || "The Journal entry could not be deleted.";
+    try {
+      const payload = await error.context?.json();
+      if (payload?.error) message = payload.error;
+    } catch { /* keep the safe function error */ }
+    throw new Error(message);
+  }
+  if (data?.status !== "deleted") throw new Error("Cine-Cord did not confirm that the Journal entry was deleted. Refresh before trying again.");
+  return data;
+}
+
 async function copyJournalToClipboard(draft, preview) {
   const template = buildDiscordTemplate(draft);
   try {
@@ -1762,7 +1841,7 @@ function renderJournalEditor(entry) {
         <legend>Viewers</legend>
         <div>${members.map((member) => `<label><input type="checkbox" name="viewer" value="${escapeHTML(member.id)}" ${entry.viewerIds.includes(member.id) ? "checked" : ""} /><img src="${escapeHTML(member.avatar)}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("")}</div>
       </fieldset>
-      <div class="journal-editor-actions"><button class="primary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">save</span>Save entry</button><button class="secondary-button compact" type="button" data-cancel-journal-edit>Cancel</button><small>Saving changes marks the existing Discord copy out of date; it is never updated automatically.</small></div>
+      <div class="journal-editor-actions"><button class="primary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">save</span>Save entry</button><button class="secondary-button compact" type="button" data-cancel-journal-edit>Cancel</button><button class="secondary-button compact danger-button" type="button" data-delete-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Delete entry</button><small>Saving changes marks the existing Discord copy out of date; it is never updated automatically.</small></div>
     </form>`;
 }
 
@@ -2836,6 +2915,54 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  const deleteJournalButton = event.target.closest("[data-delete-journal-entry]");
+  if (deleteJournalButton) {
+    const entry = journalCatalog.find((candidate) => candidate.journalEntryId === deleteJournalButton.dataset.deleteJournalEntry);
+    openJournalDeleteModal(entry, deleteJournalButton);
+    return;
+  }
+  if (event.target.closest("[data-close-journal-delete]") || event.target === journalDeleteModal) {
+    closeJournalDeleteModal();
+    return;
+  }
+  if (event.target.closest("[data-confirm-journal-delete]")) {
+    const entry = journalCatalog.find((candidate) => candidate.journalEntryId === journalDeleteModal.dataset.entryId);
+    if (!entry?.canEdit || journalDeletePendingId) return;
+    const entryLabel = entry.entryLabel;
+    const hadDiscordMessage = journalEntryHasDiscordMessage(entry);
+    journalDeletePendingId = entry.journalEntryId;
+    journalDeleteConfirm.disabled = true;
+    journalDeleteConfirm.querySelector("span:last-child").textContent = hadDiscordMessage ? "Deleting entry and Discord post…" : "Deleting entry…";
+    journalDeleteError.hidden = true;
+    try {
+      await deleteCatalogJournalEntry(entry);
+      journalDeletePendingId = null;
+      closeJournalDeleteModal({ restoreFocus: false });
+      journalEditingId = null;
+      if (!designPreviewMode) {
+        try {
+          await loadWorkspace();
+        } catch (refreshError) {
+          removeDeletedJournalEntryFromLocalState(entry);
+          render();
+          showToast(`Journal entry #${entryLabel} was deleted, but the workspace could not refresh: ${refreshError.message}`);
+          return;
+        }
+      }
+      render();
+      showToast(hadDiscordMessage
+        ? `Journal entry #${entryLabel} and its Discord post were deleted.`
+        : `Journal entry #${entryLabel} was deleted.`);
+    } catch (error) {
+      journalDeletePendingId = null;
+      journalDeleteConfirm.disabled = false;
+      journalDeleteConfirm.querySelector("span:last-child").textContent = hadDiscordMessage ? "Delete entry and Discord post" : "Delete entry";
+      journalDeleteError.textContent = error.message;
+      journalDeleteError.hidden = false;
+      showToast(`Journal entry was not deleted: ${error.message}`);
+    }
+    return;
+  }
   const copyCatalogButton = event.target.closest("[data-copy-journal-entry]");
   if (copyCatalogButton) {
     const entry = journalCatalog.find((candidate) => candidate.catalogId === copyCatalogButton.dataset.copyJournalEntry);
@@ -3310,6 +3437,7 @@ partyForm.addEventListener("submit", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (!journalDeleteModal.hidden) { closeJournalDeleteModal(); return; }
   if (selectedFilmId) { selectedFilmId = null; render(); return; }
   if (!partyModal.hidden) closePartyModal();
   if (!filmModal.hidden) closeFilmModal();

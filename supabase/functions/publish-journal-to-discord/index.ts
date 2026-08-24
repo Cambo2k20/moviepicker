@@ -3,6 +3,7 @@ import {
   buildDiscordJournalPayload,
   discordGuildIdForMessage,
   discordMessageUrl,
+  discordWebhookDeleteAccepted,
   discordWebhookMessageUrl,
   namedSupabaseKey,
   safeDiscordWebhookUrl,
@@ -62,12 +63,25 @@ async function serviceWrite(base: string, path: string, key: string, method: str
   return { response, data };
 }
 
+async function memberWrite(base: string, path: string, key: string, authorization: string, method: string, body?: unknown) {
+  const response = await fetch(`${base}/rest/v1/${path}`, {
+    method,
+    headers: restHeaders(key, authorization, {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      Prefer: "return=representation",
+    }),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const data = response.status === 204 ? null : await response.json().catch(() => null);
+  return { response, data };
+}
+
 function first(rows: Array<Record<string, any>>) {
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
-function safeFailureMessage(status: number, operation: "post" | "update" = "post") {
-  const action = operation === "update" ? "update" : "post";
+function safeFailureMessage(status: number, operation: "post" | "update" | "delete" = "post") {
+  const action = operation === "update" ? "update" : operation === "delete" ? "delete" : "post";
   if (status === 429) return `Discord is rate limiting Journal ${action}s. Try again shortly.`;
   if (status === 401 || status === 403 || status === 404) return "The configured Discord webhook is no longer available.";
   return `Discord did not accept the Journal ${action}. Try again.`;
@@ -117,7 +131,9 @@ Deno.serve(async (req: Request) => {
 
   let reservedPublicationId: string | null = null;
   let deliveryStarted = false;
-  let deliveryOperation: "post" | "update" = "post";
+  let deliveryOperation: "post" | "update" | "delete" = "post";
+  let discordDeleteCompleted = false;
+  let deleteRequiredDiscord = false;
   try {
     const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: restHeaders(publicKey, authorization),
@@ -130,7 +146,7 @@ Deno.serve(async (req: Request) => {
     const journalEntryId = String(body?.journalEntryId || "").trim();
     const action = body?.action == null ? "publish" : String(body.action).toLowerCase();
     if (!UUID.test(journalEntryId)) return respond({ error: "Choose a valid saved Journal entry." }, 400);
-    if (!new Set(["publish", "update"]).has(action)) return respond({ error: "Choose a valid Discord Journal action." }, 400);
+    if (!new Set(["publish", "update", "delete"]).has(action)) return respond({ error: "Choose a valid Discord Journal action." }, 400);
 
     const serviceAuthorization = bearerForSupabaseApiKey(serviceKey);
     const entries = await restRows(
@@ -155,9 +171,9 @@ Deno.serve(async (req: Request) => {
     if (!membership) return respond({ error: "Approved Cine-Cord membership is required." }, 403);
     const isAdmin = String(membership.role).toLowerCase() === "admin";
     if (entry.created_by !== user.id && !isAdmin) {
-      return respond({ error: "Only the entry creator or a website administrator can post or update this Journal entry." }, 403);
+      return respond({ error: "Only the entry creator or a website administrator can manage this Journal entry." }, 403);
     }
-    if (session.status !== "WATCHED") return respond({ error: "The Journal can be posted only after the film is marked watched." }, 409);
+    if (action !== "delete" && session.status !== "WATCHED") return respond({ error: "The Journal can be posted only after the film is marked watched." }, 409);
 
     const viewerIds = [...new Set(viewerRows.map((viewer) => String(viewer.profile_id || "")).filter((id) => UUID.test(id)))];
     const viewerProfiles = viewerIds.length
@@ -175,6 +191,55 @@ Deno.serve(async (req: Request) => {
       && publication?.discord_message_id
       && publication?.posted_at
     );
+
+    if (action === "delete") {
+      deliveryOperation = "delete";
+      deleteRequiredDiscord = hasDiscordMessage;
+      if (!hasDiscordMessage && ["POSTING", "UNKNOWN"].includes(String(publication?.status || ""))) {
+        return respond({ error: "Discord delivery is uncertain and Cine-Cord has no confirmed message reference to delete. Check the Journal channel before removing this entry." }, 409);
+      }
+      if (hasDiscordMessage) {
+        if (!webhook) return respond({ error: "The Discord Journal webhook is not configured, so its message cannot be deleted safely." }, 503);
+        const webhookMetadata = await discordWebhookMetadata(webhook);
+        if (webhookMetadata && webhookMetadata.channelId !== String(publication.discord_channel_id)) {
+          return respond({ error: "The configured webhook no longer belongs to this Journal message's channel." }, 409);
+        }
+        const deleteUrl = discordWebhookMessageUrl(webhook, publication.discord_message_id);
+        if (!deleteUrl) return respond({ error: "The stored Discord message reference is invalid." }, 409);
+        deliveryStarted = true;
+        const discordResponse = await fetch(deleteUrl, { method: "DELETE" });
+        if (!discordWebhookDeleteAccepted(discordResponse.status)) {
+          const message = safeFailureMessage(discordResponse.status, "delete");
+          return respond({ error: message }, discordResponse.status === 429 ? 429 : 502);
+        }
+        discordDeleteCompleted = true;
+      }
+
+      const deleted = await memberWrite(
+        supabaseUrl,
+        `journal_entries?id=eq.${journalEntryId}`,
+        publicKey,
+        authorization,
+        "DELETE",
+      );
+      if (!deleted.response.ok || !Array.isArray(deleted.data) || deleted.data.length !== 1) {
+        const error = discordDeleteCompleted
+          ? "The Discord post was deleted, but Cine-Cord could not remove the Journal entry. Try deleting the entry again."
+          : "Cine-Cord could not delete that Journal entry. Refresh before trying again.";
+        return respond({ error }, 409);
+      }
+
+      await memberWrite(
+        supabaseUrl,
+        `movie_sessions?id=eq.${entry.movie_session_id}`,
+        publicKey,
+        authorization,
+        "PATCH",
+        { journal_draft: {} },
+      ).catch(() => null);
+
+      return respond({ status: "deleted", entryId: journalEntryId, discordDeleted: discordDeleteCompleted });
+    }
 
     if (action === "update") {
       if (!publication || !hasDiscordMessage) {
@@ -400,7 +465,15 @@ Deno.serve(async (req: Request) => {
     publication = completed.data[0];
     return respond({ status: "posted", publication, outOfDate: false, messageUrl: discordMessageUrl(publication) });
   } catch (error) {
-    console.error("Journal publication failed", error);
+    console.error("Discord Journal operation failed", error);
+    if (deliveryOperation === "delete") {
+      const message = discordDeleteCompleted
+        ? "The Discord post may have been deleted, but Cine-Cord could not remove the Journal entry. Try deleting the entry again."
+        : deleteRequiredDiscord
+          ? "The Journal entry was not deleted because Discord could not confirm removal. Try again."
+          : "Cine-Cord could not delete that Journal entry. Refresh before trying again.";
+      return respond({ error: message }, 502);
+    }
     if (reservedPublicationId && deliveryStarted) {
       if (deliveryOperation === "update") {
         const message = "Discord may have updated the message, but Cine-Cord could not confirm it. Retrying is safe and will not create a duplicate.";

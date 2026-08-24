@@ -301,6 +301,57 @@ test("only the creator or an admin can edit a current entry", async () => {
   assert.match(ownerChangeError?.message || "", /cannot change its group, creator or source session/i);
 });
 
+test("only the creator or an admin can delete a current entry and dependent rows cascade", async () => {
+  const { data: refusedRows, error: refusedError } = await member.client
+    .from("journal_entries")
+    .delete()
+    .eq("id", entryId)
+    .select("id");
+  assert.equal(refusedError, null);
+  assert.deepEqual(refusedRows, []);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.journal_entries where id = '${entryId}'`).count, 1);
+
+  const { data: deletedRows, error: creatorDeleteError } = await creator.client
+    .from("journal_entries")
+    .delete()
+    .eq("id", entryId)
+    .select("id");
+  assert.equal(creatorDeleteError, null);
+  assert.deepEqual(deletedRows, [{ id: entryId }]);
+  assert.deepEqual(sqlRow(`
+    select
+      (select count(*)::integer from public.journal_entries where id = '${entryId}') as entries,
+      (select count(*)::integer from public.entry_viewers where entry_id = '${entryId}') as viewers,
+      (select count(*)::integer from public.discord_publications where journal_entry_id = '${entryId}') as publications
+  `), { entries: 0, viewers: 0, publications: 0 });
+});
+
+test("an admin can delete another member's current entry while archives remain protected", async () => {
+  runSql(`
+    insert into public.journal_entries (
+      group_id, entry_number, title, release_year, watched_at, status, created_by
+    ) values (
+      '${group}', 1326, 'Admin cleanup', 2026, '2026-08-24', 'FINISHED', '${creator.id}'
+    );
+  `);
+  const adminCleanupId = sqlRow("select id from public.journal_entries where entry_number = 1326").id;
+  const { data: deletedRows, error: adminDeleteError } = await admin.client
+    .from("journal_entries")
+    .delete()
+    .eq("id", adminCleanupId)
+    .select("id");
+  assert.equal(adminDeleteError, null);
+  assert.deepEqual(deletedRows, [{ id: adminCleanupId }]);
+
+  const archiveId = sqlRow("select id from public.journal_archive_entries where discord_message_id = '888888888888888888'").id;
+  const { error: archiveDeleteError } = await admin.client
+    .from("journal_archive_entries")
+    .delete()
+    .eq("id", archiveId);
+  assert.match(archiveDeleteError?.message || "", /permission denied/i);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.journal_archive_entries where id = '${archiveId}'`).count, 1);
+});
+
 test("service_role can import archive rows but members cannot", () => {
   assert.deepEqual(sqlRow(`
     select
