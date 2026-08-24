@@ -121,6 +121,40 @@ test("local application images resolve in the browser", async ({ page }) => {
   expect(viewportOverflow).toBeLessThanOrEqual(1);
 });
 
+test("the master Journal keeps archives read-only and current entries actionable", async ({ page }, testInfo) => {
+  await page.getByRole("button", { name: "Journal" }).click();
+  await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
+  await expect(page.locator(".journal-totals")).toContainText("2 archived");
+  await expect(page.locator(".journal-totals")).toContainText("1 editable");
+  await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  await expect(page.locator(".journal-entry-card.is-archive [data-edit-journal-entry]")).toHaveCount(0);
+  await expect(page.locator(".journal-entry-card.is-archive [data-journal-entry-form]")).toHaveCount(0);
+  await expect(page.locator(".journal-entry-card.is-archive [data-copy-journal-entry]")).toHaveCount(0);
+  await expect(page.locator(".journal-entry-card.is-archive").first()).toContainText("Original Discord message");
+
+  await page.locator("#journal-search").fill("Ghostland");
+  await expect(page.locator(".journal-entry-card")).toHaveCount(1);
+  await expect(page.locator(".journal-entry-card")).toContainText("Entry #12.1");
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.locator("#journal-source-filter").selectOption({ label: "Cine-Cord entries" });
+  await expect(page.locator(".journal-entry-card")).toHaveCount(1);
+  await expect(page.locator(".journal-entry-card")).toContainText("Discord copy out of date");
+
+  if (testInfo.project.name === "desktop") {
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.locator("[data-journal-entry-form] [name=comment]").fill("Corrected from the website.");
+    await page.getByRole("button", { name: "Save entry" }).click();
+    await expect(page.locator("#toast")).toContainText("marked out of date");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Update Discord post" }).click();
+    await expect(page.locator(".journal-entry-card")).toContainText("Discord copy current");
+    await expect(page.getByRole("button", { name: "Update Discord post" })).toHaveCount(0);
+  }
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("a confirmed Queue Roulette result and Discord form stay in-bounds", async ({ page }, testInfo) => {
   test.setTimeout(45_000);
   await page.locator('[data-view="pick"]').click();
@@ -423,14 +457,14 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   // Publishing is an explicit, confirmed action and survives a refresh.
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Post to Discord" }).click();
-  await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();
+  await expect(page.locator(".discord-publication-state").getByText("Discord copy is current", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /View in Discord/ })).toHaveAttribute(
     "href",
     /^https:\/\/discord\.com\/channels\/preview-guild\/preview-channel\/preview-\d+$/,
   );
   await page.reload();
   await page.getByRole("button", { name: "Edit Journal post" }).click();
-  await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();
+  await expect(page.locator(".discord-publication-state").getByText("Discord copy is current", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
 
   // The session fills these in, so they start folded away.

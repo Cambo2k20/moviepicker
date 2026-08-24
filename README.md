@@ -4,17 +4,18 @@ A private, membership-gated movie list and movie-night companion for the Discord
 
 ## Current product boundary
 
-- Email/password authentication plus optional Discord OAuth, both protected by administrator-approved group membership.
+- Email/password authentication plus Discord OAuth, both protected by administrator-approved group membership. Discord sign-in securely synchronises the member's Discord display name and avatar without exposing their Discord ID to the browser.
 - A persistent poster-led movie list with metadata lookup, voting and watched status.
 - Persistent movie-night sessions with participants, selected-film snapshots and resumable state.
 - Queue Roulette with truthful runtime/genre filters, age weighting and one veto per participant.
-- An editable **Copy for Discord** result; nothing posts to Discord automatically.
+- A top-level Journal that searches new Cine-Cord entries together with the read-only history imported from the three existing Discord Journal channels.
+- Creator/admin editing for current entries, plus explicit **Post to Discord** and **Update Discord post** actions that reuse the same Discord message. **Copy for Discord** remains available and nothing posts automatically.
 - Responsive phone, tablet and desktop layouts.
 - List-based statistics that are explicitly not Journal statistics.
 
-Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. The database contains Journal tables and secure write functions, but the active frontend does not currently provide a Journal screen or Journal write flow. Wrapped/challenge calculations also remain future work.
+Consensus Sprint and Reel Bracket are visible as **Coming soon** and cannot create sessions. Historical Discord entries remain read-only, and Phase 1 does not add `/journal edit` or Discord modals. Wrapped/challenge calculations also remain future work.
 
-Discord OAuth is limited to sign-in. There is deliberately no Discord bot, webhook, automatic posting, guild-membership check or server permission request.
+Discord OAuth does not inspect guild membership or request server permissions. The only Discord write integration is the server-side Journal webhook, and it runs solely after an authorised member presses a posting or update button.
 
 ## Local development
 
@@ -44,7 +45,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-- `test:unit` covers Roulette filtering, weighting, duplicate display-name vetoes and state recovery.
+- `test:unit` covers Roulette rules, Discord Journal payload safety and the historical Journal parser.
 - `build` creates `dist/` and fails if a bundled local asset is missing or an unbundled source path remains.
 - `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`. It runs entirely in `?design-preview`, so it proves the interface, not the database.
 - `test:db` runs the Supabase integration suite. It needs a local database and is therefore not part of `npm test` or CI:
@@ -54,7 +55,7 @@ npx supabase start
 npm run test:db
 ```
 
-  It exercises the session RPCs, the Journal entry-numbering rules and the Row Level Security boundary against real Postgres, using several genuinely authenticated identities with different roles.
+  It exercises the session RPCs, Discord identity boundary, unified Journal catalog, creator/admin edit rules, publication freshness and Row Level Security against real Postgres, using several genuinely authenticated identities with different roles.
 
 ## Deployment
 
@@ -79,6 +80,7 @@ https://cambo2k20.github.io/moviepicker/
 | `assets/` | Versioned application images and avatars |
 | `tests/` | Node unit tests, Playwright responsive tests and Supabase integration tests |
 | `supabase/rollback/` | Reverse scripts matching the additive migrations |
+| `scripts/import-discord-journal.mjs` | Dry-run-first importer for the three preserved Discord Journal exports |
 | `scripts/verify-dist.mjs` | Production artifact asset verification |
 | `.github/workflows/` | Pull-request validation and GitHub Pages deployment |
 | `supabase/schema.sql` | Base profiles, groups and Journal backend schema |
@@ -97,7 +99,7 @@ For a fresh Supabase environment, apply everything in `supabase/migrations/` in 
 
 The canonical files (`supabase/schema.sql`, `member_management.sql`, `movie_metadata.sql`, `movie_sessions.sql`) remain as readable documentation of how the schema was first assembled. They predate the session-planning work and are **not** sufficient to run the current frontend on their own; see `supabase/README.md` for what they are missing.
 
-The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The migration baseline itself is reconciled; the privilege-hardening migration in this branch remains staged locally and is not applied to production by a build, test or GitHub Pages deployment.
+The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The Phase 1 master-Journal migration, historical import and updated Edge Function in this branch are not applied to production by a build, test or GitHub Pages deployment.
 
 Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the browser bundle.
 

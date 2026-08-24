@@ -53,7 +53,21 @@ function posterUrl(path) {
   return value.startsWith("/") ? `https://image.tmdb.org/t/p/w500${value}` : null;
 }
 
-export function buildDiscordJournalPayload({ entry, session, viewers, submitter }) {
+function webhookAvatarUrl(value) {
+  const text = String(value || "").trim();
+  if (!/^https:\/\//i.test(text) || text.length > 2048) return null;
+  return text;
+}
+
+export function webhookPosterName(value) {
+  const fallback = "A Discordian";
+  const requested = clipped(value || fallback, 80) || fallback;
+  return requested
+    .replace(/discord/gi, "Discordian")
+    .replace(/clyde/gi, "Member");
+}
+
+export function buildDiscordJournalPayload({ entry, session, viewers, submitter, poster, includeWebhookIdentity = true }) {
   const genres = cleanGenres(session.selected_genres);
   const details = [
     entry.release_year ? String(entry.release_year) : "Year unavailable",
@@ -85,10 +99,16 @@ export function buildDiscordJournalPayload({ entry, session, viewers, submitter 
   const comment = clipped(entry.comment, EMBED_DESCRIPTION_LIMIT);
   if (comment) embeds.push({ color: 0x20183a, title: "COMMENT", description: comment });
 
-  return {
+  const payload = {
     allowed_mentions: { parse: [] },
     embeds,
   };
+  if (includeWebhookIdentity) {
+    payload.username = webhookPosterName(poster?.displayName || submitter);
+    const avatarUrl = webhookAvatarUrl(poster?.avatarUrl);
+    if (avatarUrl) payload.avatar_url = avatarUrl;
+  }
+  return payload;
 }
 
 export function discordMessageUrl(publication) {
@@ -114,5 +134,14 @@ export function safeDiscordWebhookUrl(value) {
   url.search = "";
   url.hash = "";
   url.searchParams.set("wait", "true");
+  return url;
+}
+
+export function discordWebhookMessageUrl(webhook, messageId) {
+  if (!(webhook instanceof URL) || !/^\d+$/.test(String(messageId || ""))) return null;
+  const url = new URL(webhook);
+  url.search = "";
+  url.hash = "";
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/messages/${messageId}`;
   return url;
 }
