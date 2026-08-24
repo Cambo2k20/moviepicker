@@ -4541,6 +4541,10 @@ legend,
     flex-direction: column;
   }
 
+  .active-session-head {
+    flex-direction: column;
+  }
+
   .session-actions .primary-button,
   .session-actions .secondary-button {
     width: 100%;

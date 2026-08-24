@@ -36,6 +36,7 @@ test("list actions and desktop film artwork remain clear", async ({ page }, test
   await page.locator("[data-select-film]").first().click();
   const detailPoster = page.locator(".detail-poster");
   await expect(detailPoster).toBeVisible();
+  await expect(page.locator("[data-shortlist-film]")).toHaveCount(0);
   const detailPosterImage = detailPoster.locator("img");
   await expect(detailPosterImage).toBeVisible();
   await expect.poll(
@@ -78,6 +79,9 @@ test("the available game and watch-party dialog stay truthful and in-bounds", as
   await expect(dialog.getByRole("radio", { name: /Queue Roulette/ })).toBeChecked();
   await expect(dialog.getByRole("radio", { name: /Consensus Sprint/ })).toBeDisabled();
   await expect(dialog.getByRole("radio", { name: /Reel Bracket/ })).toBeDisabled();
+  const memberChoices = dialog.locator('input[name="members"]');
+  await expect(memberChoices).toHaveCount(5);
+  expect(await memberChoices.evaluateAll((choices) => choices.every((choice) => choice.checked))).toBe(true);
 
   const dialogOverflow = await dialog.evaluate((element) => element.scrollWidth - element.clientWidth);
   expect(dialogOverflow).toBeLessThanOrEqual(1);
@@ -118,9 +122,15 @@ test("local application images resolve in the browser", async ({ page }) => {
 });
 
 test("a confirmed Queue Roulette result and Discord form stay in-bounds", async ({ page }, testInfo) => {
+  test.setTimeout(45_000);
   await page.locator('[data-view="pick"]').click();
   await page.getByRole("button", { name: /Start a Session/ }).click();
   await page.getByRole("button", { name: /Create Watch Party/ }).click();
+  await page.getByRole("button", { name: "Close Queue Roulette" }).click();
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel session" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+  await page.getByRole("button", { name: /Open current session/ }).click();
   await expect(page.locator("#roulette-runtime")).toHaveValue("any");
 
   if (testInfo.project.name === "desktop") {
@@ -139,8 +149,8 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator(".roulette-wheel-stage [data-spin-roulette]")).toHaveText("Spin");
   await expect(page.locator(".roulette-wheel-stage [data-spin-roulette]")).toHaveAttribute("aria-label", "Spin the list");
   await expect(page.locator(".roulette-pool .roulette-session-vetoes")).toBeVisible();
-  await expect(page.locator(".roulette-pool .roulette-veto-token")).toHaveCount(3);
-  await expect(page.locator(".roulette-pool .roulette-veto-player")).toContainText(["Cameron", "Dean", "Kieran"]);
+  await expect(page.locator(".roulette-pool .roulette-veto-token")).toHaveCount(5);
+  await expect(page.locator(".roulette-pool .roulette-veto-player")).toContainText(["Cameron", "Dean", "Kieran", "Andrew", "Ross"]);
   await expect(page.locator(".roulette-pool-odds")).toHaveCount(0);
   await expect(page.locator(".roulette-control-column [data-spin-roulette]")).toHaveCount(0);
   await expect(page.locator(".roulette-veto-panel")).toHaveCount(0);
@@ -331,7 +341,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(dateField).toBeVisible();
   await expect(page.locator("#session-details-form [name=host_id]")).toHaveValue("preview-cameron");
   await dateField.fill("2026-09-05");
-  await page.locator("#session-details-form [name=participant]").last().check();
+  await page.locator("#session-details-form [name=participant]").last().uncheck();
   await page.getByRole("button", { name: "Save session details" }).click();
   // Formatted with the viewer's locale, so match the parts rather than an order.
   await expect(page.locator(".session-summary-grid dd").first()).toHaveText(/September.*5|5.*September/);
@@ -352,7 +362,29 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(page.locator(".session-history-actions .status-pill").first()).toHaveText("Watched");
 
   // A draft survives refresh without creating a Journal entry or assigning a number.
-  await page.locator("[name=comment]").fill("Still thinking about that ending.");
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    window.__previewWorkspaceWrites = 0;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === "cine-cord-design-preview-state") window.__previewWorkspaceWrites += 1;
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  const commentField = page.locator("[name=comment]");
+  await commentField.fill("Still thinking about that ending.");
+  const writesAfterInput = await page.evaluate(() => window.__previewWorkspaceWrites);
+  await commentField.blur();
+  await expect.poll(() => page.evaluate(() => window.__previewWorkspaceWrites)).toBeGreaterThan(writesAfterInput);
+  await commentField.press("End");
+  await commentField.type(" ");
+  await commentField.press("Backspace");
+  const writesBeforeTabHide = await page.evaluate(() => window.__previewWorkspaceWrites);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    delete document.visibilityState;
+  });
+  await expect.poll(() => page.evaluate(() => window.__previewWorkspaceWrites)).toBeGreaterThan(writesBeforeTabHide);
   await page.getByRole("button", { name: "Save draft" }).click();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
@@ -386,7 +418,9 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   const entryDetails = page.locator(".discord-entry-details");
   await expect(entryDetails).not.toHaveAttribute("open", /.*/);
   await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeHidden();
-  await page.locator("[data-toggle-journal-details]").click();
+  const journalDetailsToggle = page.locator("[data-toggle-journal-details]");
+  await journalDetailsToggle.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await journalDetailsToggle.click();
   await expect(entryDetails).toHaveAttribute("open", /.*/);
   await expect(page.locator(".discord-entry-fields input[name=\"title\"]")).toBeVisible();
 
@@ -428,6 +462,8 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
 
 test("a participant cannot edit another host's sessions but can copy a saved Journal", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Permission surfaces are covered once.");
+  const cdpSession = await page.context().newCDPSession(page);
+  await cdpSession.send("Emulation.setTimezoneOverride", { timezoneId: "America/Los_Angeles" });
   await page.evaluate(() => {
     const alien = { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "A deadly lifeform.", tmdbId: 348 };
     const homeAlone = { id: "preview-home-alone", title: "Home Alone", year: 1990, posterUrl: "https://image.tmdb.org/t/p/w500/onTSipZ8R3bliBdKfPtsDuHTdlL.jpg", runtime: 103, genres: ["Comedy", "Family"], overview: "Home alone.", tmdbId: 771 };
@@ -453,6 +489,7 @@ test("a participant cannot edit another host's sessions but can copy a saved Jou
 
   await page.goto("/moviepicker/?design-preview=observer#sessions");
   await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.locator(".session-history-row").first()).toContainText("20 Aug 2026");
   await expect(page.getByText("Hosted by Cameron").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Mark as watched" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Cancel session" })).toHaveCount(0);
