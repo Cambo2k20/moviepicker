@@ -10,8 +10,10 @@ function clipped(value, maximum) {
 function discordAvatarUrl({ guildId, userId, guildAvatar, userAvatar }) {
   const serverHash = clipped(guildAvatar, 200);
   if (DISCORD_ASSET_HASH.test(serverHash)) {
-    const extension = serverHash.startsWith("a_") ? "gif" : "png";
-    return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/avatars/${serverHash}.${extension}?size=256`;
+    const asset = serverHash.startsWith("a_")
+      ? `${serverHash}.webp?size=256&animated=true`
+      : `${serverHash}.png?size=256`;
+    return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/avatars/${asset}`;
   }
 
   // Discord itself uses the account avatar when a member has no server-specific
@@ -19,8 +21,10 @@ function discordAvatarUrl({ guildId, userId, guildAvatar, userAvatar }) {
   // as a separate global identity in Cine-Cord.
   const accountHash = clipped(userAvatar, 200);
   if (DISCORD_ASSET_HASH.test(accountHash)) {
-    const extension = accountHash.startsWith("a_") ? "gif" : "png";
-    return `https://cdn.discordapp.com/avatars/${userId}/${accountHash}.${extension}?size=256`;
+    const asset = accountHash.startsWith("a_")
+      ? `${accountHash}.webp?size=256&animated=true`
+      : `${accountHash}.png?size=256`;
+    return `https://cdn.discordapp.com/avatars/${userId}/${asset}`;
   }
   return null;
 }

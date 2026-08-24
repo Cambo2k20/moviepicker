@@ -13,7 +13,7 @@ const syncFunctionSource = readFileSync(
   "utf8",
 );
 
-test("uses The Discordians nickname and animated server avatar", () => {
+test("uses The Discordians nickname and animated WebP server avatar", () => {
   const profile = discordServerProfile({
     nick: "Basil Brush",
     avatar: "a_serveravatarhash",
@@ -29,7 +29,7 @@ test("uses The Discordians nickname and animated server avatar", () => {
     discordGuildId: DISCORDIANS_GUILD_ID,
     discordUserId: "123456789012345678",
     displayName: "Basil Brush",
-    avatarUrl: `https://cdn.discordapp.com/guilds/${DISCORDIANS_GUILD_ID}/users/123456789012345678/avatars/a_serveravatarhash.gif?size=256`,
+    avatarUrl: `https://cdn.discordapp.com/guilds/${DISCORDIANS_GUILD_ID}/users/123456789012345678/avatars/a_serveravatarhash.webp?size=256&animated=true`,
   });
 });
 
@@ -49,6 +49,24 @@ test("stores one effective server presentation when no server overrides exist", 
   assert.equal(profile.avatarUrl, "https://cdn.discordapp.com/avatars/123456789012345678/accountavatarhash.png?size=256");
   assert.equal("globalDisplayName" in profile, false);
   assert.equal("globalAvatarUrl" in profile, false);
+});
+
+test("uses animated WebP for an animated Discord account avatar fallback", () => {
+  const profile = discordServerProfile({
+    nick: null,
+    avatar: null,
+    user: {
+      id: "123456789012345678",
+      username: "accountname",
+      global_name: "Visible in server",
+      avatar: "a_accountavatarhash",
+    },
+  });
+
+  assert.equal(
+    profile.avatarUrl,
+    "https://cdn.discordapp.com/avatars/123456789012345678/a_accountavatarhash.webp?size=256&animated=true",
+  );
 });
 
 test("reads the Discord account ID only from the trusted Auth identity", () => {
