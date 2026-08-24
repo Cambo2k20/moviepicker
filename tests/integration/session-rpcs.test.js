@@ -12,6 +12,7 @@ import {
   createIdentity,
   expectRpcError,
   groupId,
+  requireLocalApiUrl,
   resetWorkspace,
   sqlRow,
   sqlRows,
@@ -24,6 +25,14 @@ let ross;    // member, suggested the film, hosts nothing
 let outsider; // authenticated, never approved
 let film;
 let sessionId;
+
+test("the database harness refuses hosted Supabase projects", () => {
+  assert.throws(
+    () => requireLocalApiUrl("https://example.supabase.co"),
+    /Refusing to run destructive database tests against non-local Supabase URL/,
+  );
+  assert.equal(requireLocalApiUrl("http://127.0.0.1:54521"), "http://127.0.0.1:54521");
+});
 
 test("set up a real group with four authenticated identities", async () => {
   await resetWorkspace();

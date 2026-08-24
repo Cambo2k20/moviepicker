@@ -24,14 +24,38 @@ const repoRoot = new URL("../../../", import.meta.url);
 
 let cachedEnv = null;
 
+export function requireLocalApiUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Invalid local Supabase API URL: ${value}`);
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(hostname)) {
+    throw new Error(
+      `Refusing to run destructive database tests against non-local Supabase URL: ${url.origin}`,
+    );
+  }
+
+  return value;
+}
+
 // `supabase status` is slow enough to matter per test file, so allow a plain
 // environment override and cache the parsed result for the rest of the process.
 export function localEnv() {
   if (cachedEnv) return cachedEnv;
 
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  const overrideNames = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"];
+  const suppliedOverrides = overrideNames.filter((name) => process.env[name]);
+  if (suppliedOverrides.length > 0 && suppliedOverrides.length < overrideNames.length) {
+    throw new Error(`Set all local Supabase overrides together: ${overrideNames.join(", ")}.`);
+  }
+
+  if (suppliedOverrides.length === overrideNames.length) {
     cachedEnv = {
-      apiUrl: process.env.SUPABASE_URL,
+      apiUrl: requireLocalApiUrl(process.env.SUPABASE_URL),
       anonKey: process.env.SUPABASE_ANON_KEY,
       serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     };
@@ -40,11 +64,14 @@ export function localEnv() {
 
   let raw;
   try {
-    raw = execFileSync("npx", ["supabase", "status", "-o", "env"], {
+    const command = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : "npx";
+    const args = process.platform === "win32"
+      ? ["/d", "/s", "/c", "npx.cmd supabase status -o env"]
+      : ["supabase", "status", "-o", "env"];
+    raw = execFileSync(command, args, {
       cwd: fileURLToPath(repoRoot),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      shell: process.platform === "win32",
     });
   } catch (error) {
     throw new Error(
@@ -64,12 +91,15 @@ export function localEnv() {
     throw new Error("Local Supabase is not running. Run `npx supabase start` first.");
   }
 
-  cachedEnv = { apiUrl: values.API_URL, anonKey: values.ANON_KEY, serviceKey: values.SERVICE_ROLE_KEY };
+  cachedEnv = {
+    apiUrl: requireLocalApiUrl(values.API_URL),
+    anonKey: values.ANON_KEY,
+    serviceKey: values.SERVICE_ROLE_KEY,
+  };
   return cachedEnv;
 }
 
 function dbContainer() {
-  if (process.env.SUPABASE_DB_CONTAINER) return process.env.SUPABASE_DB_CONTAINER;
   const config = readFileSync(new URL("supabase/config.toml", repoRoot), "utf8");
   const projectId = config.match(/^project_id\s*=\s*"(.+)"/m)?.[1];
   if (!projectId) throw new Error("Could not read project_id from supabase/config.toml.");

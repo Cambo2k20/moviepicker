@@ -99,6 +99,8 @@ npm run test:db
 
 Fixture setup and ground-truth reads go through `psql` as `postgres` rather than a service-role PostgREST client, because Supabase's local baseline grants `service_role` only `TRUNCATE`, `REFERENCES` and `TRIGGER` on `postgres`-owned tables in `public`. That is a property of the local stack, not of this repository's migrations — an unrelated local project shows the same default ACL. Granting `service_role` more would change the very privilege surface these tests exist to check.
 
+The harness refuses non-loopback API URLs and derives the database container name from this repository's `project_id`. This is deliberate: the fixtures truncate application tables and delete local Auth users, so `test:db` must never be pointed at a hosted project or an arbitrary Docker container.
+
 The suite is not wired into CI, because CI has no database service. Run it locally before changing anything under `supabase/`.
 
 `config.toml` was added so the stack can be started at all. Two deliberate choices in it:
