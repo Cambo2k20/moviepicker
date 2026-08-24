@@ -424,7 +424,10 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Post to Discord" }).click();
   await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /View in Discord/ })).toHaveAttribute("href", /discord\.com\/channels\//);
+  await expect(page.getByRole("link", { name: /View in Discord/ })).toHaveAttribute(
+    "href",
+    /^https:\/\/discord\.com\/channels\/preview-guild\/preview-channel\/preview-\d+$/,
+  );
   await page.reload();
   await page.getByRole("button", { name: "Edit Journal post" }).click();
   await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();

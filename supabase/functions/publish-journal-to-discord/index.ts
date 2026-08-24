@@ -1,6 +1,9 @@
 import {
+  bearerForSupabaseApiKey,
   buildDiscordJournalPayload,
+  discordGuildIdForMessage,
   discordMessageUrl,
+  namedSupabaseKey,
   safeDiscordWebhookUrl,
 } from "../_shared/discord-journal.js";
 
@@ -27,11 +30,15 @@ function environmentKey(name: string, legacyName?: string) {
   return null;
 }
 
-function restHeaders(key: string, authorization: string, extra: Record<string, string> = {}) {
-  return { apikey: key, Authorization: authorization, ...extra };
+function namedEnvironmentKey(name: string) {
+  return namedSupabaseKey(Deno.env.get(name));
 }
 
-async function restRows(base: string, path: string, key: string, authorization: string) {
+function restHeaders(key: string, authorization: string | null, extra: Record<string, string> = {}) {
+  return { apikey: key, ...(authorization ? { Authorization: authorization } : {}), ...extra };
+}
+
+async function restRows(base: string, path: string, key: string, authorization: string | null) {
   const response = await fetch(`${base}/rest/v1/${path}`, {
     headers: restHeaders(key, authorization),
   });
@@ -43,7 +50,7 @@ async function restRows(base: string, path: string, key: string, authorization: 
 async function serviceWrite(base: string, path: string, key: string, method: string, body: unknown, prefer = "return=representation") {
   const response = await fetch(`${base}/rest/v1/${path}`, {
     method,
-    headers: restHeaders(key, `Bearer ${key}`, {
+    headers: restHeaders(key, bearerForSupabaseApiKey(key), {
       "Content-Type": "application/json",
       Prefer: prefer,
     }),
@@ -63,6 +70,21 @@ function safeFailureMessage(status: number) {
   return "Discord did not accept the Journal post. Try again.";
 }
 
+async function discordWebhookMetadata(webhook: URL) {
+  try {
+    const metadataUrl = new URL(webhook);
+    metadataUrl.search = "";
+    const response = await fetch(metadataUrl);
+    if (!response.ok) return null;
+    const metadata = await response.json().catch(() => null);
+    const guildId = String(metadata?.guild_id || "").trim();
+    const channelId = String(metadata?.channel_id || "").trim();
+    return guildId && channelId ? { guildId, channelId } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function contentHash(payload: unknown) {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -74,8 +96,10 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return respond({ error: "Method not allowed." }, 405);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const publicKey = environmentKey("SUPABASE_ANON_KEY", "SB_PUBLISHABLE_KEY");
-  const serviceKey = environmentKey("SUPABASE_SERVICE_ROLE_KEY", "SB_SECRET_KEY");
+  const publicKey = namedEnvironmentKey("SUPABASE_PUBLISHABLE_KEYS")
+    || environmentKey("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY");
+  const serviceKey = namedEnvironmentKey("SUPABASE_SECRET_KEYS")
+    || environmentKey("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY");
   const authorization = req.headers.get("Authorization");
   if (!supabaseUrl || !publicKey || !serviceKey) return respond({ error: "Journal publishing is not configured." }, 503);
   if (!authorization) return respond({ error: "Sign in to publish a Journal entry." }, 401);
@@ -94,7 +118,7 @@ Deno.serve(async (req: Request) => {
     const journalEntryId = String(body?.journalEntryId || "").trim();
     if (!UUID.test(journalEntryId)) return respond({ error: "Choose a valid saved Journal entry." }, 400);
 
-    const serviceAuthorization = `Bearer ${serviceKey}`;
+    const serviceAuthorization = bearerForSupabaseApiKey(serviceKey);
     const entries = await restRows(
       supabaseUrl,
       `journal_entries?select=id,group_id,movie_session_id,entry_number,title,release_year,watched_at,status,comment,created_by&id=eq.${journalEntryId}&limit=1`,
@@ -120,7 +144,23 @@ Deno.serve(async (req: Request) => {
     if (session.status !== "WATCHED") return respond({ error: "The Journal can be posted only after the film is marked watched." }, 409);
 
     let publication = first(existingRows);
+    const webhook = safeDiscordWebhookUrl(Deno.env.get("DISCORD_JOURNAL_WEBHOOK_URL"));
     if (publication?.status === "POSTED") {
+      if (!publication.discord_guild_id && webhook) {
+        const metadata = await discordWebhookMetadata(webhook);
+        if (metadata?.channelId === String(publication.discord_channel_id || "")) {
+          const repaired = await serviceWrite(
+            supabaseUrl,
+            `discord_publications?id=eq.${publication.id}`,
+            serviceKey,
+            "PATCH",
+            { discord_guild_id: metadata.guildId },
+          );
+          if (repaired.response.ok && Array.isArray(repaired.data) && repaired.data.length) {
+            publication = repaired.data[0];
+          }
+        }
+      }
       return respond({ status: "posted", publication, messageUrl: discordMessageUrl(publication) });
     }
     if (publication?.status === "UNKNOWN") {
@@ -147,7 +187,7 @@ Deno.serve(async (req: Request) => {
     if (publication) {
       const updated = await serviceWrite(
         supabaseUrl,
-        `discord_publications?id=eq.${publication.id}&status=neq.POSTED`,
+        `discord_publications?id=eq.${publication.id}&status=eq.${publication.status}`,
         serviceKey,
         "PATCH",
         {
@@ -182,7 +222,6 @@ Deno.serve(async (req: Request) => {
     }
     reservedPublicationId = publication.id;
 
-    const webhook = safeDiscordWebhookUrl(Deno.env.get("DISCORD_JOURNAL_WEBHOOK_URL"));
     if (!webhook) {
       await serviceWrite(supabaseUrl, `discord_publications?id=eq.${publication.id}`, serviceKey, "PATCH", {
         status: "FAILED",
@@ -191,6 +230,7 @@ Deno.serve(async (req: Request) => {
       return respond({ error: "The Discord Journal webhook is not configured. Check the Supabase secret name." }, 503);
     }
 
+    const webhookMetadata = await discordWebhookMetadata(webhook);
     deliveryStarted = true;
     const discordResponse = await fetch(webhook, {
       method: "POST",
@@ -213,9 +253,10 @@ Deno.serve(async (req: Request) => {
       return respond({ error: message }, 502);
     }
 
+    const discordGuildId = discordGuildIdForMessage(discordMessage, webhookMetadata);
     const completed = await serviceWrite(supabaseUrl, `discord_publications?id=eq.${publication.id}`, serviceKey, "PATCH", {
       status: "POSTED",
-      discord_guild_id: discordMessage.guild_id || null,
+      discord_guild_id: discordGuildId || null,
       discord_channel_id: discordMessage.channel_id,
       discord_message_id: discordMessage.id,
       posted_at: new Date().toISOString(),

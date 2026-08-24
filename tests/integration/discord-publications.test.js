@@ -15,6 +15,39 @@ let member;
 let outsider;
 let entryId;
 
+test("service_role has the publisher's required DML and no source-table writes", () => {
+  assert.deepEqual(sqlRow(`
+    with source_tables(table_name) as (
+      select unnest(array[
+        'public.journal_entries',
+        'public.movie_sessions',
+        'public.group_memberships',
+        'public.movie_session_participants',
+        'public.profiles'
+      ]::text[])
+    )
+    select
+      bool_and(has_table_privilege('service_role', table_name, 'SELECT')) as all_source_select,
+      bool_or(has_table_privilege('service_role', table_name, 'INSERT')) as any_source_insert,
+      bool_or(has_table_privilege('service_role', table_name, 'UPDATE')) as any_source_update,
+      bool_or(has_table_privilege('service_role', table_name, 'DELETE')) as any_source_delete,
+      has_table_privilege('service_role', 'public.discord_publications', 'SELECT') as publication_select,
+      has_table_privilege('service_role', 'public.discord_publications', 'INSERT') as publication_insert,
+      has_table_privilege('service_role', 'public.discord_publications', 'UPDATE') as publication_update,
+      has_table_privilege('service_role', 'public.discord_publications', 'DELETE') as publication_delete
+    from source_tables
+  `), {
+    all_source_select: true,
+    any_source_insert: false,
+    any_source_update: false,
+    any_source_delete: false,
+    publication_select: true,
+    publication_insert: true,
+    publication_update: true,
+    publication_delete: false,
+  });
+});
+
 test("set up a publication owned by the server", async () => {
   await resetWorkspace();
   group = groupId();
