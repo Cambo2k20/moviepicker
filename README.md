@@ -46,7 +46,15 @@ npm run test:e2e
 
 - `test:unit` covers Roulette filtering, weighting, duplicate display-name vetoes and state recovery.
 - `build` creates `dist/` and fails if a bundled local asset is missing or an unbundled source path remains.
-- `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`.
+- `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`. It runs entirely in `?design-preview`, so it proves the interface, not the database.
+- `test:db` runs the Supabase integration suite. It needs a local database and is therefore not part of `npm test` or CI:
+
+```bash
+npx supabase start
+npm run test:db
+```
+
+  It exercises the session RPCs, the Journal entry-numbering rules and the Row Level Security boundary against real Postgres, using several genuinely authenticated identities with different roles.
 
 ## Deployment
 
@@ -69,7 +77,8 @@ https://cambo2k20.github.io/moviepicker/
 | `roulette-core.js` | Pure Queue Roulette rules and state compatibility |
 | `styles.css` | Active visual system and responsive behavior |
 | `assets/` | Versioned application images and avatars |
-| `tests/` | Node unit tests and Playwright responsive tests |
+| `tests/` | Node unit tests, Playwright responsive tests and Supabase integration tests |
+| `supabase/rollback/` | Reverse scripts matching the additive migrations |
 | `scripts/verify-dist.mjs` | Production artifact asset verification |
 | `.github/workflows/` | Pull-request validation and GitHub Pages deployment |
 | `supabase/schema.sql` | Base profiles, groups and Journal backend schema |
@@ -84,14 +93,11 @@ https://cambo2k20.github.io/moviepicker/
 
 ## Supabase setup
 
-For a fresh Supabase environment, review and apply the canonical SQL in order:
+For a fresh Supabase environment, apply everything in `supabase/migrations/` in timestamp order. That chain builds a complete, current database, and is what `supabase db reset` and `supabase start` use.
 
-1. `supabase/schema.sql`
-2. `supabase/member_management.sql`
-3. `supabase/movie_metadata.sql`
-4. `supabase/movie_sessions.sql`
+The canonical files (`supabase/schema.sql`, `member_management.sql`, `movie_metadata.sql`, `movie_sessions.sql`) remain as readable documentation of how the schema was first assembled. They predate the session-planning work and are **not** sufficient to run the current frontend on their own; see `supabase/README.md` for what they are missing.
 
-The nine earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The migration baseline itself is reconciled; the privilege-hardening migration in this branch remains staged locally and is not applied to production by a build, test or GitHub Pages deployment.
+The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The migration baseline itself is reconciled; the privilege-hardening migration in this branch remains staged locally and is not applied to production by a build, test or GitHub Pages deployment.
 
 Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the browser bundle.
 
