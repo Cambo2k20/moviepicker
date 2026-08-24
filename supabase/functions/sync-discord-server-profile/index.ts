@@ -100,12 +100,11 @@ Deno.serve(async (req: Request) => {
       return respond({ error: "This Cine-Cord account is not connected to Discord." }, 409);
     }
 
-    const serviceAuthorization = bearerForSupabaseApiKey(serviceKey);
     const groups = await restRows(
       supabaseUrl,
       "groups?select=id&slug=eq.the-discordians&limit=1",
-      serviceKey,
-      serviceAuthorization,
+      publicKey,
+      authorization,
     );
     const group = first(groups);
     if (!group?.id) return respond({ error: "The Discordians group is not configured." }, 503);
@@ -113,8 +112,8 @@ Deno.serve(async (req: Request) => {
     const memberships = await restRows(
       supabaseUrl,
       `group_memberships?select=user_id&group_id=eq.${group.id}&user_id=eq.${user.id}&limit=1`,
-      serviceKey,
-      serviceAuthorization,
+      publicKey,
+      authorization,
     );
     if (!first(memberships)) return respond({ error: "Approved Cine-Cord membership is required." }, 403);
 

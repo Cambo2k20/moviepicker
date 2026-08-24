@@ -1,11 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   DISCORDIANS_GUILD_ID,
   discordAuthUserId,
   discordServerProfile,
 } from "../supabase/functions/_shared/discord-server-profile.js";
+
+const syncFunctionSource = readFileSync(
+  new URL("../supabase/functions/sync-discord-server-profile/index.ts", import.meta.url),
+  "utf8",
+);
 
 test("uses The Discordians nickname and animated server avatar", () => {
   const profile = discordServerProfile({
@@ -62,4 +68,19 @@ test("rejects malformed guild-member profiles and unsafe asset hashes", () => {
     user: { id: "123456789012345678", username: "Cameron", avatar: "also/not/safe" },
   });
   assert.equal(profile.avatarUrl, null);
+});
+
+test("membership-gate reads use the signed-in member while the protected write uses service_role", () => {
+  assert.match(
+    syncFunctionSource,
+    /"groups\?select=id&slug=eq\.the-discordians&limit=1",\s*publicKey,\s*authorization,/,
+  );
+  assert.match(
+    syncFunctionSource,
+    /`group_memberships\?select=user_id[^`]+`,\s*publicKey,\s*authorization,/,
+  );
+  assert.match(
+    syncFunctionSource,
+    /"rpc\/upsert_discord_server_identity",\s*serviceKey,/,
+  );
 });
