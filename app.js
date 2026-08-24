@@ -84,6 +84,7 @@ let journalDetailsOpen = false;
 let sessionDetailsEditing = null;
 let journalSessionId = null;
 let journalDraftTimer = 0;
+let journalPublishPendingId = null;
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -92,7 +93,6 @@ let genreFilter = "all";
 let memberFilter = "all";
 let listFiltersOpen = false;
 let selectedFilmId = null;
-const shortlistedFilmIds = new Set();
 let rouletteState = null;
 let rouletteSpinTimer = null;
 let rouletteSpinToken = 0;
@@ -241,6 +241,15 @@ function formatAddedDate(value) {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
 }
 
+function formatSavedDate(value, options = { day: "numeric", month: "short", year: "numeric" }, locale = "en-GB") {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return "Date unknown";
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "Date unknown";
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" }).format(date);
+}
+
 function normaliseGenres(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (typeof value === "string") return value.split(",").map((genre) => genre.trim()).filter(Boolean);
@@ -285,6 +294,8 @@ function createDiscordDraft(session, film) {
     year: entry?.year || film?.year || "",
     viewerIds: (session.participantIds || []).filter(Boolean),
     viewers: session.members.join(", "),
+    runtime: Number(film?.runtime) || null,
+    genres: normaliseGenres(film?.genres),
     status: entry?.status === "DNF" ? "DNF" : "Finished",
     comment: entry?.comment || "",
   };
@@ -314,6 +325,8 @@ function ensureDiscordDraft(session, film) {
   }
   discordDraft.viewerIds = (session.participantIds || []).filter(Boolean);
   discordDraft.viewers = session.members.join(", ");
+  discordDraft.runtime = Number(film?.runtime) || null;
+  discordDraft.genres = normaliseGenres(film?.genres);
   return discordDraft;
 }
 
@@ -322,6 +335,8 @@ function buildDiscordTemplate(draft) {
     `- Entry #${String(draft.entryNumber || "assigned when saved").trim()}`,
     `- ${String(draft.title || "").trim()}`,
     `- ${String(draft.year || "").trim()}`,
+    `- Runtime: ${draft.runtime ? `${Number(draft.runtime)} min` : "Unavailable"}`,
+    `- Genres: ${normaliseGenres(draft.genres).join(", ") || "Unavailable"}`,
     `- Viewers: ${String(draft.viewers || "").trim()}`,
     `- Status: ${draft.status === "DNF" ? "DNF" : "Finished"}`,
   ];
@@ -329,6 +344,56 @@ function buildDiscordTemplate(draft) {
   if (comment) lines.push(`- ${comment}`);
   lines.push(DISCORD_ENTRY_DIVIDER);
   return lines.join("\n");
+}
+
+function discordPublicationUrl(publication) {
+  const channel = String(publication?.discord_channel_id || "").trim();
+  const message = String(publication?.discord_message_id || "").trim();
+  if (!channel || !message) return null;
+  const guild = String(publication?.discord_guild_id || "@me").trim();
+  return `https://discord.com/channels/${encodeURIComponent(guild)}/${encodeURIComponent(channel)}/${encodeURIComponent(message)}`;
+}
+
+function renderDiscordFancyPreview(session, film, draft) {
+  const poster = film ? filmPoster(film) : null;
+  const genres = normaliseGenres(film?.genres);
+  const comment = String(draft.comment || "").trim();
+  return `
+    <section class="discord-embed-preview" aria-label="Discord embed preview">
+      <div class="discord-embed-accent"></div>
+      <div class="discord-embed-body">
+        <span class="discord-embed-author">Entry #${escapeHTML(draft.entryNumber || "assigned when saved")}</span>
+        <strong class="discord-embed-title" data-discord-preview-title>${escapeHTML(draft.title || "Untitled")}</strong>
+        <dl class="discord-embed-fields">
+          <div><dt>Film</dt><dd data-discord-preview-film>${escapeHTML(draft.year || "Year unavailable")} · ${escapeHTML(runtimeLabel(film || {}))}</dd></div>
+          <div><dt>Genres</dt><dd data-discord-preview-genres>${escapeHTML(genres.join(" · ") || "Genres unavailable")}</dd></div>
+          <div><dt>Viewers</dt><dd data-discord-preview-viewers>${escapeHTML(draft.viewers || "No viewers recorded")}</dd></div>
+          <div><dt>Status</dt><dd data-discord-preview-status>${escapeHTML(draft.status)}</dd></div>
+        </dl>
+        <blockquote data-discord-preview-comment ${comment ? "" : "hidden"}>${escapeHTML(comment)}</blockquote>
+        <small>Submitted by ${escapeHTML(currentProfile?.displayName || "a Discordian")} via Cine-Cord</small>
+      </div>
+      ${poster ? `<img src="${escapeHTML(poster)}" alt="" />` : ""}
+    </section>`;
+}
+
+function renderDiscordPublicationActions(session) {
+  const publication = session.journalPublication;
+  const canPublish = canManageSession(session);
+  if (publication?.status === "POSTED") {
+    const messageUrl = discordPublicationUrl(publication);
+    return `<div class="discord-publication-state is-posted" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span><div><strong>Posted to Discord</strong><small>${publication.posted_at ? `Posted ${escapeHTML(formatAddedDate(publication.posted_at))}. ` : ""}Edits saved here will not update the Discord message in this phase.</small></div>${messageUrl ? `<a class="secondary-button compact" href="${escapeHTML(messageUrl)}" target="_blank" rel="noopener noreferrer">View in Discord <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}</div>`;
+  }
+  if (publication?.status === "POSTING") {
+    return `<div class="discord-publication-state" role="status"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span><div><strong>Posting to Discord…</strong><small>Refresh in a moment if this does not update.</small></div></div>`;
+  }
+  if (publication?.status === "UNKNOWN") {
+    return `<div class="discord-publication-state has-warning" role="alert"><span class="material-symbols-outlined" aria-hidden="true">warning</span><div><strong>Discord delivery is uncertain</strong><small>${escapeHTML(publication.last_error || "Check the Journal channel. Posting again is blocked so the entry is not duplicated.")}</small></div></div>`;
+  }
+  if (!canPublish) return "";
+  const failed = publication?.status === "FAILED";
+  const pending = journalPublishPendingId === session.id;
+  return `<div class="discord-publish-action ${failed ? "has-failed" : ""}">${failed ? `<p role="alert"><strong>Discord post failed.</strong> ${escapeHTML(publication.last_error || "The saved Journal entry is safe; try posting it again.")}</p>` : ""}<button class="primary-button discord-post-button" type="button" data-post-journal ${pending ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">${pending ? "progress_activity" : "send"}</span>${pending ? "Posting…" : failed ? "Retry Discord post" : "Post to Discord"}</button><small>This is explicit: it saves the Journal entry, then sends one embed to the configured Journal channel.</small></div>`;
 }
 
 function journalDetailsNeedAttention(draft) {
@@ -375,7 +440,7 @@ function renderSessionSummary(session, { editorMode = null } = {}) {
         ${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
       </div>
       <dl class="session-summary-grid">
-        <div><dt>Watch date</dt><dd>${escapeHTML(new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</dd></div>
+        <div><dt>Watch date</dt><dd>${escapeHTML(formatSavedDate(date, { weekday: "long", day: "numeric", month: "long", year: "numeric" }, navigator.language))}</dd></div>
         <div><dt>Host</dt><dd>${escapeHTML(session.hostName)}</dd></div>
         <div><dt>Participants</dt><dd>${participants.length ? escapeHTML(participants.map(({ name }) => name).join(", ")) : "No one added yet"}</dd></div>
       </dl>
@@ -394,11 +459,12 @@ function renderDiscordTemplate(session, film) {
   return `
     <section class="discord-copy-card" aria-labelledby="discord-copy-title">
       <div class="discord-copy-heading">
-        <div><span class="eyebrow">${hasSavedEntry ? `Journal entry #${escapeHTML(draft.entryNumber)}` : "Optional Discord handoff"}</span><h3 id="discord-copy-title">${canEdit ? "Prepare the Journal post" : "Journal post"}</h3><p>${canEdit ? "Save the entry, then copy it into Discord yourself." : "This saved entry can be copied into Discord. Only the session host or an administrator can change it."}</p></div>
+        <div><span class="eyebrow">${hasSavedEntry ? `Journal entry #${escapeHTML(draft.entryNumber)}` : "Optional Discord handoff"}</span><h3 id="discord-copy-title">${canEdit ? "Prepare the Journal post" : "Journal post"}</h3><p>${canEdit ? "Preview the Discord card, then post it directly or keep using manual copy." : "This saved entry can be viewed or copied. Only the session host or an administrator can post or change it."}</p></div>
         </div>
       <form id="discord-template-form" class="discord-template-form">
+        ${renderDiscordFancyPreview(session, film, draft)}
         <div class="discord-post-row">
-          <label class="discord-preview-field"><span>Discord preview</span><textarea id="discord-template-preview" readonly rows="8">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
+          <label class="discord-preview-field"><span>Manual copy preview</span><textarea id="discord-template-preview" readonly rows="10">${escapeHTML(buildDiscordTemplate(draft))}</textarea></label>
           <div class="discord-author-fields">
             <label class="discord-entry-field"><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" value="${escapeHTML(draft.entryNumber)}" placeholder="Assigned when saved" ${readOnly} /><small>Leave blank for the next number. Change it only to correct an entry.</small></label>
             <label class="discord-comment-field"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="3" placeholder="Add the Journal comment…" ${readOnly}>${escapeHTML(draft.comment)}</textarea></label>
@@ -417,7 +483,8 @@ function renderDiscordTemplate(session, film) {
             <label class="discord-status-field"><span>Status</span><select name="status" ${canEdit ? "" : "disabled"}><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
           </div>
         </details>
-        <div class="discord-copy-actions"><button class="primary-button" type="${canEdit ? "submit" : "button"}" ${canEdit ? "" : "data-copy-saved-journal"}><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>${canEdit ? `<button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button>` : ""}<small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
+        <div class="discord-copy-actions"><button class="secondary-button" type="${canEdit ? "submit" : "button"}" ${canEdit ? "" : "data-copy-saved-journal"}><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>${canEdit ? `<button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button>` : ""}<small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
+        ${renderDiscordPublicationActions(session)}
       </form>
     </section>`;
 }
@@ -427,6 +494,7 @@ function updateDiscordDraftPreview(form) {
   const session = journalSession();
   if (!form || !session) return;
   const values = new FormData(form);
+  const film = selectedFilmForSession(session);
   discordDraft = {
     sessionId: session.id,
     entryNumber: String(values.get("entry_number") || ""),
@@ -434,10 +502,23 @@ function updateDiscordDraftPreview(form) {
     year: String(values.get("year") || ""),
     viewerIds: (session.participantIds || []).filter(Boolean),
     viewers: session.members.join(", "),
+    runtime: Number(film?.runtime) || null,
+    genres: normaliseGenres(film?.genres),
     status: String(values.get("status")) === "DNF" ? "DNF" : "Finished",
     comment: String(values.get("comment") || ""),
   };
   form.querySelector("#discord-template-preview").value = buildDiscordTemplate(discordDraft);
+  const fancy = form.querySelector(".discord-embed-preview");
+  if (fancy) {
+    fancy.querySelector("[data-discord-preview-title]").textContent = discordDraft.title || "Untitled";
+    fancy.querySelector("[data-discord-preview-film]").textContent = `${discordDraft.year || "Year unavailable"} · ${runtimeLabel(film || {})}`;
+    fancy.querySelector("[data-discord-preview-genres]").textContent = normaliseGenres(film?.genres).join(" · ") || "Genres unavailable";
+    fancy.querySelector("[data-discord-preview-viewers]").textContent = discordDraft.viewers || "No viewers recorded";
+    fancy.querySelector("[data-discord-preview-status]").textContent = discordDraft.status;
+    const comment = fancy.querySelector("[data-discord-preview-comment]");
+    comment.textContent = discordDraft.comment;
+    comment.hidden = !discordDraft.comment;
+  }
   session.journalDraft = discordDraft;
   persistDesignPreviewWorkspace();
   scheduleJournalDraftSave(session);
@@ -447,11 +528,27 @@ function updateDiscordDraftPreview(form) {
 // remembering to press Copy. Save shortly after typing stops, and on the way out.
 function scheduleJournalDraftSave(session) {
   if (designPreviewMode || !session) return;
-  window.clearTimeout(journalDraftTimer);
-  journalDraftTimer = window.setTimeout(() => { saveJournalDraft(session).catch(() => {}); }, 1200);
+  clearJournalDraftSaveTimer();
+  journalDraftTimer = window.setTimeout(() => {
+    journalDraftTimer = 0;
+    saveJournalDraft(session).catch(() => {});
+  }, 1200);
+}
+
+function clearJournalDraftSaveTimer() {
+  if (journalDraftTimer) window.clearTimeout(journalDraftTimer);
+  journalDraftTimer = 0;
+}
+
+function flushJournalDraftSave() {
+  const session = journalSession();
+  clearJournalDraftSaveTimer();
+  if (!session || !discordDraft || !canManageSession(session)) return Promise.resolve(false);
+  return saveJournalDraft(session).then(() => true);
 }
 
 async function saveJournalDraft(session = journalSession()) {
+  clearJournalDraftSaveTimer();
   if (!session || !discordDraft) return;
   if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can save this draft.");
   const snapshot = { ...discordDraft };
@@ -530,6 +627,42 @@ async function saveJournalEntry(session, draft) {
   return discordDraft;
 }
 
+async function publishJournalToDiscord(session) {
+  if (!session?.journalEntry?.id) throw new Error("Save the Journal entry before posting it to Discord.");
+  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can post this Journal entry.");
+  if (session.journalPublication?.status === "POSTED") return session.journalPublication;
+  if (designPreviewMode) {
+    const publication = {
+      id: `preview-publication-${session.journalEntry.id}`,
+      journal_entry_id: session.journalEntry.id,
+      status: "POSTED",
+      discord_guild_id: "preview-guild",
+      discord_channel_id: "preview-channel",
+      discord_message_id: `preview-${session.journalEntry.entryNumber}`,
+      posted_at: new Date().toISOString(),
+      posted_by: currentProfile.id,
+      last_error: null,
+    };
+    session.journalPublication = publication;
+    persistDesignPreviewWorkspace();
+    return publication;
+  }
+  const { data, error } = await supabase.functions.invoke("publish-journal-to-discord", {
+    body: { journalEntryId: session.journalEntry.id },
+  });
+  if (error) {
+    let message = error.message || "The Journal could not be posted to Discord.";
+    try {
+      const payload = await error.context?.json();
+      if (payload?.error) message = payload.error;
+    } catch { /* keep the safe function error */ }
+    throw new Error(message);
+  }
+  if (!data?.publication) throw new Error("Discord did not return a publication record. Refresh before trying again.");
+  session.journalPublication = data.publication;
+  return data.publication;
+}
+
 async function copyJournalToClipboard(draft, preview) {
   const template = buildDiscordTemplate(draft);
   try {
@@ -577,11 +710,10 @@ function isoDateOnly(value) {
 function sessionDateLabel(value) {
   const today = isoDateOnly(new Date());
   if (value === today) return "tonight";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return "tonight";
   const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
   if (value === isoDateOnly(yesterday)) return "last night";
-  return `on ${date.toLocaleDateString(undefined, { day: "numeric", month: "long" })}`;
+  const label = formatSavedDate(value, { day: "numeric", month: "long" }, navigator.language);
+  return label === "Date unknown" ? "tonight" : `on ${label}`;
 }
 
 function rouletteWeightSummary(weight, item, { weighted }) {
@@ -878,7 +1010,6 @@ function renderFilmCard(item) {
 }
 
 function renderFilmDetails(item) {
-  const isShortlisted = shortlistedFilmIds.has(item.id);
   return `
     <button class="detail-scrim" type="button" data-close-film-details aria-label="Close film details"></button>
     <aside class="film-detail-drawer" aria-labelledby="film-detail-title" tabindex="-1">
@@ -887,9 +1018,8 @@ function renderFilmDetails(item) {
       <div class="detail-title-row"><div><h2 id="film-detail-title">${escapeHTML(item.title)}</h2><p>${item.year ? escapeHTML(item.year) : "Year pending"}</p></div><span class="status-pill ${item.watched ? "watched" : "ready"}">${escapeHTML(watchHistoryLabel(item))}</span></div>
       <div class="detail-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(item))}</span>${item.genres.map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>
       <dl class="detail-ledger"><div><dt>Added by</dt><dd><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" />${escapeHTML(item.suggestedBy)}</dd></div><div><dt>On the list</dt><dd>${escapeHTML(formatAddedDate(item.createdAt))}</dd></div><div><dt>Group votes</dt><dd>${item.votes}</dd></div></dl>
-      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote, shortlist it and use it in Pick Tonight now.")}</p>
+      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote for it and use it in Pick Tonight now.")}</p>
       <div class="detail-actions">
-        <button class="primary-button" type="button" data-shortlist-film="${item.id}"><span class="material-symbols-outlined" aria-hidden="true">${isShortlisted ? "check" : "playlist_add"}</span>${isShortlisted ? "Added to Tonight" : "Add to Tonight"}</button>
         <button class="secondary-button" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${item.votedByMe ? "Remove vote" : "Vote"} · ${item.votes}</button>
         ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-match-film="${item.id}">${item.tmdbId ? "Refresh movie details" : "Find poster and details"}</button><button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
       </div>
@@ -1101,7 +1231,7 @@ function renderQueueRoulette() {
     <section class="roulette-game ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? "has-result" : ""}" aria-labelledby="roulette-title">
       <header class="roulette-header">
         <div><span class="eyebrow">Pick Tonight · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
-        ${canManageSession() ? `<button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>` : ""}
+        <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
       </header>
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
     </section>`;
@@ -1127,7 +1257,7 @@ function renderSessions() {
   const activeEditor = sessionEditorMode(activeSession);
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then save the optional Journal post whenever it suits. Discord remains a manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then save the optional Journal whenever it suits. Post its card to Discord explicitly, or keep using manual copy.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
       ${activeSession ? `
         <article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">
           ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
@@ -1152,7 +1282,7 @@ function renderSessions() {
         const canManage = canManageSession(session);
         const journalLabel = session.journalEntry ? (canManage ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
         const canOpenJournal = canManage || session.journalEntry;
-        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatAddedDate(session.watchedAt || session.startedAt))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
       }).join("")}</div></section>` : ""}
     </section>`;
 }
@@ -1261,7 +1391,7 @@ function openPartyModal(mode = "Queue Roulette") {
     showToast("Add at least one ready film before starting a session.");
     return;
   }
-  partyMembers.innerHTML = members.map((member, index) => `<label class="member-choice"><input type="checkbox" name="members" value="${escapeHTML(member.id)}" ${index < 3 ? "checked" : ""} /><img src="${member.avatar}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("");
+  partyMembers.innerHTML = members.map((member) => `<label class="member-choice"><input type="checkbox" name="members" value="${escapeHTML(member.id)}" checked /><img src="${member.avatar}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("");
   const radio = partyForm.querySelector(`input[name="mode"][value="${mode}"]`);
   if (radio) radio.checked = true;
   partyModal.hidden = false;
@@ -1642,6 +1772,7 @@ async function loadWorkspace() {
   discordDraft = null;
   journalSessionId = null;
   sessionDetailsEditing = null;
+  journalPublishPendingId = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
@@ -1656,19 +1787,21 @@ async function loadWorkspace() {
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, sessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult] = await Promise.all([
+  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
-    supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).order("started_at", { ascending: false }).limit(20),
+    supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).in("status", ["ACTIVE", "CONFIRMED"]).order("started_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).eq("status", "WATCHED").order("watch_date", { ascending: false }).order("started_at", { ascending: false }).limit(20),
     supabase.from("movie_session_participants").select("session_id,profile_id,display_name_snapshot,added_at").order("added_at", { ascending: true }),
     supabase.rpc("group_watch_counts", { p_group_id: activeGroup.id }),
     supabase.from("journal_entries").select("*").eq("group_id", activeGroup.id).order("watched_at", { ascending: false }),
-    supabase.from("entry_viewers").select("entry_id,profile_id")
+    supabase.from("entry_viewers").select("entry_id,profile_id"),
+    supabase.from("discord_publications").select("id,journal_entry_id,status,discord_guild_id,discord_channel_id,discord_message_id,posted_by,posted_at,attempt_started_at,last_error")
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, sessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
@@ -1718,6 +1851,7 @@ async function loadWorkspace() {
     current.push(viewer.profile_id);
     viewerIdsByEntry.set(viewer.entry_id, current);
   }
+  const publicationByEntry = new Map((publicationsResult.data || []).map((publication) => [publication.journal_entry_id, publication]));
   const journalBySession = new Map((journalResult.data || [])
     .filter((entry) => entry.movie_session_id)
     .map((entry) => [entry.movie_session_id, {
@@ -1729,8 +1863,13 @@ async function loadWorkspace() {
       status: entry.status,
       comment: entry.comment || "",
       viewerIds: viewerIdsByEntry.get(entry.id) || [],
+      publication: publicationByEntry.get(entry.id) || null,
     }]));
-  const sessions = (sessionsResult.data || []).map((session) => {
+  const sessionRows = [
+    ...(currentSessionResult.data ? [currentSessionResult.data] : []),
+    ...(watchedSessionsResult.data || []),
+  ];
+  const sessions = sessionRows.map((session) => {
     const participants = participantsBySession.get(session.id) || [];
     const selectedFromList = movieList.find((item) => item.id === session.selected_queue_item_id);
     const selectedFilm = selectedFromList || (session.selected_title ? {
@@ -1769,6 +1908,7 @@ async function loadWorkspace() {
       watchedAt: session.watched_at || null,
       journalDraft: session.journal_draft && Object.keys(session.journal_draft).length ? session.journal_draft : null,
       journalEntry,
+      journalPublication: journalEntry?.publication || null,
     };
   });
   // A film's viewing count is the number of watched sessions that chose it, so
@@ -1792,7 +1932,9 @@ async function loadWorkspace() {
       .sort()
       .at(-1) || null;
   }
-  activeSession = sessions.find((session) => ["ACTIVE", "CONFIRMED"].includes(session.status)) || null;
+  activeSession = currentSessionResult.data
+    ? sessions.find((session) => session.id === currentSessionResult.data.id) || null
+    : null;
   sessionHistory = sessions.filter((session) => session.status === "WATCHED");
   if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
   if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
@@ -1814,8 +1956,9 @@ async function syncSession(session) {
   discordDraft = null;
   journalSessionId = null;
   sessionDetailsEditing = null;
+  journalPublishPendingId = null;
   selectedFilmId = null;
-  shortlistedFilmIds.clear();
+  clearJournalDraftSaveTimer();
   render();
   if (authUser) {
     try { await loadWorkspace(); }
@@ -1826,10 +1969,18 @@ async function syncSession(session) {
 }
 
 window.addEventListener("beforeunload", () => {
-  if (designPreviewMode || !discordDraft || !journalDraftTimer) return;
-  window.clearTimeout(journalDraftTimer);
-  const session = journalSession();
-  if (session) saveJournalDraft(session).catch(() => {});
+  if (!discordDraft) return;
+  flushJournalDraftSave().catch(() => {});
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && discordDraft) flushJournalDraftSave().catch(() => {});
+});
+
+document.addEventListener("focusout", (event) => {
+  if (!event.target.closest("#discord-template-form") || !event.target.matches("input, textarea, select")) return;
+  if (event.relatedTarget?.closest?.("[data-save-journal-draft], button[type='submit']")) return;
+  flushJournalDraftSave().catch(() => {});
 });
 
 document.addEventListener("submit", async (event) => {
@@ -1880,12 +2031,15 @@ document.addEventListener("submit", async (event) => {
       year: String(form.get("year")).trim(),
       viewerIds: [...(session?.participantIds || [])],
       viewers: session?.members.join(", ") || "",
+      runtime: Number(selectedFilmForSession(session)?.runtime) || null,
+      genres: normaliseGenres(selectedFilmForSession(session)?.genres),
       status: String(form.get("status")) === "DNF" ? "DNF" : "Finished",
       comment: String(form.get("comment")).trim(),
     };
     const submit = event.target.querySelector("button[type=submit]");
     if (submit) submit.disabled = true;
     try {
+      clearJournalDraftSaveTimer();
       const preview = event.target.querySelector("#discord-template-preview");
       const savedDraft = await saveJournalEntry(session, discordDraft);
       const entryField = event.target.querySelector("[name=entry_number]");
@@ -2118,17 +2272,6 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const shortlistButton = event.target.closest("[data-shortlist-film]");
-  if (shortlistButton) {
-    const item = movieList.find((candidate) => candidate.id === shortlistButton.dataset.shortlistFilm);
-    if (!item) return;
-    if (shortlistedFilmIds.has(item.id)) shortlistedFilmIds.delete(item.id);
-    else shortlistedFilmIds.add(item.id);
-    render();
-    showToast(shortlistedFilmIds.has(item.id) ? `${item.title} added to tonight's shortlist.` : `${item.title} removed from tonight's shortlist.`);
-    return;
-  }
-
   const voteButton = event.target.closest("[data-vote]");
   if (voteButton) {
     const item = movieList.find((candidate) => candidate.id === voteButton.dataset.vote);
@@ -2161,7 +2304,6 @@ document.addEventListener("click", async (event) => {
     if (error) { deleteFilmButton.disabled = false; showToast(`Film was not removed: ${error.message}`); return; }
     if (!data) { deleteFilmButton.disabled = false; showToast("The film was not removed. Refresh before trying again."); return; }
     selectedFilmId = null;
-    shortlistedFilmIds.delete(item.id);
     await loadWorkspace(); render(); showToast(`${item.title} removed from the website list. Discord was not changed.`); return;
   }
 
@@ -2213,13 +2355,51 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
+  if (event.target.closest("[data-post-journal]")) {
+    const button = event.target.closest("[data-post-journal]");
+    const form = document.querySelector("#discord-template-form");
+    const session = journalSession();
+    if (!form || !session || !canManageSession(session) || !form.reportValidity()) return;
+    updateDiscordDraftPreview(form);
+    const title = selectedFilmForSession(session)?.title || discordDraft?.title || "this film";
+    if (!window.confirm(`Post the saved Journal entry for ${title} to the configured Discord Journal channel?`)) return;
+    button.disabled = true;
+    journalPublishPendingId = session.id;
+    let journalSaved = false;
+    try {
+      clearJournalDraftSaveTimer();
+      const savedDraft = await saveJournalEntry(session, discordDraft);
+      journalSaved = true;
+      discordDraft = savedDraft;
+      await publishJournalToDiscord(session);
+      showToast(`Journal entry #${savedDraft.entryNumber} posted to Discord.`);
+    } catch (error) {
+      if (session.journalEntry && session.journalPublication?.status !== "POSTED") {
+        const uncertain = /delivery (?:is |could not be )?uncertain|could not be confirmed|retry is blocked/i.test(error.message);
+        session.journalPublication = {
+          ...(session.journalPublication || {}),
+          journal_entry_id: session.journalEntry.id,
+          status: uncertain ? "UNKNOWN" : "FAILED",
+          last_error: error.message,
+        };
+      }
+      showToast(journalSaved
+        ? `The Journal was saved, but Discord was not updated: ${error.message}`
+        : `The Journal entry was not saved or posted: ${error.message}`);
+    } finally {
+      journalPublishPendingId = null;
+      persistDesignPreviewWorkspace();
+      render();
+    }
+    return;
+  }
   if (event.target.closest("[data-save-journal-draft]")) {
     const button = event.target.closest("[data-save-journal-draft]");
     const form = document.querySelector("#discord-template-form");
     if (form) updateDiscordDraftPreview(form);
     button.disabled = true;
     try {
-      window.clearTimeout(journalDraftTimer);
+      clearJournalDraftSaveTimer();
       await saveJournalDraft();
       showToast("Journal draft saved. Nothing was posted to Discord.");
     } catch (error) {
@@ -2314,12 +2494,7 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-continue-roulette]")) { navigate(activeSession?.mode === "Queue Roulette" ? "pick" : "sessions"); return; }
   if (event.target.closest("[data-close-roulette]")) {
-    if (!canManageSession() || !window.confirm("Cancel this Queue Roulette session? It will disappear from the normal session list. The movie list and Discord will not change.")) return;
-    try {
-      await endMovieSession();
-      navigate("sessions");
-      showToast("Queue Roulette cancelled. Discord was not changed.");
-    } catch (error) { showToast(`The session was not cancelled: ${error.message}`); }
+    navigate("sessions");
     return;
   }
   if (event.target.closest("[data-end-session]")) {

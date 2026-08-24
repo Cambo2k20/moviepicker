@@ -4541,6 +4541,10 @@ legend,
     flex-direction: column;
   }
 
+  .active-session-head {
+    flex-direction: column;
+  }
+
   .session-actions .primary-button,
   .session-actions .secondary-button {
     width: 100%;
@@ -4682,6 +4686,91 @@ legend,
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+}
+
+.discord-embed-preview {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) 86px;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px 18px 16px 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #2b2d31;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+}
+
+.discord-embed-accent {
+  background: #6c4cf5;
+}
+
+.discord-embed-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.discord-embed-author,
+.discord-embed-fields dt {
+  color: #b9bbbe;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.discord-embed-title {
+  color: #f2f3f5;
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.discord-embed-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+}
+
+.discord-embed-fields div {
+  min-width: 0;
+}
+
+.discord-embed-fields dt,
+.discord-embed-fields dd {
+  margin: 0;
+}
+
+.discord-embed-fields dd {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #dbdee1;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.discord-embed-body blockquote {
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid #6c4cf5;
+  background: rgba(17, 18, 24, 0.36);
+  color: #dbdee1;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.discord-embed-body > small {
+  color: #949ba4;
+  font-size: 11px;
+}
+
+.discord-embed-preview > img {
+  width: 86px;
+  max-height: 129px;
+  border-radius: 3px;
+  object-fit: cover;
 }
 
 .discord-template-form label {
@@ -4852,6 +4941,60 @@ legend,
 
 .discord-copy-actions small {
   color: var(--muted);
+}
+
+.discord-publish-action,
+.discord-publication-state {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.discord-publish-action > small,
+.discord-publication-state small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.discord-publish-action p {
+  flex: 1 1 100%;
+  margin: 0;
+  color: #ffb5b5;
+}
+
+.discord-publish-action.has-failed {
+  flex-wrap: wrap;
+}
+
+.discord-post-button {
+  flex: 0 0 auto;
+  min-width: 220px;
+  justify-content: center;
+}
+
+.discord-publication-state > .material-symbols-outlined {
+  color: var(--purple-light);
+  font-size: 28px;
+}
+
+.discord-publication-state.is-posted > .material-symbols-outlined {
+  color: var(--success);
+}
+
+.discord-publication-state.has-warning > .material-symbols-outlined {
+  color: #f0b65a;
+}
+
+.discord-publication-state > div {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+}
+
+.discord-publication-state .secondary-button {
+  flex: 0 0 auto;
 }
 
 /* Reveal and confirmed share one grid so confirming changes what the screen
@@ -5049,11 +5192,26 @@ legend,
     grid-template-columns: 1fr;
   }
 
+  .discord-embed-preview {
+    grid-template-columns: 4px minmax(0, 1fr) 64px;
+    gap: 12px;
+    padding-right: 12px;
+  }
+
+  .discord-embed-preview > img {
+    width: 64px;
+    max-height: 96px;
+  }
+
+  .discord-embed-fields {
+    grid-template-columns: 1fr;
+  }
+
   .discord-copy-actions {
     flex-wrap: wrap;
   }
 
-  .discord-copy-actions .primary-button {
+  .discord-copy-actions button {
     width: 100%;
     justify-content: center;
   }
@@ -5069,7 +5227,18 @@ legend,
     flex-direction: column;
   }
 
-  .discord-copy-actions .primary-button {
+  .discord-copy-actions button {
+    width: 100%;
+  }
+
+  .discord-publish-action,
+  .discord-publication-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .discord-post-button,
+  .discord-publication-state .secondary-button {
     width: 100%;
   }
 
