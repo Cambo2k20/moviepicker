@@ -9,6 +9,7 @@ import {
   discordMessageUrl,
   discordWebhookDeleteAccepted,
   discordWebhookMessageUrl,
+  journalActionRequiresSession,
   namedSupabaseKey,
   safeDiscordWebhookUrl,
   webhookPosterName,
@@ -100,6 +101,15 @@ test("accepts a confirmed or already-absent Discord message deletion", () => {
   assert.equal(discordWebhookDeleteAccepted(401), false);
   assert.equal(discordWebhookDeleteAccepted(429), false);
   assert.equal(discordWebhookDeleteAccepted(500), false);
+});
+
+test("allows deletion without a watch session but keeps publish and update session-bound", () => {
+  assert.equal(journalActionRequiresSession("delete"), false);
+  assert.equal(journalActionRequiresSession("publish"), true);
+  assert.equal(journalActionRequiresSession("update"), true);
+  assert.doesNotMatch(publisherFunctionSource, /if \(!entry\?\.movie_session_id\)/);
+  assert.match(publisherFunctionSource, /if \(requiresSession && !entry\.movie_session_id\)/);
+  assert.match(publisherFunctionSource, /if \(entry\.movie_session_id\) \{\s*await memberWrite\([\s\S]*?movie_sessions\?id=eq\.\$\{entry\.movie_session_id\}/);
 });
 
 test("deletes the database entry with the caller's RLS identity after Discord", () => {

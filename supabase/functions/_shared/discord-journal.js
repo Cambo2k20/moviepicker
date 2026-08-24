@@ -149,3 +149,7 @@ export function discordWebhookMessageUrl(webhook, messageId) {
 export function discordWebhookDeleteAccepted(status) {
   return status === 204 || status === 404;
 }
+
+export function journalActionRequiresSession(action) {
+  return String(action || "").toLowerCase() !== "delete";
+}
