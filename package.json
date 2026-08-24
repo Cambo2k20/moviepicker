@@ -8,9 +8,10 @@
     "build": "vite build && node scripts/verify-dist.mjs",
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:e2e",
-    "test:unit": "node --test tests/roulette-core.test.js tests/auth-core.test.js tests/discord-journal.test.js",
+    "test:unit": "node --test tests/roulette-core.test.js tests/auth-core.test.js tests/discord-journal.test.js tests/journal-import.test.js",
     "test:db": "node --test --test-concurrency=1 \"tests/integration/*.test.js\"",
     "test:e2e": "playwright test",
+    "journal:import": "node scripts/import-discord-journal.mjs",
     "git:cleanup": "node scripts/git-cleanup.mjs"
   },
   "dependencies": {

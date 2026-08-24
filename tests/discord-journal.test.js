@@ -6,8 +6,10 @@ import {
   buildDiscordJournalPayload,
   discordGuildIdForMessage,
   discordMessageUrl,
+  discordWebhookMessageUrl,
   namedSupabaseKey,
   safeDiscordWebhookUrl,
+  webhookPosterName,
 } from "../supabase/functions/_shared/discord-journal.js";
 
 const entry = {
@@ -31,9 +33,11 @@ test("builds a fancy Journal payload without Discord mentions", () => {
     session,
     viewers: [{ display_name_snapshot: "Cameron" }, { display_name_snapshot: "Dean" }],
     submitter: "Cameron",
+    poster: { displayName: "Cameron", avatarUrl: "https://cdn.discordapp.com/cameron.png" },
   });
   assert.deepEqual(payload.allowed_mentions, { parse: [] });
-  assert.equal(payload.username, undefined);
+  assert.equal(payload.username, "Cameron");
+  assert.equal(payload.avatar_url, "https://cdn.discordapp.com/cameron.png");
   assert.equal(payload.embeds[0].author.name, "ENTRY #1325");
   assert.equal(payload.embeds[0].title, "Alien");
   assert.equal(payload.embeds[0].fields[0].value, "1979 · 117 min");
@@ -51,6 +55,20 @@ test("keeps long comments in a separate Discord embed and clips safely", () => {
   assert.equal(payload.embeds[0].fields[2].value, "No viewers recorded");
 });
 
+test("an edit payload preserves the original message author by omitting webhook identity overrides", () => {
+  const payload = buildDiscordJournalPayload({
+    entry,
+    session,
+    viewers: [],
+    submitter: "Original poster",
+    poster: { displayName: "Different updater", avatarUrl: "https://cdn.discordapp.com/updater.png" },
+    includeWebhookIdentity: false,
+  });
+  assert.equal(payload.username, undefined);
+  assert.equal(payload.avatar_url, undefined);
+  assert.match(payload.embeds[0].footer.text, /Original poster/);
+});
+
 test("accepts only real Discord webhook URLs and adds wait=true", () => {
   const valid = safeDiscordWebhookUrl("https://discord.com/api/webhooks/123/token_value?thread_id=secret");
   assert.equal(valid?.origin, "https://discord.com");
@@ -58,6 +76,21 @@ test("accepts only real Discord webhook URLs and adds wait=true", () => {
   assert.equal(valid?.searchParams.has("thread_id"), false);
   assert.equal(safeDiscordWebhookUrl("https://example.com/api/webhooks/123/token"), null);
   assert.equal(safeDiscordWebhookUrl("http://discord.com/api/webhooks/123/token"), null);
+});
+
+test("builds an edit URL for the existing message only", () => {
+  const webhook = safeDiscordWebhookUrl("https://discord.com/api/webhooks/123/token_value");
+  assert.equal(
+    discordWebhookMessageUrl(webhook, "456")?.href,
+    "https://discord.com/api/webhooks/123/token_value/messages/456",
+  );
+  assert.equal(discordWebhookMessageUrl(webhook, "not-a-message"), null);
+});
+
+test("keeps webhook poster names valid without accepting reserved Discord names", () => {
+  assert.equal(webhookPosterName("Cameron"), "Cameron");
+  assert.equal(webhookPosterName("Discord Clyde"), "Discordian Member");
+  assert.equal(webhookPosterName("x".repeat(100)).length, 80);
 });
 
 test("builds the direct Discord message URL from stored public identifiers", () => {

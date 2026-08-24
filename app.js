@@ -65,7 +65,7 @@ const toast = document.querySelector("#toast");
 const sessionPanel = document.querySelector("#session-panel");
 const sessionName = document.querySelector("#session-name");
 
-const legacyViewMap = { home: "list", queue: "list", journal: "list", tonight: "pick", wrapped: "stats" };
+const legacyViewMap = { home: "list", queue: "list", tonight: "pick", wrapped: "stats" };
 const initialHash = window.location.hash.replace("#", "");
 
 let currentView = legacyViewMap[initialHash] || initialHash || "list";
@@ -79,12 +79,21 @@ let joinRequests = [];
 let movieList = [];
 let activeSession = null;
 let sessionHistory = [];
+let journalCatalog = [];
 let discordDraft = null;
 let journalDetailsOpen = false;
 let sessionDetailsEditing = null;
 let journalSessionId = null;
 let journalDraftTimer = 0;
 let journalPublishPendingId = null;
+let journalEditingId = null;
+let journalSyncPendingId = null;
+let journalQuery = "";
+let journalSourceFilter = "all";
+let journalStatusFilter = "all";
+let journalYearFilter = "all";
+let journalViewerFilter = "all";
+let journalVisibleLimit = 60;
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -192,6 +201,89 @@ function loadDesignPreviewWorkspace() {
   for (const item of movieList) item.watchCount = 0;
   isLoading = false;
   restoreDesignPreviewWorkspace();
+  journalCatalog = [
+    {
+      catalogId: "current:preview-journal-1324",
+      sourceType: "CINE_CORD",
+      recordId: "preview-journal-1324",
+      journalEntryId: "preview-journal-1324",
+      entryLabel: "1324",
+      entrySortNumber: 1324,
+      title: "Filth",
+      year: 2013,
+      watchedAt: "2026-08-16",
+      status: "FINISHED",
+      comment: "Same rules still apply — corrected on Cine-Cord after posting.",
+      viewerNames: ["Dean", "Kieran"],
+      viewerIds: ["preview-dean", "preview-kieran"],
+      createdById: "preview-cameron",
+      authorName: "Cameron",
+      volumeName: "Cine-Cord",
+      discordUrl: "https://discord.com/channels/272427070779293697/1353823481413763132/1538675059584143380",
+      sourceCreatedAt: "2026-08-16T23:25:21.405+01:00",
+      parserStatus: "PARSED",
+      publicationStatus: "POSTED",
+      publication: {
+        id: "preview-publication-1324",
+        journal_entry_id: "preview-journal-1324",
+        status: "POSTED",
+        discord_guild_id: "272427070779293697",
+        discord_channel_id: "1353823481413763132",
+        discord_message_id: "1538675059584143380",
+        poster_display_name: "Cameron",
+        discord_out_of_date: true,
+      },
+      discordOutOfDate: true,
+      canEdit: currentProfile.id === "preview-cameron" || isCurrentAdmin(),
+    },
+    {
+      catalogId: "archive:preview-1000",
+      sourceType: "DISCORD_ARCHIVE",
+      recordId: "preview-1000",
+      journalEntryId: null,
+      entryLabel: "687 (#1000)",
+      entrySortNumber: 687,
+      title: "American Pie Reunion",
+      year: 2006,
+      watchedAt: "2025-08-03",
+      status: "FINISHED",
+      comment: "The snap that started it all. We are inevitable...",
+      viewerNames: ["Brad", "Cameron", "Dean", "Innes", "Jake", "Kieran", "Ross"],
+      viewerIds: [],
+      authorName: "Dean",
+      volumeName: "The Journal Strikes Back",
+      discordUrl: "https://discord.com/channels/272427070779293697/995528992985710682/1401343985519296613",
+      sourceCreatedAt: "2025-08-03T00:20:41.860+01:00",
+      parserStatus: "PARSED",
+      publicationStatus: null,
+      discordOutOfDate: false,
+      canEdit: false,
+    },
+    {
+      catalogId: "archive:preview-12-1",
+      sourceType: "DISCORD_ARCHIVE",
+      recordId: "preview-12-1",
+      journalEntryId: null,
+      entryLabel: "12.1",
+      entrySortNumber: 12.1,
+      title: "Ghostland",
+      year: 2018,
+      watchedAt: "2020-06-07",
+      status: "FINISHED",
+      comment: "A preserved entry from the first Discord Journal channel.",
+      viewerNames: ["Adam", "Andrew"],
+      viewerIds: [],
+      authorName: "Cameron",
+      volumeName: "The Journal",
+      discordUrl: "https://discord.com/channels/272427070779293697/713935563912118293/719022021823954986",
+      sourceCreatedAt: "2020-06-07T03:56:48.786+01:00",
+      parserStatus: "PARSED",
+      publicationStatus: null,
+      discordOutOfDate: false,
+      canEdit: false,
+    },
+  ];
+  for (const session of sessionHistory) upsertCurrentJournalCatalogEntry(session);
 }
 
 function escapeHTML(value) {
@@ -217,6 +309,18 @@ function canManageFilm(item) {
 
 function canManageSession(session = activeSession) {
   return Boolean(session && (isCurrentAdmin() || session.hostId === authUser?.id));
+}
+
+function canManageJournalEntry(entry, session = null) {
+  if (!entry) return canManageSession(session);
+  const creatorId = entry.createdById || entry.created_by || entry.createdBy;
+  return Boolean(isCurrentAdmin() || (creatorId && creatorId === authUser?.id));
+}
+
+function canEditSessionDetails(session) {
+  if (!canManageSession(session)) return false;
+  if (session?.status !== "WATCHED" || !session.journalEntry) return true;
+  return canManageJournalEntry(session.journalEntry, session);
 }
 
 function formatRequestDate(value) {
@@ -287,13 +391,15 @@ function selectedFilmForSession(session) {
 
 function createDiscordDraft(session, film) {
   const entry = session?.journalEntry;
+  const entryViewerIds = (entry?.viewerIds || []).filter(Boolean);
+  const entryViewerNames = (entry?.viewerNames || entryViewerIds.map((id) => members.find((member) => member.id === id)?.name).filter(Boolean));
   return {
     sessionId: session.id,
     entryNumber: entry?.entryNumber ? String(entry.entryNumber) : "",
     title: entry?.title || film?.title || "",
     year: entry?.year || film?.year || "",
-    viewerIds: (session.participantIds || []).filter(Boolean),
-    viewers: session.members.join(", "),
+    viewerIds: entry ? entryViewerIds : (session.participantIds || []).filter(Boolean),
+    viewers: entry ? entryViewerNames.join(", ") : session.members.join(", "),
     runtime: Number(film?.runtime) || null,
     genres: normaliseGenres(film?.genres),
     status: entry?.status === "DNF" ? "DNF" : "Finished",
@@ -323,8 +429,11 @@ function ensureDiscordDraft(session, film) {
       ? { ...session.journalDraft, sessionId: session.id }
       : createDiscordDraft(session, film);
   }
-  discordDraft.viewerIds = (session.participantIds || []).filter(Boolean);
-  discordDraft.viewers = session.members.join(", ");
+  const entry = session.journalEntry;
+  discordDraft.viewerIds = entry ? [...(entry.viewerIds || [])] : (session.participantIds || []).filter(Boolean);
+  discordDraft.viewers = entry
+    ? (entry.viewerNames || discordDraft.viewerIds.map((id) => members.find((member) => member.id === id)?.name).filter(Boolean)).join(", ")
+    : session.members.join(", ");
   discordDraft.runtime = Number(film?.runtime) || null;
   discordDraft.genres = normaliseGenres(film?.genres);
   return discordDraft;
@@ -371,7 +480,7 @@ function renderDiscordFancyPreview(session, film, draft) {
           <div><dt>Status</dt><dd data-discord-preview-status>${escapeHTML(draft.status)}</dd></div>
         </dl>
         <blockquote data-discord-preview-comment ${comment ? "" : "hidden"}>${escapeHTML(comment)}</blockquote>
-        <small>Submitted by ${escapeHTML(currentProfile?.displayName || "a Discordian")} via Cine-Cord</small>
+        <small>Submitted by ${escapeHTML(currentProfile?.discordDisplayName || currentProfile?.displayName || "a Discordian")} via Cine-Cord</small>
       </div>
       ${poster ? `<img src="${escapeHTML(poster)}" alt="" />` : ""}
     </section>`;
@@ -379,10 +488,20 @@ function renderDiscordFancyPreview(session, film, draft) {
 
 function renderDiscordPublicationActions(session) {
   const publication = session.journalPublication;
-  const canPublish = canManageSession(session);
-  if (publication?.status === "POSTED") {
+  const canPublish = canManageJournalEntry(session.journalEntry, session);
+  const hasMessage = Boolean(publication?.discord_message_id);
+  const outOfDate = Boolean(publication?.discord_out_of_date || publication?.outOfDate);
+  const syncing = journalSyncPendingId === session.journalEntry?.id;
+  if (hasMessage && publication?.status === "UPDATING") {
+    return `<div class="discord-publication-state" role="status"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span><div><strong>Updating Discord post…</strong><small>The existing message is being edited; no new message will be created.</small></div></div>`;
+  }
+  if (hasMessage && (outOfDate || publication?.status === "UPDATE_FAILED")) {
     const messageUrl = discordPublicationUrl(publication);
-    return `<div class="discord-publication-state is-posted" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span><div><strong>Posted to Discord</strong><small>${publication.posted_at ? `Posted ${escapeHTML(formatAddedDate(publication.posted_at))}. ` : ""}Edits saved here will not update the Discord message in this phase.</small></div>${messageUrl ? `<a class="secondary-button compact" href="${escapeHTML(messageUrl)}" target="_blank" rel="noopener noreferrer">View in Discord <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}</div>`;
+    return `<div class="discord-publication-state has-warning" role="alert"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span><div><strong>Discord copy is out of date</strong><small>${escapeHTML(publication.last_error || "The website entry changed after this message was posted.")}</small></div>${canPublish ? `<button class="primary-button compact" type="button" data-update-journal ${syncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${syncing ? "Updating…" : "Update Discord post"}</button>` : ""}${messageUrl ? `<a class="secondary-button compact" href="${escapeHTML(messageUrl)}" target="_blank" rel="noopener noreferrer">View post</a>` : ""}</div>`;
+  }
+  if (hasMessage && publication?.status === "POSTED") {
+    const messageUrl = discordPublicationUrl(publication);
+    return `<div class="discord-publication-state is-posted" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span><div><strong>Discord copy is current</strong><small>${publication.poster_display_name ? `Originally posted as ${escapeHTML(publication.poster_display_name)}. ` : ""}${publication.last_synced_at ? `Last synchronized ${escapeHTML(formatAddedDate(publication.last_synced_at))}.` : ""}</small></div>${messageUrl ? `<a class="secondary-button compact" href="${escapeHTML(messageUrl)}" target="_blank" rel="noopener noreferrer">View in Discord <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}</div>`;
   }
   if (publication?.status === "POSTING") {
     return `<div class="discord-publication-state" role="status"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span><div><strong>Posting to Discord…</strong><small>Refresh in a moment if this does not update.</small></div></div>`;
@@ -392,7 +511,7 @@ function renderDiscordPublicationActions(session) {
   }
   if (!canPublish) return "";
   const failed = publication?.status === "FAILED";
-  const pending = journalPublishPendingId === session.id;
+  const pending = journalPublishPendingId === session.id || syncing;
   return `<div class="discord-publish-action ${failed ? "has-failed" : ""}">${failed ? `<p role="alert"><strong>Discord post failed.</strong> ${escapeHTML(publication.last_error || "The saved Journal entry is safe; try posting it again.")}</p>` : ""}<button class="primary-button discord-post-button" type="button" data-post-journal ${pending ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">${pending ? "progress_activity" : "send"}</span>${pending ? "Posting…" : failed ? "Retry Discord post" : "Post to Discord"}</button><small>This is explicit: it saves the Journal entry, then sends one embed to the configured Journal channel.</small></div>`;
 }
 
@@ -406,7 +525,7 @@ function journalDetailsNeedAttention(draft) {
 }
 
 function renderSessionSummary(session, { editorMode = null } = {}) {
-  const canManage = canManageSession(session);
+  const canManage = canEditSessionDetails(session);
   const date = session.sessionDate || isoDateOnly(session.startedAt);
   const participants = session.participants || [];
   if (editorMode && canManage) {
@@ -450,7 +569,7 @@ function renderSessionSummary(session, { editorMode = null } = {}) {
 
 function renderDiscordTemplate(session, film) {
   const draft = ensureDiscordDraft(session, film);
-  const canEdit = canManageSession(session);
+  const canEdit = canManageJournalEntry(session.journalEntry, session);
   const hasSavedEntry = Boolean(session.journalEntry);
   const readOnly = canEdit ? "" : "readonly";
   // The drawer opens on request, and on its own when a session-filled value is
@@ -459,7 +578,7 @@ function renderDiscordTemplate(session, film) {
   return `
     <section class="discord-copy-card" aria-labelledby="discord-copy-title">
       <div class="discord-copy-heading">
-        <div><span class="eyebrow">${hasSavedEntry ? `Journal entry #${escapeHTML(draft.entryNumber)}` : "Optional Discord handoff"}</span><h3 id="discord-copy-title">${canEdit ? "Prepare the Journal post" : "Journal post"}</h3><p>${canEdit ? "Preview the Discord card, then post it directly or keep using manual copy." : "This saved entry can be viewed or copied. Only the session host or an administrator can post or change it."}</p></div>
+        <div><span class="eyebrow">${hasSavedEntry ? `Journal entry #${escapeHTML(draft.entryNumber)}` : "Optional Discord handoff"}</span><h3 id="discord-copy-title">${canEdit ? "Prepare the Journal post" : "Journal post"}</h3><p>${canEdit ? "Preview the Discord card, then post it directly or keep using manual copy." : "This saved entry can be viewed or copied. Only its creator or an administrator can post or change it."}</p></div>
         </div>
       <form id="discord-template-form" class="discord-template-form">
         ${renderDiscordFancyPreview(session, film, draft)}
@@ -479,11 +598,11 @@ function renderDiscordTemplate(session, film) {
           <div class="discord-entry-fields">
             <label class="discord-title-field"><span>Title</span><input name="title" required maxlength="200" value="${escapeHTML(draft.title)}" ${readOnly} /></label>
             <label class="discord-year-field"><span>Year</span><input name="year" type="number" min="1888" max="2200" required value="${escapeHTML(draft.year)}" ${readOnly} /></label>
-            <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" readonly /><small>Edit the watched session to correct this list.</small></label>
+            <label class="discord-viewers-field"><span>Viewers</span><input name="viewers" required maxlength="500" value="${escapeHTML(draft.viewers)}" readonly /><small>Use the main Journal editor to correct a saved entry's viewers.</small></label>
             <label class="discord-status-field"><span>Status</span><select name="status" ${canEdit ? "" : "disabled"}><option value="Finished" ${draft.status === "Finished" ? "selected" : ""}>Finished</option><option value="DNF" ${draft.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
           </div>
         </details>
-        <div class="discord-copy-actions"><button class="secondary-button" type="${canEdit ? "submit" : "button"}" ${canEdit ? "" : "data-copy-saved-journal"}><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>${canEdit ? `<button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button>` : ""}<small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
+        <div class="discord-copy-actions"><button class="secondary-button" type="${canEdit ? "submit" : "button"}" ${canEdit ? "" : "data-copy-saved-journal"}><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>${canEdit && canManageSession(session) ? `<button class="secondary-button" type="button" data-save-journal-draft><span class="material-symbols-outlined" aria-hidden="true">save</span>Save draft</button>` : ""}<small>Nothing is posted automatically. Copying puts the text on your clipboard; you paste it into Discord yourself.</small></div>
         ${renderDiscordPublicationActions(session)}
       </form>
     </section>`;
@@ -495,13 +614,18 @@ function updateDiscordDraftPreview(form) {
   if (!form || !session) return;
   const values = new FormData(form);
   const film = selectedFilmForSession(session);
+  const existingEntry = session.journalEntry;
+  const viewerIds = existingEntry ? [...(existingEntry.viewerIds || [])] : (session.participantIds || []).filter(Boolean);
+  const viewerNames = existingEntry
+    ? (existingEntry.viewerNames || viewerIds.map((id) => members.find((member) => member.id === id)?.name).filter(Boolean))
+    : session.members;
   discordDraft = {
     sessionId: session.id,
     entryNumber: String(values.get("entry_number") || ""),
     title: String(values.get("title") || ""),
     year: String(values.get("year") || ""),
-    viewerIds: (session.participantIds || []).filter(Boolean),
-    viewers: session.members.join(", "),
+    viewerIds,
+    viewers: viewerNames.join(", "),
     runtime: Number(film?.runtime) || null,
     genres: normaliseGenres(film?.genres),
     status: String(values.get("status")) === "DNF" ? "DNF" : "Finished",
@@ -521,7 +645,7 @@ function updateDiscordDraftPreview(form) {
   }
   session.journalDraft = discordDraft;
   persistDesignPreviewWorkspace();
-  scheduleJournalDraftSave(session);
+  if (canManageSession(session)) scheduleJournalDraftSave(session);
 }
 
 // Typing should not fire a write per keystroke, and a draft should not depend on
@@ -571,8 +695,17 @@ async function saveJournalDraft(session = journalSession()) {
 
 async function saveJournalEntry(session, draft) {
   if (!session || session.status !== "WATCHED") throw new Error("The Journal is available after the film is marked watched.");
-  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can save this Journal entry.");
+  const existingEntry = session.journalEntry;
+  if (existingEntry ? !canManageJournalEntry(existingEntry, session) : !canManageSession(session)) {
+    throw new Error(existingEntry
+      ? "Only the entry creator or a website administrator can edit this Journal entry."
+      : "Only the session host or a website administrator can create this Journal entry.");
+  }
   const requestedNumber = String(draft.entryNumber || "").trim();
+  const viewerIds = existingEntry
+    ? [...(draft.viewerIds || existingEntry.viewerIds || [])]
+    : [...(session.participantIds || [])];
+  const viewerNames = viewerIds.map((id) => members.find((member) => member.id === id)?.name).filter(Boolean);
   let saved;
   if (designPreviewMode) {
     const entryNumber = requestedNumber ? Number(requestedNumber) : (session.journalEntry?.entryNumber || previewNextEntryNumber);
@@ -589,17 +722,32 @@ async function saveJournalEntry(session, draft) {
       watchedAt: session.sessionDate,
       status: draft.status === "DNF" ? "DNF" : "FINISHED",
       comment: draft.comment,
-      viewerIds: [...session.participantIds],
+      createdById: existingEntry?.createdById || authUser.id,
+      viewerIds,
+      viewerNames,
+      updatedAt: new Date().toISOString(),
     };
   } else {
-    const { data, error } = await supabase.rpc("save_movie_session_journal", {
-      p_session_id: session.id,
-      p_title: String(draft.title).trim(),
-      p_release_year: Number(draft.year),
-      p_status: draft.status === "DNF" ? "DNF" : "FINISHED",
-      p_comment: String(draft.comment || "").trim(),
-      p_entry_number: requestedNumber ? Number(requestedNumber) : null,
-    });
+    const request = existingEntry
+      ? supabase.rpc("update_journal_entry", {
+        p_entry_id: existingEntry.id,
+        p_entry_number: requestedNumber ? Number(requestedNumber) : existingEntry.entryNumber,
+        p_title: String(draft.title).trim(),
+        p_release_year: Number(draft.year),
+        p_watched_at: existingEntry.watchedAt || session.sessionDate,
+        p_status: draft.status === "DNF" ? "DNF" : "FINISHED",
+        p_comment: String(draft.comment || "").trim(),
+        p_viewer_ids: viewerIds,
+      })
+      : supabase.rpc("save_movie_session_journal", {
+        p_session_id: session.id,
+        p_title: String(draft.title).trim(),
+        p_release_year: Number(draft.year),
+        p_status: draft.status === "DNF" ? "DNF" : "FINISHED",
+        p_comment: String(draft.comment || "").trim(),
+        p_entry_number: requestedNumber ? Number(requestedNumber) : null,
+      });
+    const { data, error } = await request;
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) throw new Error("The Journal entry was not saved. Refresh before trying again.");
@@ -611,45 +759,57 @@ async function saveJournalEntry(session, draft) {
       watchedAt: row.watched_at,
       status: row.status,
       comment: row.comment || "",
-      viewerIds: [...session.participantIds],
+      createdById: row.created_by,
+      viewerIds,
+      viewerNames,
+      updatedAt: row.updated_at,
     };
+  }
+  if (session.journalPublication?.discord_message_id && existingEntry) {
+    session.journalPublication = { ...session.journalPublication, discord_out_of_date: true };
   }
   session.journalEntry = saved;
   discordDraft = {
     ...draft,
     sessionId: session.id,
     entryNumber: String(saved.entryNumber),
-    viewerIds: [...session.participantIds],
-    viewers: session.members.join(", "),
+    viewerIds,
+    viewers: viewerNames.join(", "),
   };
   session.journalDraft = { ...discordDraft };
+  upsertCurrentJournalCatalogEntry(session);
   persistDesignPreviewWorkspace();
   return discordDraft;
 }
 
-async function publishJournalToDiscord(session) {
+async function publishJournalToDiscord(session, action = "publish") {
   if (!session?.journalEntry?.id) throw new Error("Save the Journal entry before posting it to Discord.");
-  if (!canManageSession(session)) throw new Error("Only the session host or a website administrator can post this Journal entry.");
-  if (session.journalPublication?.status === "POSTED") return session.journalPublication;
+  if (!canManageJournalEntry(session.journalEntry, session)) throw new Error("Only the entry creator or a website administrator can post or update this Journal entry.");
+  if (action === "publish" && session.journalPublication?.discord_message_id) return session.journalPublication;
   if (designPreviewMode) {
-    const publication = {
-      id: `preview-publication-${session.journalEntry.id}`,
-      journal_entry_id: session.journalEntry.id,
-      status: "POSTED",
-      discord_guild_id: "preview-guild",
-      discord_channel_id: "preview-channel",
-      discord_message_id: `preview-${session.journalEntry.entryNumber}`,
-      posted_at: new Date().toISOString(),
-      posted_by: currentProfile.id,
-      last_error: null,
-    };
+    const now = new Date().toISOString();
+    const publication = action === "update" && session.journalPublication
+      ? { ...session.journalPublication, status: "POSTED", discord_out_of_date: false, last_synced_by: currentProfile.id, last_synced_at: now, discord_updated_at: now, last_error: null }
+      : {
+        id: `preview-publication-${session.journalEntry.id}`,
+        journal_entry_id: session.journalEntry.id,
+        status: "POSTED",
+        discord_guild_id: "preview-guild",
+        discord_channel_id: "preview-channel",
+        discord_message_id: `preview-${session.journalEntry.entryNumber}`,
+        posted_at: now,
+        posted_by: currentProfile.id,
+        poster_display_name: currentProfile.discordDisplayName || currentProfile.displayName,
+        last_synced_by: currentProfile.id,
+        last_synced_at: now,
+        discord_out_of_date: false,
+        last_error: null,
+      };
     session.journalPublication = publication;
     persistDesignPreviewWorkspace();
     return publication;
   }
-  const { data, error } = await supabase.functions.invoke("publish-journal-to-discord", {
-    body: { journalEntryId: session.journalEntry.id },
-  });
+  const { data, error } = await supabase.functions.invoke("publish-journal-to-discord", { body: { journalEntryId: session.journalEntry.id, action } });
   if (error) {
     let message = error.message || "The Journal could not be posted to Discord.";
     try {
@@ -659,8 +819,97 @@ async function publishJournalToDiscord(session) {
     throw new Error(message);
   }
   if (!data?.publication) throw new Error("Discord did not return a publication record. Refresh before trying again.");
+  data.publication.discord_out_of_date = Boolean(data.outOfDate);
   session.journalPublication = data.publication;
   return data.publication;
+}
+
+async function syncCatalogJournalToDiscord(entry, action) {
+  if (!entry?.journalEntryId || !entry.canEdit) throw new Error("Only the entry creator or a website administrator can post or update this Journal entry.");
+  const session = journalSessionForEntry(entry);
+  if (session) {
+    const publication = await publishJournalToDiscord(session, action);
+    entry.publication = publication;
+    entry.publicationStatus = publication.status;
+    entry.discordOutOfDate = Boolean(publication.discord_out_of_date);
+    entry.discordUrl = discordPublicationUrl(publication) || entry.discordUrl;
+    return publication;
+  }
+  if (designPreviewMode) {
+    const now = new Date().toISOString();
+    entry.publication = action === "update" && entry.publication
+      ? { ...entry.publication, status: "POSTED", discord_out_of_date: false, last_synced_by: currentProfile.id, last_synced_at: now, discord_updated_at: now, last_error: null }
+      : {
+        id: `preview-publication-${entry.journalEntryId}`,
+        journal_entry_id: entry.journalEntryId,
+        status: "POSTED",
+        discord_guild_id: "preview-guild",
+        discord_channel_id: "preview-channel",
+        discord_message_id: `preview-${entry.entryLabel}`,
+        posted_at: now,
+        posted_by: currentProfile.id,
+        poster_display_name: currentProfile.discordDisplayName || currentProfile.displayName,
+        discord_out_of_date: false,
+      };
+    entry.publicationStatus = "POSTED";
+    entry.discordOutOfDate = false;
+    entry.discordUrl = discordPublicationUrl(entry.publication) || entry.discordUrl;
+    return entry.publication;
+  }
+
+  const { data, error } = await supabase.functions.invoke("publish-journal-to-discord", {
+    body: { journalEntryId: entry.journalEntryId, action },
+  });
+  if (error) {
+    let message = error.message || `The Journal could not be ${action === "update" ? "updated in" : "posted to"} Discord.`;
+    try {
+      const payload = await error.context?.json();
+      if (payload?.error) message = payload.error;
+    } catch { /* keep the safe function error */ }
+    throw new Error(message);
+  }
+  if (!data?.publication) throw new Error("Discord did not return a publication record. Refresh before trying again.");
+  entry.publication = data.publication;
+  entry.publicationStatus = data.publication.status;
+  entry.discordOutOfDate = Boolean(data.outOfDate);
+  entry.discordUrl = data.messageUrl || discordPublicationUrl(data.publication) || entry.discordUrl;
+  return data.publication;
+}
+
+async function saveCatalogJournalEntry(form) {
+  const entry = journalCatalog.find((candidate) => candidate.journalEntryId === form.dataset.entryId);
+  if (!entry?.canEdit || entry.sourceType !== "CINE_CORD" || !entry.journalEntryId) {
+    throw new Error("Only current Cine-Cord entries can be edited by their creator or a website administrator.");
+  }
+  const values = new FormData(form);
+  const viewerIds = values.getAll("viewer").map(String);
+  if (!viewerIds.length) throw new Error("Choose at least one viewer.");
+  if (designPreviewMode) {
+    entry.entryLabel = String(values.get("entry_number"));
+    entry.entrySortNumber = Number(entry.entryLabel);
+    entry.title = String(values.get("title")).trim();
+    entry.year = Number(values.get("release_year"));
+    entry.watchedAt = String(values.get("watched_at"));
+    entry.status = String(values.get("status")) === "DNF" ? "DNF" : "FINISHED";
+    entry.comment = String(values.get("comment") || "").trim();
+    entry.viewerIds = viewerIds;
+    entry.viewerNames = viewerIds.map((id) => members.find((member) => member.id === id)?.name).filter(Boolean);
+    entry.discordOutOfDate = Boolean(entry.discordUrl);
+    if (entry.publication) entry.publication.discord_out_of_date = entry.discordOutOfDate;
+    return entry;
+  }
+  const { data, error } = await supabase.rpc("update_journal_entry", {
+    p_entry_id: entry.journalEntryId,
+    p_entry_number: Number(values.get("entry_number")),
+    p_title: String(values.get("title")).trim(),
+    p_release_year: Number(values.get("release_year")),
+    p_watched_at: String(values.get("watched_at")),
+    p_status: String(values.get("status")) === "DNF" ? "DNF" : "FINISHED",
+    p_comment: String(values.get("comment") || "").trim(),
+    p_viewer_ids: viewerIds,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
 }
 
 async function copyJournalToClipboard(draft, preview) {
@@ -897,6 +1146,103 @@ async function saveMovie(movie = null) {
   });
   if (error) throw error;
   return { action: "added", title: payload.title };
+}
+
+async function fetchAllJournalCatalog(groupId) {
+  const pageSize = 500;
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("journal_catalog")
+      .select("*")
+      .eq("group_id", groupId)
+      .order("source_created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) return rows;
+  }
+}
+
+function normaliseJournalCatalogRow(row, viewerIdsByEntry, publicationByEntry) {
+  const publication = row.journal_entry_id ? publicationByEntry.get(row.journal_entry_id) || null : null;
+  const viewerNames = Array.isArray(row.viewer_names) ? row.viewer_names.filter(Boolean) : [];
+  return {
+    catalogId: row.catalog_id,
+    sourceType: row.source_type,
+    recordId: row.record_id,
+    journalEntryId: row.journal_entry_id,
+    archiveEntryId: row.archive_entry_id,
+    groupId: row.group_id,
+    entryLabel: row.entry_label,
+    entrySortNumber: Number(row.entry_sort_number),
+    title: row.title,
+    year: row.release_year,
+    watchedAt: row.watched_at,
+    status: row.status,
+    comment: row.comment || "",
+    viewerNames,
+    viewerIds: row.journal_entry_id ? viewerIdsByEntry.get(row.journal_entry_id) || [] : [],
+    createdById: row.created_by,
+    authorName: row.author_display_name || "Unknown Discordian",
+    volumeId: row.volume_id,
+    volumeName: row.volume_name,
+    discordUrl: row.discord_jump_url || null,
+    sourceCreatedAt: row.source_created_at,
+    sourceUpdatedAt: row.source_updated_at,
+    parserStatus: row.parser_status,
+    publicationStatus: publication?.status || row.publication_status || null,
+    publication,
+    postedBy: row.posted_by,
+    posterDisplayName: row.poster_display_name,
+    posterAvatarUrl: row.poster_avatar_url,
+    postedAt: row.posted_at,
+    lastSyncedBy: row.last_synced_by,
+    lastSyncedAt: row.last_synced_at,
+    discordUpdatedAt: row.discord_updated_at,
+    discordOutOfDate: Boolean(row.discord_out_of_date),
+    canEdit: Boolean(row.can_edit),
+  };
+}
+
+function upsertCurrentJournalCatalogEntry(session) {
+  const entry = session?.journalEntry;
+  if (!entry?.id) return;
+  const existingIndex = journalCatalog.findIndex((candidate) => candidate.journalEntryId === entry.id);
+  const existing = existingIndex >= 0 ? journalCatalog[existingIndex] : null;
+  const publication = session.journalPublication || existing?.publication || null;
+  const catalogEntry = {
+    ...(existing || {}),
+    catalogId: `current:${entry.id}`,
+    sourceType: "CINE_CORD",
+    recordId: entry.id,
+    journalEntryId: entry.id,
+    archiveEntryId: null,
+    groupId: session.groupId || activeGroup?.id,
+    entryLabel: String(entry.entryNumber),
+    entrySortNumber: Number(entry.entryNumber),
+    title: entry.title,
+    year: entry.year,
+    watchedAt: entry.watchedAt,
+    status: entry.status,
+    comment: entry.comment || "",
+    viewerNames: [...(entry.viewerNames || [])],
+    viewerIds: [...(entry.viewerIds || [])],
+    createdById: entry.createdById,
+    authorName: members.find((member) => member.id === entry.createdById)?.name || currentProfile?.displayName || "Discordian",
+    volumeId: null,
+    volumeName: "Cine-Cord",
+    discordUrl: discordPublicationUrl(publication),
+    sourceCreatedAt: existing?.sourceCreatedAt || new Date().toISOString(),
+    sourceUpdatedAt: entry.updatedAt || new Date().toISOString(),
+    parserStatus: "PARSED",
+    publicationStatus: publication?.status || null,
+    publication,
+    discordOutOfDate: Boolean(publication?.discord_message_id && (publication.discord_out_of_date ?? true)),
+    canEdit: canManageJournalEntry(entry, session),
+  };
+  if (existingIndex >= 0) journalCatalog.splice(existingIndex, 1, catalogEntry);
+  else journalCatalog.unshift(catalogEntry);
 }
 
 function showToast(message) {
@@ -1280,10 +1626,144 @@ function renderSessions() {
       ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Watched</span><h2 id="watched-history-title">Previous watch nights</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
         const film = selectedFilmForSession(session);
         const canManage = canManageSession(session);
-        const journalLabel = session.journalEntry ? (canManage ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
-        const canOpenJournal = canManage || session.journalEntry;
-        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canManage ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+        const canEditDetails = canEditSessionDetails(session);
+        const canEditJournal = canManageJournalEntry(session.journalEntry, session);
+        const journalLabel = session.journalEntry ? (canEditJournal ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
+        const canOpenJournal = canEditJournal || canManage || session.journalEntry;
+        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
       }).join("")}</div></section>` : ""}
+    </section>`;
+}
+
+function journalStatusLabel(status) {
+  if (status === "DNF") return "DNF";
+  if (status === "FINISHED") return "Finished";
+  return "Status unconfirmed";
+}
+
+function getFilteredJournalEntries() {
+  const query = journalQuery.trim().toLowerCase();
+  return journalCatalog.filter((entry) => {
+    const matchesQuery = !query || `${entry.title} ${entry.entryLabel}`.toLowerCase().includes(query);
+    const matchesSource = journalSourceFilter === "all"
+      || (journalSourceFilter === "CINE_CORD" && entry.sourceType === "CINE_CORD")
+      || entry.volumeName === journalSourceFilter;
+    const matchesStatus = journalStatusFilter === "all" || entry.status === journalStatusFilter;
+    const matchesYear = journalYearFilter === "all" || String(entry.year || "unknown") === journalYearFilter;
+    const matchesViewer = journalViewerFilter === "all" || entry.viewerNames.includes(journalViewerFilter);
+    return matchesQuery && matchesSource && matchesStatus && matchesYear && matchesViewer;
+  }).sort((left, right) => {
+    const leftDate = new Date(left.watchedAt || left.sourceCreatedAt || 0).getTime();
+    const rightDate = new Date(right.watchedAt || right.sourceCreatedAt || 0).getTime();
+    return rightDate - leftDate || right.entrySortNumber - left.entrySortNumber;
+  });
+}
+
+function journalSessionForEntry(entry) {
+  if (!entry?.journalEntryId) return null;
+  return sessionHistory.find((session) => session.journalEntry?.id === entry.journalEntryId)
+    || (activeSession?.journalEntry?.id === entry.journalEntryId ? activeSession : null);
+}
+
+function journalDraftForCatalogEntry(entry) {
+  const session = journalSessionForEntry(entry);
+  const film = selectedFilmForSession(session);
+  return {
+    sessionId: session?.id || null,
+    entryNumber: entry.entryLabel,
+    title: entry.title,
+    year: entry.year || "",
+    viewerIds: [...entry.viewerIds],
+    viewers: entry.viewerNames.join(", "),
+    runtime: Number(film?.runtime) || null,
+    genres: normaliseGenres(film?.genres),
+    status: entry.status === "DNF" ? "DNF" : "Finished",
+    comment: entry.comment || "",
+  };
+}
+
+function renderJournalEditor(entry) {
+  return `
+    <form class="journal-entry-editor" data-journal-entry-form data-entry-id="${escapeHTML(entry.journalEntryId)}">
+      <div class="journal-editor-grid">
+        <label><span>Entry number</span><input name="entry_number" type="number" min="1" step="1" required value="${escapeHTML(entry.entryLabel)}" /></label>
+        <label class="journal-editor-title"><span>Title</span><input name="title" maxlength="200" required value="${escapeHTML(entry.title)}" /></label>
+        <label><span>Release year</span><input name="release_year" type="number" min="1888" max="2200" required value="${escapeHTML(entry.year || "")}" /></label>
+        <label><span>Watched on</span><input name="watched_at" type="date" required value="${escapeHTML(entry.watchedAt || "")}" /></label>
+        <label><span>Status</span><select name="status"><option value="FINISHED" ${entry.status === "FINISHED" ? "selected" : ""}>Finished</option><option value="DNF" ${entry.status === "DNF" ? "selected" : ""}>DNF</option></select></label>
+        <label class="journal-editor-comment"><span>Comment <small>Optional</small></span><textarea name="comment" maxlength="2000" rows="4">${escapeHTML(entry.comment)}</textarea></label>
+      </div>
+      <fieldset class="journal-editor-viewers">
+        <legend>Viewers</legend>
+        <div>${members.map((member) => `<label><input type="checkbox" name="viewer" value="${escapeHTML(member.id)}" ${entry.viewerIds.includes(member.id) ? "checked" : ""} /><img src="${escapeHTML(member.avatar)}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("")}</div>
+      </fieldset>
+      <div class="journal-editor-actions"><button class="primary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">save</span>Save entry</button><button class="secondary-button compact" type="button" data-cancel-journal-edit>Cancel</button><small>Saving changes marks the existing Discord copy out of date; it is never updated automatically.</small></div>
+    </form>`;
+}
+
+function renderJournalCard(entry) {
+  const isArchive = entry.sourceType === "DISCORD_ARCHIVE";
+  const isEditing = !isArchive
+    && Boolean(entry.journalEntryId)
+    && entry.canEdit
+    && journalEditingId === entry.journalEntryId;
+  const publication = entry.publication;
+  const hasDiscordMessage = Boolean(entry.discordUrl || publication?.discord_message_id);
+  const isOutOfDate = Boolean(entry.discordOutOfDate || publication?.status === "UPDATE_FAILED");
+  const isSyncing = journalSyncPendingId === entry.journalEntryId || ["POSTING", "UPDATING"].includes(publication?.status);
+  const sourceCopy = isArchive
+    ? `${entry.volumeName} · Original Discord message`
+    : `Cine-Cord · Created by ${entry.authorName}`;
+  const discordState = !isArchive && hasDiscordMessage
+    ? (isOutOfDate ? `<span class="journal-discord-state is-stale"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
+    : "";
+  return `
+    <article class="journal-entry-card ${isArchive ? "is-archive" : "is-current"} ${isEditing ? "is-editing" : ""}">
+      <div class="journal-entry-head">
+        <div><span class="journal-entry-number">Entry #${escapeHTML(entry.entryLabel)}</span><span class="journal-source-label">${escapeHTML(sourceCopy)}</span></div>
+        <span class="status-pill ${entry.status === "DNF" ? "journal-dnf" : "watched"}">${escapeHTML(journalStatusLabel(entry.status))}</span>
+      </div>
+      <div class="journal-entry-main">
+        <div><h2>${escapeHTML(entry.title)}</h2><p class="journal-entry-meta">${entry.year ? escapeHTML(entry.year) : "Year not recorded"} · ${entry.watchedAt ? escapeHTML(formatAddedDate(entry.watchedAt)) : "Watch date not recorded"}</p></div>
+        <dl><div><dt>Viewers</dt><dd>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</dd></div><div><dt>Recorded by</dt><dd>${escapeHTML(entry.authorName)}</dd></div></dl>
+        ${entry.comment ? `<blockquote>${escapeHTML(entry.comment)}</blockquote>` : ""}
+        ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
+      </div>
+      <footer class="journal-entry-actions">
+        <div>${discordState}</div>
+        <div>
+          ${!isArchive ? `<button class="secondary-button compact" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
+          ${entry.canEdit ? `<button class="secondary-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
+          ${entry.canEdit && !hasDiscordMessage ? `<button class="primary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : ""}
+          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
+          ${entry.discordUrl ? `<a class="secondary-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer">${isArchive ? "Open original" : "View in Discord"}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}
+        </div>
+      </footer>
+      ${isEditing ? renderJournalEditor(entry) : ""}
+    </article>`;
+}
+
+function renderJournal() {
+  const filtered = getFilteredJournalEntries();
+  const displayed = filtered.slice(0, journalVisibleLimit);
+  const sources = [...new Set(journalCatalog.filter((entry) => entry.sourceType === "DISCORD_ARCHIVE").map((entry) => entry.volumeName))];
+  const years = [...new Set(journalCatalog.map((entry) => entry.year).filter(Boolean))].sort((a, b) => b - a);
+  const viewers = [...new Set(journalCatalog.flatMap((entry) => entry.viewerNames))].sort((a, b) => a.localeCompare(b));
+  const currentCount = journalCatalog.filter((entry) => entry.sourceType === "CINE_CORD").length;
+  const archiveCount = journalCatalog.length - currentCount;
+  return `
+    <section class="page-view journal-view" aria-labelledby="journal-title">
+      <header class="page-header journal-header"><div><span class="eyebrow">${journalCatalog.length.toLocaleString()} movie-night records</span><h1 id="journal-title" class="page-title">The Journal</h1><p class="page-subtitle">One searchable history across all three Discord channels and every new Cine-Cord entry. The Discord originals stay exactly where they are.</p></div><div class="journal-totals"><span><strong>${archiveCount.toLocaleString()}</strong> archived</span><span><strong>${currentCount.toLocaleString()}</strong> editable</span></div></header>
+      <div class="journal-toolbar">
+        <label class="search-field journal-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="journal-search" type="search" value="${escapeHTML(journalQuery)}" placeholder="Search titles or entry numbers" aria-label="Search the Journal" /></label>
+        <label class="compact-select"><span class="sr-only">Source</span><select id="journal-source-filter" aria-label="Filter Journal by source"><option value="all">All sources</option><option value="CINE_CORD" ${journalSourceFilter === "CINE_CORD" ? "selected" : ""}>Cine-Cord entries</option>${sources.map((source) => `<option value="${escapeHTML(source)}" ${journalSourceFilter === source ? "selected" : ""}>${escapeHTML(source)}</option>`).join("")}</select></label>
+        <label class="compact-select"><span class="sr-only">Year</span><select id="journal-year-filter" aria-label="Filter Journal by release year"><option value="all">All years</option>${years.map((year) => `<option value="${year}" ${journalYearFilter === String(year) ? "selected" : ""}>${year}</option>`).join("")}</select></label>
+        <label class="compact-select"><span class="sr-only">Status</span><select id="journal-status-filter" aria-label="Filter Journal by status"><option value="all">All statuses</option><option value="FINISHED" ${journalStatusFilter === "FINISHED" ? "selected" : ""}>Finished</option><option value="DNF" ${journalStatusFilter === "DNF" ? "selected" : ""}>DNF</option><option value="UNKNOWN" ${journalStatusFilter === "UNKNOWN" ? "selected" : ""}>Unconfirmed</option></select></label>
+        <label class="compact-select"><span class="sr-only">Viewer</span><select id="journal-viewer-filter" aria-label="Filter Journal by viewer"><option value="all">All viewers</option>${viewers.map((viewer) => `<option value="${escapeHTML(viewer)}" ${journalViewerFilter === viewer ? "selected" : ""}>${escapeHTML(viewer)}</option>`).join("")}</select></label>
+      </div>
+      <div class="journal-results-heading"><span>${filtered.length.toLocaleString()} ${filtered.length === 1 ? "entry" : "entries"}</span>${filtered.length !== journalCatalog.length ? `<button class="text-button" type="button" data-clear-journal-filters>Clear filters</button>` : ""}</div>
+      <div class="journal-entry-list" aria-live="polite">${displayed.length ? displayed.map(renderJournalCard).join("") : `<div class="empty-state"><span class="material-symbols-outlined" aria-hidden="true">menu_book</span><h2>No Journal entries match.</h2><p>Try another title, source, year, status or viewer.</p><button class="secondary-button" type="button" data-clear-journal-filters>Clear filters</button></div>`}</div>
+      ${displayed.length < filtered.length ? `<button class="secondary-button journal-show-more" type="button" data-show-more-journal>Show ${Math.min(60, filtered.length - displayed.length)} more</button>` : ""}
     </section>`;
 }
 
@@ -1342,6 +1822,20 @@ function bindListSearch() {
   });
 }
 
+function bindJournalSearch() {
+  const search = document.querySelector("#journal-search");
+  search?.addEventListener("input", (event) => {
+    journalQuery = event.target.value;
+    journalVisibleLimit = 60;
+    root.innerHTML = renderJournal();
+    updateShellState();
+    bindJournalSearch();
+    const refreshed = document.querySelector("#journal-search");
+    refreshed?.focus();
+    refreshed?.setSelectionRange(refreshed.value.length, refreshed.value.length);
+  });
+}
+
 function render() {
   if (isLoading) {
     root.innerHTML = renderLoading();
@@ -1358,11 +1852,12 @@ function render() {
     updateShellState();
     return;
   }
-  const renderers = { list: renderList, pick: renderPick, sessions: renderSessions, stats: renderStats, members: renderMembers };
+  const renderers = { list: renderList, pick: renderPick, sessions: renderSessions, journal: renderJournal, stats: renderStats, members: renderMembers };
   if (!renderers[currentView] || (currentView === "members" && !isCurrentAdmin())) currentView = "list";
   root.innerHTML = renderers[currentView]();
   updateShellState();
   if (currentView === "list") bindListSearch();
+  if (currentView === "journal") bindJournalSearch();
 }
 
 function navigate(view) {
@@ -1549,6 +2044,9 @@ async function confirmMovieSession(winner) {
 
 async function saveSessionDetails(session, { sessionDate, hostId, participantIds }) {
   if (!session) throw new Error("There is no session to update.");
+  if (!canEditSessionDetails(session)) {
+    throw new Error("Only the Journal entry creator or a website administrator can change a watched session linked to that entry.");
+  }
   const chosen = members.filter((member) => participantIds.includes(member.id));
   if (!chosen.length) throw new Error("Choose at least one participant.");
   const host = members.find((member) => member.id === hostId);
@@ -1768,11 +2266,14 @@ async function loadWorkspace() {
   movieList = [];
   activeSession = null;
   sessionHistory = [];
+  journalCatalog = [];
   rouletteState = null;
   discordDraft = null;
   journalSessionId = null;
   sessionDetailsEditing = null;
   journalPublishPendingId = null;
+  journalEditingId = null;
+  journalSyncPendingId = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult] = await Promise.all([
@@ -1787,9 +2288,12 @@ async function loadWorkspace() {
   if (!selfMembershipResult.data) return;
 
   activeGroup = availableGroup;
-  const [profilesResult, membershipsResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult] = await Promise.all([
+  const { error: identitySyncError } = await supabase.rpc("sync_my_discord_identity");
+  if (identitySyncError) console.warn("Discord identity sync failed", identitySyncError);
+  const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
+    supabase.from("discord_identities").select("profile_id,display_name,avatar_url,synced_at"),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
@@ -1799,16 +2303,26 @@ async function loadWorkspace() {
     supabase.rpc("group_watch_counts", { p_group_id: activeGroup.id }),
     supabase.from("journal_entries").select("*").eq("group_id", activeGroup.id).order("watched_at", { ascending: false }),
     supabase.from("entry_viewers").select("entry_id,profile_id"),
-    supabase.from("discord_publications").select("id,journal_entry_id,status,discord_guild_id,discord_channel_id,discord_message_id,posted_by,posted_at,attempt_started_at,last_error")
+    supabase.from("discord_publications").select("*"),
+    fetchAllJournalCatalog(activeGroup.id),
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
-  currentProfile = { id: authUser.id, displayName: profileMap.get(authUser.id)?.display_name || currentProfile.displayName, role: selfMembershipResult.data.role };
+  const discordIdentityMap = new Map((identitiesResult.data || []).map((identity) => [identity.profile_id, identity]));
+  const selfDiscordIdentity = discordIdentityMap.get(authUser.id);
+  currentProfile = {
+    id: authUser.id,
+    displayName: profileMap.get(authUser.id)?.display_name || currentProfile.displayName,
+    discordDisplayName: selfDiscordIdentity?.display_name || null,
+    discordAvatar: selfDiscordIdentity?.avatar_url || null,
+    role: selfMembershipResult.data.role,
+  };
   members = (membershipsResult.data || []).map((membership) => {
     const name = profileMap.get(membership.user_id)?.display_name || "Discordian";
-    return { id: membership.user_id, name, role: membership.role, avatar: avatarForName(name) };
+    const identity = discordIdentityMap.get(membership.user_id);
+    return { id: membership.user_id, name, discordName: identity?.display_name || null, role: membership.role, avatar: identity?.avatar_url || avatarForName(name) };
   });
   joinRequests = isCurrentAdmin() ? (requestsResult.data || []) : [];
   const votesByItem = new Map();
@@ -1852,6 +2366,10 @@ async function loadWorkspace() {
     viewerIdsByEntry.set(viewer.entry_id, current);
   }
   const publicationByEntry = new Map((publicationsResult.data || []).map((publication) => [publication.journal_entry_id, publication]));
+  journalCatalog = (catalogRows || []).map((row) => normaliseJournalCatalogRow(row, viewerIdsByEntry, publicationByEntry));
+  for (const catalogEntry of journalCatalog) {
+    if (catalogEntry.publication) catalogEntry.publication.discord_out_of_date = catalogEntry.discordOutOfDate;
+  }
   const journalBySession = new Map((journalResult.data || [])
     .filter((entry) => entry.movie_session_id)
     .map((entry) => [entry.movie_session_id, {
@@ -1862,7 +2380,10 @@ async function loadWorkspace() {
       watchedAt: entry.watched_at,
       status: entry.status,
       comment: entry.comment || "",
+      createdById: entry.created_by,
       viewerIds: viewerIdsByEntry.get(entry.id) || [],
+      viewerNames: (viewerIdsByEntry.get(entry.id) || []).map((id) => profileMap.get(id)?.display_name || "Former member"),
+      updatedAt: entry.updated_at,
       publication: publicationByEntry.get(entry.id) || null,
     }]));
   const sessionRows = [
@@ -1952,11 +2473,14 @@ async function syncSession(session) {
   movieList = [];
   activeSession = null;
   sessionHistory = [];
+  journalCatalog = [];
   rouletteState = null;
   discordDraft = null;
   journalSessionId = null;
   sessionDetailsEditing = null;
   journalPublishPendingId = null;
+  journalEditingId = null;
+  journalSyncPendingId = null;
   selectedFilmId = null;
   clearJournalDraftSaveTimer();
   render();
@@ -1984,6 +2508,26 @@ document.addEventListener("focusout", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const journalEditor = event.target.closest("[data-journal-entry-form]");
+  if (journalEditor) {
+    event.preventDefault();
+    if (!journalEditor.reportValidity()) return;
+    const submit = journalEditor.querySelector("[type=submit]");
+    submit.disabled = true;
+    try {
+      const entryNumber = new FormData(journalEditor).get("entry_number");
+      await saveCatalogJournalEntry(journalEditor);
+      journalEditingId = null;
+      if (!designPreviewMode) await loadWorkspace();
+      render();
+      showToast(`Journal entry #${entryNumber} saved. Any existing Discord copy is now marked out of date.`);
+    } catch (error) {
+      submit.disabled = false;
+      showToast(`The Journal entry was not saved: ${error.message}`);
+    }
+    return;
+  }
+
   if (event.target.matches("#session-details-form")) {
     event.preventDefault();
     if (!event.target.reportValidity()) return;
@@ -2029,8 +2573,8 @@ document.addEventListener("submit", async (event) => {
       entryNumber: String(form.get("entry_number") || "").trim(),
       title: String(form.get("title")).trim(),
       year: String(form.get("year")).trim(),
-      viewerIds: [...(session?.participantIds || [])],
-      viewers: session?.members.join(", ") || "",
+      viewerIds: [...(session?.journalEntry?.viewerIds || session?.participantIds || [])],
+      viewers: session?.journalEntry?.viewerNames?.join(", ") || session?.members.join(", ") || "",
       runtime: Number(selectedFilmForSession(session)?.runtime) || null,
       genres: normaliseGenres(selectedFilmForSession(session)?.genres),
       status: String(form.get("status")) === "DNF" ? "DNF" : "Finished",
@@ -2166,6 +2710,73 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-nav='list']")) { event.preventDefault(); navigate("list"); return; }
   if (event.target.closest("[data-sign-out]")) { await supabase.auth.signOut(); await syncSession(null); showToast("Signed out of Cine-Cord."); return; }
+
+  const editJournalButton = event.target.closest("[data-edit-journal-entry]");
+  if (editJournalButton) {
+    const entry = journalCatalog.find((candidate) => candidate.journalEntryId === editJournalButton.dataset.editJournalEntry);
+    if (!entry?.canEdit || entry.sourceType !== "CINE_CORD" || !entry.journalEntryId) return;
+    journalEditingId = entry.journalEntryId;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-journal-entry-form] [name=title]")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-cancel-journal-edit]")) {
+    journalEditingId = null;
+    render();
+    return;
+  }
+  const copyCatalogButton = event.target.closest("[data-copy-journal-entry]");
+  if (copyCatalogButton) {
+    const entry = journalCatalog.find((candidate) => candidate.catalogId === copyCatalogButton.dataset.copyJournalEntry);
+    if (!entry || entry.sourceType !== "CINE_CORD") return;
+    const copied = await copyJournalToClipboard(journalDraftForCatalogEntry(entry));
+    showToast(copied ? "Journal post copied. Nothing was posted automatically." : "Automatic copy was blocked by the browser.");
+    return;
+  }
+  const catalogDiscordButton = event.target.closest("[data-post-catalog-journal], [data-update-catalog-journal]");
+  if (catalogDiscordButton) {
+    const entryId = catalogDiscordButton.dataset.postCatalogJournal || catalogDiscordButton.dataset.updateCatalogJournal;
+    const entry = journalCatalog.find((candidate) => candidate.journalEntryId === entryId);
+    const action = catalogDiscordButton.hasAttribute("data-update-catalog-journal") ? "update" : "publish";
+    if (!entry?.canEdit) return;
+    const question = action === "update"
+      ? `Update the existing Discord message for Journal entry #${entry.entryLabel}? No duplicate will be created.`
+      : `Post Journal entry #${entry.entryLabel} to the configured Discord Journal channel?`;
+    if (!window.confirm(question)) return;
+    journalSyncPendingId = entry.journalEntryId;
+    render();
+    try {
+      await syncCatalogJournalToDiscord(entry, action);
+      showToast(action === "update"
+        ? `Discord post for Journal entry #${entry.entryLabel} updated without creating a duplicate.`
+        : `Journal entry #${entry.entryLabel} posted to Discord.`);
+    } catch (error) {
+      if (action === "update") {
+        entry.discordOutOfDate = true;
+        entry.publication = { ...(entry.publication || {}), status: "UPDATE_FAILED", last_error: error.message };
+      }
+      showToast(`Discord was not ${action === "update" ? "updated" : "posted to"}: ${error.message}`);
+    } finally {
+      journalSyncPendingId = null;
+      render();
+    }
+    return;
+  }
+  if (event.target.closest("[data-clear-journal-filters]")) {
+    journalQuery = "";
+    journalSourceFilter = "all";
+    journalStatusFilter = "all";
+    journalYearFilter = "all";
+    journalViewerFilter = "all";
+    journalVisibleLimit = 60;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-show-more-journal]")) {
+    journalVisibleLimit += 60;
+    render();
+    return;
+  }
 
   if (event.target.closest("[data-cancel-access-request]")) {
     if (!accessRequest || !window.confirm("Cancel your website access request?")) return;
@@ -2355,39 +2966,49 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-spin-roulette]")) { await spinRoulette(); return; }
   const vetoButton = event.target.closest("[data-veto-member]");
   if (vetoButton) { await spinRoulette(vetoButton.dataset.vetoMember); return; }
-  if (event.target.closest("[data-post-journal]")) {
-    const button = event.target.closest("[data-post-journal]");
+  const sessionDiscordButton = event.target.closest("[data-post-journal], [data-update-journal]");
+  if (sessionDiscordButton) {
+    const button = sessionDiscordButton;
     const form = document.querySelector("#discord-template-form");
     const session = journalSession();
-    if (!form || !session || !canManageSession(session) || !form.reportValidity()) return;
+    const action = button.hasAttribute("data-update-journal") ? "update" : "publish";
+    if (!form || !session || !canManageJournalEntry(session.journalEntry, session) || !form.reportValidity()) return;
     updateDiscordDraftPreview(form);
     const title = selectedFilmForSession(session)?.title || discordDraft?.title || "this film";
-    if (!window.confirm(`Post the saved Journal entry for ${title} to the configured Discord Journal channel?`)) return;
+    const question = action === "update"
+      ? `Update the existing Discord Journal message for ${title}? This will not create a new post.`
+      : `Post the saved Journal entry for ${title} to the configured Discord Journal channel?`;
+    if (!window.confirm(question)) return;
     button.disabled = true;
-    journalPublishPendingId = session.id;
+    if (action === "update") journalSyncPendingId = session.journalEntry.id;
+    else journalPublishPendingId = session.id;
     let journalSaved = false;
     try {
       clearJournalDraftSaveTimer();
       const savedDraft = await saveJournalEntry(session, discordDraft);
       journalSaved = true;
       discordDraft = savedDraft;
-      await publishJournalToDiscord(session);
-      showToast(`Journal entry #${savedDraft.entryNumber} posted to Discord.`);
+      await publishJournalToDiscord(session, action);
+      showToast(action === "update"
+        ? `Discord post for Journal entry #${savedDraft.entryNumber} updated without creating a duplicate.`
+        : `Journal entry #${savedDraft.entryNumber} posted to Discord.`);
     } catch (error) {
-      if (session.journalEntry && session.journalPublication?.status !== "POSTED") {
+      if (session.journalEntry && (action === "update" || session.journalPublication?.status !== "POSTED")) {
         const uncertain = /delivery (?:is |could not be )?uncertain|could not be confirmed|retry is blocked/i.test(error.message);
         session.journalPublication = {
           ...(session.journalPublication || {}),
           journal_entry_id: session.journalEntry.id,
-          status: uncertain ? "UNKNOWN" : "FAILED",
+          status: action === "update" ? "UPDATE_FAILED" : uncertain ? "UNKNOWN" : "FAILED",
+          discord_out_of_date: action === "update" || Boolean(session.journalPublication?.discord_out_of_date),
           last_error: error.message,
         };
       }
       showToast(journalSaved
-        ? `The Journal was saved, but Discord was not updated: ${error.message}`
+        ? `The Journal was saved, but Discord was not ${action === "update" ? "updated" : "posted to"}: ${error.message}`
         : `The Journal entry was not saved or posted: ${error.message}`);
     } finally {
       journalPublishPendingId = null;
+      journalSyncPendingId = null;
       persistDesignPreviewWorkspace();
       render();
     }
@@ -2412,7 +3033,7 @@ document.addEventListener("click", async (event) => {
   if (journalButton) {
     journalSessionId = journalButton.dataset.openJournal;
     const session = journalSession();
-    if (!session || (!canManageSession(session) && !session.journalEntry)) return;
+    if (!session || (!canManageJournalEntry(session.journalEntry, session) && !canManageSession(session) && !session.journalEntry)) return;
     discordDraft = session?.journalDraft ? { ...session.journalDraft, sessionId: session.id } : null;
     render();
     window.requestAnimationFrame(() => document.querySelector("#discord-copy-title")?.scrollIntoView({ block: "center", behavior: "smooth" }));
@@ -2430,7 +3051,7 @@ document.addEventListener("click", async (event) => {
   const editSessionButton = event.target.closest("[data-edit-session-details]");
   if (editSessionButton) {
     const session = sessionForId(editSessionButton.dataset.editSessionDetails);
-    if (!canManageSession(session)) return;
+    if (!canEditSessionDetails(session)) return;
     journalSessionId = null;
     sessionDetailsEditing = { sessionId: session.id, mode: "edit" };
     render();
@@ -2512,6 +3133,15 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", async (event) => {
   const discordForm = event.target.closest("#discord-template-form");
   if (discordForm) { updateDiscordDraftPreview(discordForm); return; }
+  if (event.target.matches("#journal-source-filter, #journal-year-filter, #journal-status-filter, #journal-viewer-filter")) {
+    if (event.target.matches("#journal-source-filter")) journalSourceFilter = event.target.value;
+    if (event.target.matches("#journal-year-filter")) journalYearFilter = event.target.value;
+    if (event.target.matches("#journal-status-filter")) journalStatusFilter = event.target.value;
+    if (event.target.matches("#journal-viewer-filter")) journalViewerFilter = event.target.value;
+    journalVisibleLimit = 60;
+    render();
+    return;
+  }
   if (event.target.matches("#list-sort")) { listSort = event.target.value; render(); }
   if (event.target.matches("#genre-filter")) { genreFilter = event.target.value; render(); }
   if (event.target.matches("#member-filter")) { memberFilter = event.target.value; render(); }

@@ -23,7 +23,9 @@ test("service_role has the publisher's required DML and no source-table writes",
         'public.movie_sessions',
         'public.group_memberships',
         'public.movie_session_participants',
-        'public.profiles'
+        'public.entry_viewers',
+        'public.profiles',
+        'public.discord_identities'
       ]::text[])
     )
     select
