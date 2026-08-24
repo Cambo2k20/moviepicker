@@ -3,7 +3,7 @@ begin;
 -- Discord Auth's identity metadata contains the account-wide profile. Cine-Cord
 -- belongs to one Discord server, so discard that cache and accept only profiles
 -- fetched from The Discordians guild-member endpoint by the authenticated Edge
--- Function. Every approved member will reauthorise once to repopulate this table.
+-- Function; every approved member will reauthorise once to repopulate this table.
 alter table public.discord_identities
   add column discord_guild_id text;
 

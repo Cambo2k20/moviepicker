@@ -1,5 +1,7 @@
 begin;
 
+-- Restore the account-wide identity cache used before the server-profile cutover.
+
 drop function if exists public.upsert_discord_server_identity(uuid, text, text, text);
 
 revoke insert (
