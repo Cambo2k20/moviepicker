@@ -1,4 +1,4 @@
-// Regression cover for 20260824104512_protect_sessions_on_member_removal.
+// Regression cover for 20260824031434_protect_sessions_on_member_removal.
 //
 // Before that migration, private.validate_movie_session() re-checked host
 // membership on every update, so removing a member who hosted a session made

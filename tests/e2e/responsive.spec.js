@@ -414,6 +414,22 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await page.locator('[data-view="sessions"]').click();
   await page.getByRole("button", { name: "Edit Journal post" }).click();
 
+  // The fancy card adds runtime and genres while manual copy remains available.
+  const embedPreview = page.locator(".discord-embed-preview");
+  await expect(embedPreview).toContainText(/\d+ min/);
+  await expect(embedPreview.locator("[data-discord-preview-genres]")).not.toHaveText("Genres unavailable");
+  await expect(page.getByText("Manual copy preview")).toBeVisible();
+
+  // Publishing is an explicit, confirmed action and survives a refresh.
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Post to Discord" }).click();
+  await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /View in Discord/ })).toHaveAttribute("href", /discord\.com\/channels\//);
+  await page.reload();
+  await page.getByRole("button", { name: "Edit Journal post" }).click();
+  await expect(page.locator(".discord-publication-state").getByText("Posted to Discord", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
+
   // The session fills these in, so they start folded away.
   const entryDetails = page.locator(".discord-entry-details");
   await expect(entryDetails).not.toHaveAttribute("open", /.*/);
@@ -499,5 +515,6 @@ test("a participant cannot edit another host's sessions but can copy a saved Jou
   await expect(page.getByRole("heading", { name: "Journal post" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Copy for Discord" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
   await expect(page.locator("[name=entry_number]")).toHaveAttribute("readonly", "");
 });

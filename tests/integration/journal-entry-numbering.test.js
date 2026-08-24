@@ -1,4 +1,4 @@
-// Regression cover for 20260824103055_harden_journal_entry_numbering.
+// Regression cover for 20260824031432_harden_journal_entry_numbering.
 //
 // Before that migration, typing a historical Discord entry number left the
 // identity sequence behind the data, and the next automatically numbered entry

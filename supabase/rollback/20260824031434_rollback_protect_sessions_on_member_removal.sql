@@ -1,4 +1,4 @@
--- Rollback for 20260824104512_protect_sessions_on_member_removal.
+-- Rollback for 20260824031434_protect_sessions_on_member_removal.
 --
 -- Restores private.validate_movie_session() as 20260823214112 defined it and
 -- public.remove_group_member() as 20260822104103 defined it.

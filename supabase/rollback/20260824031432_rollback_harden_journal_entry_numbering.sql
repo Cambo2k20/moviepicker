@@ -1,4 +1,4 @@
--- Rollback for 20260824103055_harden_journal_entry_numbering.
+-- Rollback for 20260824031432_harden_journal_entry_numbering.
 --
 -- Restores public.save_movie_session_journal exactly as 20260823214112 defined
 -- it and drops the sequence helper.
