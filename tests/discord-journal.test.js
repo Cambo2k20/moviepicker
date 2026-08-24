@@ -1,16 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   bearerForSupabaseApiKey,
   buildDiscordJournalPayload,
   discordGuildIdForMessage,
   discordMessageUrl,
+  discordWebhookDeleteAccepted,
   discordWebhookMessageUrl,
   namedSupabaseKey,
   safeDiscordWebhookUrl,
   webhookPosterName,
 } from "../supabase/functions/_shared/discord-journal.js";
+
+const publisherFunctionSource = readFileSync(
+  new URL("../supabase/functions/publish-journal-to-discord/index.ts", import.meta.url),
+  "utf8",
+);
 
 const entry = {
   entry_number: 1325,
@@ -85,6 +92,25 @@ test("builds an edit URL for the existing message only", () => {
     "https://discord.com/api/webhooks/123/token_value/messages/456",
   );
   assert.equal(discordWebhookMessageUrl(webhook, "not-a-message"), null);
+});
+
+test("accepts a confirmed or already-absent Discord message deletion", () => {
+  assert.equal(discordWebhookDeleteAccepted(204), true);
+  assert.equal(discordWebhookDeleteAccepted(404), true);
+  assert.equal(discordWebhookDeleteAccepted(401), false);
+  assert.equal(discordWebhookDeleteAccepted(429), false);
+  assert.equal(discordWebhookDeleteAccepted(500), false);
+});
+
+test("deletes the database entry with the caller's RLS identity after Discord", () => {
+  const discordDelete = publisherFunctionSource.indexOf('await fetch(deleteUrl, { method: "DELETE" })');
+  const databaseDelete = publisherFunctionSource.indexOf('`journal_entries?id=eq.${journalEntryId}`');
+  assert.ok(discordDelete >= 0, "Discord delete request should exist");
+  assert.ok(databaseDelete > discordDelete, "database deletion must happen after Discord deletion");
+  assert.match(
+    publisherFunctionSource.slice(databaseDelete, databaseDelete + 220),
+    /publicKey,\s*authorization,\s*"DELETE"/,
+  );
 });
 
 test("keeps webhook poster names valid without accepting reserved Discord names", () => {

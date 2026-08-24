@@ -1301,6 +1301,82 @@ textarea::placeholder {
   width: min(760px, 100%);
 }
 
+.journal-delete-modal {
+  width: min(540px, 100%);
+}
+
+.journal-delete-summary {
+  display: grid;
+  gap: 5px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.journal-delete-summary span,
+.journal-delete-summary small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journal-delete-summary strong {
+  font-size: 19px;
+}
+
+.journal-delete-discord-note,
+.journal-delete-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(228, 124, 145, 0.38);
+  background: rgba(228, 124, 145, 0.07);
+  color: #efabb8;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.journal-delete-discord-note .material-symbols-outlined {
+  flex: 0 0 auto;
+  font-size: 19px;
+}
+
+.journal-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.journal-delete-confirm {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: 1px solid rgba(228, 124, 145, 0.7);
+  border-radius: 2px;
+  background: rgba(228, 124, 145, 0.13);
+  color: #ffd9e0;
+  cursor: pointer;
+}
+
+.journal-delete-confirm:hover:not(:disabled),
+.journal-delete-confirm:focus-visible {
+  border-color: var(--danger);
+  background: rgba(228, 124, 145, 0.21);
+}
+
+.journal-delete-confirm:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .film-search-status {
   margin-top: 20px;
   padding: 12px 14px;
@@ -5068,6 +5144,16 @@ legend,
   font-size: 11px;
 }
 
+.journal-editor-actions .danger-button {
+  border-color: rgba(228, 124, 145, 0.4);
+}
+
+.journal-editor-actions .danger-button:hover,
+.journal-editor-actions .danger-button:focus-visible {
+  border-color: var(--danger);
+  color: #efabb8;
+}
+
 .journal-show-more {
   display: flex;
   min-width: 220px;
@@ -5178,6 +5264,15 @@ legend,
 
   .journal-editor-actions small {
     margin-left: 0;
+  }
+
+  .journal-delete-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .journal-delete-actions > * {
+    width: 100%;
   }
 }
 

@@ -84,6 +84,8 @@ For privileged database reads and writes, both functions require `SUPABASE_SECRE
 
 Do not place the webhook URL in `app.js`, a committed environment file, GitHub Actions output or screenshots. A failed Discord request leaves the Journal entry intact. Editing an entry after posting marks the Discord copy out of date; nothing changes in Discord until an authorised member presses **Update Discord post**. That action edits the existing message and never creates a replacement.
 
+Current Cine-Cord entries can also be permanently deleted by their creator or a website administrator. The same authenticated Edge Function handles deletion: when a confirmed Discord message exists, it deletes that exact webhook message first and stops without touching Supabase if Discord refuses. It then deletes the Journal row with the caller's Authorization header, so the existing Row Level Security policy remains authoritative; dependent viewer and publication rows cascade automatically. The watched session remains, its retained Journal draft is cleared when the caller may still manage that session, and entry numbers are never rewound or reused. Imported archive entries remain immutable and are never offered this action.
+
 ## Master Journal and historical import
 
 The `journal_catalog` security-invoker view combines current `journal_entries` with immutable `journal_archive_entries`. Every row keeps its source volume and original Discord message URL. The archive whitelist is fixed to the three established channels in guild `272427070779293697`; `webhooktest` and any other channel are excluded.
