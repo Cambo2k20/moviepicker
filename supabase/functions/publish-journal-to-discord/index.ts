@@ -5,6 +5,7 @@ import {
   discordMessageUrl,
   discordWebhookDeleteAccepted,
   discordWebhookMessageUrl,
+  journalActionRequiresSession,
   namedSupabaseKey,
   safeDiscordWebhookUrl,
 } from "../_shared/discord-journal.js";
@@ -147,6 +148,7 @@ Deno.serve(async (req: Request) => {
     const action = body?.action == null ? "publish" : String(body.action).toLowerCase();
     if (!UUID.test(journalEntryId)) return respond({ error: "Choose a valid saved Journal entry." }, 400);
     if (!new Set(["publish", "update", "delete"]).has(action)) return respond({ error: "Choose a valid Discord Journal action." }, 400);
+    const requiresSession = journalActionRequiresSession(action);
 
     const serviceAuthorization = bearerForSupabaseApiKey(serviceKey);
     const entries = await restRows(
@@ -156,10 +158,12 @@ Deno.serve(async (req: Request) => {
       serviceAuthorization,
     );
     const entry = first(entries);
-    if (!entry?.movie_session_id) return respond({ error: "That saved Journal entry is not linked to a watch session." }, 404);
+    if (!entry) return respond({ error: "That saved Journal entry is unavailable." }, 404);
 
     const [sessions, memberships, viewerRows, identityRows, existingRows] = await Promise.all([
-      restRows(supabaseUrl, `movie_sessions?select=id,group_id,status,selected_title,selected_runtime_minutes,selected_genres,selected_poster_path&id=eq.${entry.movie_session_id}&limit=1`, serviceKey, serviceAuthorization),
+      entry.movie_session_id
+        ? restRows(supabaseUrl, `movie_sessions?select=id,group_id,status,selected_title,selected_runtime_minutes,selected_genres,selected_poster_path&id=eq.${entry.movie_session_id}&limit=1`, serviceKey, serviceAuthorization)
+        : Promise.resolve([]),
       restRows(supabaseUrl, `group_memberships?select=role&group_id=eq.${entry.group_id}&user_id=eq.${user.id}&limit=1`, serviceKey, serviceAuthorization),
       restRows(supabaseUrl, `entry_viewers?select=profile_id&entry_id=eq.${entry.id}`, serviceKey, serviceAuthorization),
       restRows(supabaseUrl, `discord_identities?select=profile_id,discord_guild_id,display_name,avatar_url&profile_id=eq.${user.id}&discord_guild_id=eq.${DISCORDIANS_GUILD_ID}&limit=1`, serviceKey, serviceAuthorization),
@@ -167,13 +171,14 @@ Deno.serve(async (req: Request) => {
     ]);
     const session = first(sessions);
     const membership = first(memberships);
-    if (!session || session.group_id !== entry.group_id) return respond({ error: "The linked watch session is unavailable." }, 404);
     if (!membership) return respond({ error: "Approved Cine-Cord membership is required." }, 403);
     const isAdmin = String(membership.role).toLowerCase() === "admin";
     if (entry.created_by !== user.id && !isAdmin) {
       return respond({ error: "Only the entry creator or a website administrator can manage this Journal entry." }, 403);
     }
-    if (action !== "delete" && session.status !== "WATCHED") return respond({ error: "The Journal can be posted only after the film is marked watched." }, 409);
+    if (requiresSession && !entry.movie_session_id) return respond({ error: "That saved Journal entry is not linked to a watch session." }, 404);
+    if (requiresSession && (!session || session.group_id !== entry.group_id)) return respond({ error: "The linked watch session is unavailable." }, 404);
+    if (requiresSession && session.status !== "WATCHED") return respond({ error: "The Journal can be posted only after the film is marked watched." }, 409);
 
     const viewerIds = [...new Set(viewerRows.map((viewer) => String(viewer.profile_id || "")).filter((id) => UUID.test(id)))];
     const viewerProfiles = viewerIds.length
@@ -229,14 +234,16 @@ Deno.serve(async (req: Request) => {
         return respond({ error }, 409);
       }
 
-      await memberWrite(
-        supabaseUrl,
-        `movie_sessions?id=eq.${entry.movie_session_id}`,
-        publicKey,
-        authorization,
-        "PATCH",
-        { journal_draft: {} },
-      ).catch(() => null);
+      if (entry.movie_session_id) {
+        await memberWrite(
+          supabaseUrl,
+          `movie_sessions?id=eq.${entry.movie_session_id}`,
+          publicKey,
+          authorization,
+          "PATCH",
+          { journal_draft: {} },
+        ).catch(() => null);
+      }
 
       return respond({ status: "deleted", entryId: journalEntryId, discordDeleted: discordDeleteCompleted });
     }
