@@ -1795,6 +1795,54 @@ legend,
   text-align: center;
 }
 
+.feature-error-state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--dim);
+  background: var(--surface-soft);
+}
+
+.feature-error-state.is-compact {
+  margin: 16px;
+}
+
+.feature-error-state > .material-symbols-outlined {
+  color: var(--purple-light);
+  font-size: 28px;
+}
+
+.feature-error-state > div {
+  display: grid;
+  gap: 4px;
+}
+
+.feature-error-state strong,
+.feature-error-state p {
+  margin: 0;
+}
+
+.feature-error-state p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .feature-error-state {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .feature-error-state .secondary-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
 .list-view {
   width: 100%;
   max-width: 1180px;

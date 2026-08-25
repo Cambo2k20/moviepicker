@@ -5,6 +5,23 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole("heading", { name: "The List", exact: true })).toBeVisible();
 });
 
+test("a My Cinema failure stays isolated from the shared workspace", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview&preview-failure=personal-films#list");
+  await expect(page.getByRole("heading", { name: "The List", exact: true })).toBeVisible();
+  await expect(page.locator(".poster-card")).toHaveCount(9);
+
+  await page.goto("/moviepicker/?design-preview&preview-failure=personal-films#journal");
+  await expect(page.getByRole("heading", { name: "The Journal", exact: true })).toBeVisible();
+  await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+
+  await page.goto("/moviepicker/?design-preview&preview-failure=personal-films#my-films");
+  await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
+  const unavailable = page.getByRole("alert");
+  await expect(unavailable).toContainText("My Cinema couldn’t load.");
+  await expect(unavailable.getByRole("button", { name: "Try My Cinema again" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "My Cinema is empty." })).toHaveCount(0);
+});
+
 test("large desktop library keeps poster artwork prominent as space grows", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "The responsive desktop grid is covered once.");
 

@@ -26,6 +26,7 @@ import {
   personalStateLabel,
   reactionForValue,
 } from "./personal-films-core.js";
+import { settleOptionalQuery } from "./workspace-core.js";
 
 const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
@@ -38,6 +39,8 @@ const designPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(
 const designPreviewVariant = designPreviewMode
   ? new URLSearchParams(window.location.search).get("design-preview")
   : null;
+const designPreviewPersonalFilmsError = designPreviewMode
+  && new URLSearchParams(window.location.search).get("preview-failure") === "personal-films";
 const discordAuthPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("discord-auth-preview");
 
@@ -110,6 +113,7 @@ let accessRequest = null;
 let joinRequests = [];
 let movieList = [];
 let personalFilms = [];
+let personalFilmsLoadError = false;
 let activeSession = null;
 let sessionHistory = [];
 let journalCatalog = [];
@@ -321,6 +325,8 @@ function loadDesignPreviewWorkspace() {
   ];
   isLoading = false;
   restoreDesignPreviewWorkspace();
+  personalFilmsLoadError = designPreviewPersonalFilmsError;
+  if (personalFilmsLoadError) personalFilms = [];
   journalCatalog = [
     {
       catalogId: "current:preview-journal-1324",
@@ -1775,8 +1781,24 @@ function renderPageHeader({ id, eyebrow, title, description = "", actions = "", 
     </header>`;
 }
 
+function renderPersonalFilmsUnavailable({ compact = false } = {}) {
+  return `
+    <div class="feature-error-state ${compact ? "is-compact" : ""}" role="alert">
+      <span class="material-symbols-outlined" aria-hidden="true">cloud_off</span>
+      <div><strong>My Cinema couldn’t load.</strong><p>Your private films are unavailable right now. The List, Sessions and Journal are still available.</p></div>
+      <button class="secondary-button" type="button" data-retry-personal-films>Try My Cinema again</button>
+    </div>`;
+}
+
 function renderPrivateFilmPanel(context) {
   const { movie, personal } = context;
+  if (personalFilmsLoadError) {
+    return `
+      <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
+        <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Temporarily unavailable</span><small>Cine-Cord remains available</small></header>
+        ${renderPersonalFilmsUnavailable({ compact: true })}
+      </section>`;
+  }
   if (!personal) {
     return `
       <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
@@ -1888,22 +1910,26 @@ function renderPersonalFilmCard(item) {
 }
 
 function renderMyFilms() {
+  if (personalFilmsLoadError) selectedFilmId = null;
   const selectedFilm = personalFilms.find((item) => item.id === selectedFilmId) || null;
   if (selectedFilmId && !selectedFilm) selectedFilmId = null;
   if (selectedFilm) return renderFilmDetails();
   const visibleFilms = getVisiblePersonalFilms(personalFilms, { query: myFilmsQuery, filter: myFilmsFilter, sort: myFilmsSort });
+  const countLabel = personalFilmsLoadError
+    ? "My Cinema · Private to you"
+    : `My Cinema · Private to you · ${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}`;
   return `
     <section class="page-view list-view my-films-view" aria-labelledby="my-films-title">
       ${renderPageHeader({
         id: "my-films-title",
-        eyebrow: `My Cinema · Private to you · ${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}`,
+        eyebrow: countLabel,
         title: "My Films",
         description: "Your private films, states, reactions and Favourites. Nothing is shared unless you deliberately suggest it to Cine-Cord.",
         className: "list-hero my-films-hero",
-        actions: `<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
+        actions: personalFilmsLoadError ? "" : `<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
       })}
-      <div class="list-toolbar my-films-toolbar"><label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="my-films-search" type="search" value="${escapeHTML(myFilmsQuery)}" placeholder="Search My Films" aria-label="Search My Films" /></label><button class="mobile-filter-toggle" type="button" data-toggle-my-films-filters aria-expanded="${myFilmsFiltersOpen}" aria-label="${myFilmsFiltersOpen ? "Hide" : "Show"} My Films filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${myFilmsFiltersOpen ? "expand_less" : "expand_more"}</span></button><div class="filter-tabs my-film-filter-tabs ${myFilmsFiltersOpen ? "is-open" : ""}" aria-label="Filter My Films">${[["all", "All"], ["want", "Want to Watch"], ["watched", "Watched"], ["dnf", "Did Not Finish"], ["favourites", "Favourites"]].map(([value, label]) => `<button type="button" class="filter-tab ${myFilmsFilter === value ? "is-active" : ""}" data-my-films-filter="${value}">${label}</button>`).join("")}</div><div class="list-filter-controls my-film-sort-control ${myFilmsFiltersOpen ? "is-open" : ""}"><label class="compact-select"><span class="sr-only">Sort My Films</span><select id="my-films-sort" aria-label="Sort My Films"><option value="updated" ${myFilmsSort === "updated" ? "selected" : ""}>Recently updated</option><option value="added" ${myFilmsSort === "added" ? "selected" : ""}>Recently added</option><option value="title" ${myFilmsSort === "title" ? "selected" : ""}>Title A–Z</option></select></label></div></div>
-      <div class="poster-grid personal-poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderPersonalFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">theaters</span><h2>${personalFilms.length ? "No films match that view." : "My Cinema is empty."}</h2><p>${personalFilms.length ? "Try another search or filter." : "Add something you want to watch, or rate a film you have already seen."}</p><button class="secondary-button" type="button" data-open-personal-film>Add a film</button></div>`}</div>
+      ${personalFilmsLoadError ? renderPersonalFilmsUnavailable() : `<div class="list-toolbar my-films-toolbar"><label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="my-films-search" type="search" value="${escapeHTML(myFilmsQuery)}" placeholder="Search My Films" aria-label="Search My Films" /></label><button class="mobile-filter-toggle" type="button" data-toggle-my-films-filters aria-expanded="${myFilmsFiltersOpen}" aria-label="${myFilmsFiltersOpen ? "Hide" : "Show"} My Films filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${myFilmsFiltersOpen ? "expand_less" : "expand_more"}</span></button><div class="filter-tabs my-film-filter-tabs ${myFilmsFiltersOpen ? "is-open" : ""}" aria-label="Filter My Films">${[["all", "All"], ["want", "Want to Watch"], ["watched", "Watched"], ["dnf", "Did Not Finish"], ["favourites", "Favourites"]].map(([value, label]) => `<button type="button" class="filter-tab ${myFilmsFilter === value ? "is-active" : ""}" data-my-films-filter="${value}">${label}</button>`).join("")}</div><div class="list-filter-controls my-film-sort-control ${myFilmsFiltersOpen ? "is-open" : ""}"><label class="compact-select"><span class="sr-only">Sort My Films</span><select id="my-films-sort" aria-label="Sort My Films"><option value="updated" ${myFilmsSort === "updated" ? "selected" : ""}>Recently updated</option><option value="added" ${myFilmsSort === "added" ? "selected" : ""}>Recently added</option><option value="title" ${myFilmsSort === "title" ? "selected" : ""}>Title A–Z</option></select></label></div></div>
+      <div class="poster-grid personal-poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderPersonalFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">theaters</span><h2>${personalFilms.length ? "No films match that view." : "My Cinema is empty."}</h2><p>${personalFilms.length ? "Try another search or filter." : "Add something you want to watch, or rate a film you have already seen."}</p><button class="secondary-button" type="button" data-open-personal-film>Add a film</button></div>`}</div>`}
     </section>`;
 }
 
@@ -2912,6 +2938,33 @@ function closeFilmModal() {
   clearFilmMatches();
 }
 
+async function fetchPersonalFilms() {
+  return settleOptionalQuery(
+    supabase
+      .from("personal_films")
+      .select(PERSONAL_FILM_SELECT)
+      .eq("owner_id", authUser.id)
+      .order("updated_at", { ascending: false }),
+    (rows) => rows.map(normalisePersonalFilm),
+  );
+}
+
+function applyPersonalFilmsResult(result) {
+  personalFilms = result.data;
+  personalFilmsLoadError = Boolean(result.error);
+  if (result.error) console.warn("My Cinema data could not be loaded.", result.error);
+}
+
+async function retryPersonalFilms() {
+  if (designPreviewMode) {
+    personalFilmsLoadError = designPreviewPersonalFilmsError;
+    return !personalFilmsLoadError;
+  }
+  const result = await fetchPersonalFilms();
+  applyPersonalFilmsResult(result);
+  return !result.error;
+}
+
 async function loadWorkspace(providerToken = null) {
   const { data: groups, error: groupError } = await supabase.from("groups").select("id,name,slug").eq("slug", "the-discordians").limit(1);
   if (groupError) throw groupError;
@@ -2923,6 +2976,7 @@ async function loadWorkspace(providerToken = null) {
   joinRequests = [];
   movieList = [];
   personalFilms = [];
+  personalFilmsLoadError = false;
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -2956,12 +3010,12 @@ async function loadWorkspace(providerToken = null) {
       discordProfileSyncError = error.message;
     }
   }
-  const [profilesResult, membershipsResult, identitiesResult, queueResult, personalFilmsResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
+  const personalFilmsPromise = fetchPersonalFilms();
+  const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("discord_identities").select("profile_id,display_name,avatar_url,synced_at"),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
-    supabase.from("personal_films").select(PERSONAL_FILM_SELECT).eq("owner_id", authUser.id).order("updated_at", { ascending: false }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).in("status", ["ACTIVE", "CONFIRMED"]).order("started_at", { ascending: false }).limit(1).maybeSingle(),
@@ -2973,8 +3027,9 @@ async function loadWorkspace(providerToken = null) {
     supabase.from("discord_publications").select("*"),
     fetchAllJournalCatalog(activeGroup.id),
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, personalFilmsResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
   if (firstError) throw firstError;
+  applyPersonalFilmsResult(await personalFilmsPromise);
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
   const discordIdentityMap = new Map((identitiesResult.data || []).map((identity) => [identity.profile_id, identity]));
@@ -3022,7 +3077,6 @@ async function loadWorkspace(providerToken = null) {
       overview: item.overview || ""
     };
   });
-  personalFilms = (personalFilmsResult.data || []).map(normalisePersonalFilm);
   const participantsBySession = new Map();
   for (const participant of participantsResult.data || []) {
     const current = participantsBySession.get(participant.session_id) || [];
@@ -3144,6 +3198,7 @@ async function syncSession(session) {
   joinRequests = [];
   movieList = [];
   personalFilms = [];
+  personalFilmsLoadError = false;
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -3569,6 +3624,14 @@ document.addEventListener("click", async (event) => {
     await loadWorkspace(); render(); showToast(`${member.name}'s website access was removed.`); return;
   }
 
+  const retryPersonalFilmsButton = event.target.closest("[data-retry-personal-films]");
+  if (retryPersonalFilmsButton) {
+    retryPersonalFilmsButton.disabled = true;
+    const loaded = await retryPersonalFilms();
+    render();
+    showToast(loaded ? "My Cinema is available again." : "My Cinema still couldn’t load. The shared Cine-Cord pages remain available.");
+    return;
+  }
   if (event.target.closest("[data-open-film]")) { openFilmModal(); return; }
   if (event.target.closest("[data-open-personal-film]")) { openFilmModal(null, "personal"); return; }
   if (event.target.closest("[data-close-film]") || event.target === filmModal) { closeFilmModal(); return; }

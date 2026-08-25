@@ -23,3 +23,24 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Start isolated local Supabase services
+        run: npx supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Run authenticated Supabase integration tests
+        run: npm run test:db
+      - name: Stop local Supabase services
+        if: always()
+        continue-on-error: true
+        run: npx supabase stop --no-backup
