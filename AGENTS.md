@@ -6,7 +6,8 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 
 ## Working agreement
 
-- Never begin working without getting confirmation, If i ask you about something always explain your plan for doing it and wait until i agree. 
+- Never begin requested work without confirmation. Explain the plan first and
+  wait until Cameron explicitly agrees.
 - Never merge, auto-merge, rebase, delete or force-update a branch unless Cameron explicitly requests it.
 - Never commit directly to `main`. Work on a focused `feature/`, `fix/` or `codex/` branch.
 - Before editing, inspect the active branch and compare it with `main`; this repository may contain important unmerged work.
@@ -21,6 +22,29 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 - The working copy is `moviepicker/`. Confirm you are in it, and on the branch you think you are, before reviewing or editing — a stale worktree once caused a review of code that `main` had already moved past.
 - Extra worktrees live under `.worktrees/`, one per open PR, removed when that PR merges.
 - Run `npm run git:cleanup` after a PR merges to see what is spent. It only reports — branches are never deleted automatically, and an agent deletes one only when Cameron asks. Full policy in `docs/branch-and-worktree-policy.md`.
+
+### Repository safety gate
+
+- Before editing, `main` must be clean and match `origin/main`. Fetch first,
+  then require `git rev-list --left-right --count main...origin/main` to return
+  `0 0`. If it does not, stop and report the divergence.
+- Create the task branch before changing files. Never rescue a direct commit on
+  `main` by discarding it; preserve it on a named branch before realigning
+  `main`, and get explicit approval for the realignment.
+- Before any merge, rebase, reset, branch deletion, force-update or worktree
+  removal, run the mutation preflight in
+  `docs/branch-and-worktree-policy.md` and compare the exact targets with the
+  approved plan. Unexpected state is a hard stop.
+- Never bulk-delete branches in GitHub's interface. Delete only branches named
+  in Cameron's approval and proven spent by a merged PR or
+  `npm run git:cleanup`.
+- A branch with unique commits must have a remote backup before any repository
+  cleanup. Local-only active branches are not allowed.
+- Remove worktrees only with `git worktree remove <exact-path>` after verifying
+  the registered path and a clean status. Never delete a worktree directory in
+  File Explorer.
+- After every PR merge, reconcile `main`, the merged branch and its worktree
+  using the post-merge checklist in `docs/branch-and-worktree-policy.md`.
 
 ## Active code
 
