@@ -6454,6 +6454,27 @@ legend,
   display: block;
 }
 
+@media (min-width: 861px) and (max-width: 1170px) {
+  .my-films-toolbar {
+    grid-template-columns: minmax(0, 1fr) 172px;
+  }
+
+  .my-films-toolbar .list-search {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .my-film-filter-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .my-film-sort-control {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
 .personal-poster-grid {
   grid-template-columns: repeat(auto-fill, minmax(min(165px, 100%), 1fr));
 }
