@@ -1530,7 +1530,7 @@ function renderFilmDetails(item) {
       <div class="detail-title-row"><div><h2 id="film-detail-title">${escapeHTML(item.title)}</h2><p>${item.year ? escapeHTML(item.year) : "Year pending"}</p></div><span class="status-pill ${item.watched ? "watched" : "ready"}">${escapeHTML(watchHistoryLabel(item))}</span></div>
       <div class="detail-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(item))}</span>${item.genres.map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>
       <dl class="detail-ledger"><div><dt>Added by</dt><dd><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" />${escapeHTML(item.suggestedBy)}</dd></div><div><dt>On the list</dt><dd>${escapeHTML(formatAddedDate(item.createdAt))}</dd></div><div><dt>Group votes</dt><dd>${item.votes}</dd></div></dl>
-      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote for it and use it in Pick Tonight now.")}</p>
+      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote for it and use it in Watch a Film now.")}</p>
       <div class="detail-actions">
         <button class="secondary-button" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${item.votedByMe ? "Remove vote" : "Vote"} · ${item.votes}</button>
         ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-match-film="${item.id}">${item.tmdbId ? "Refresh movie details" : "Find poster and details"}</button><button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
@@ -1542,18 +1542,23 @@ function renderList() {
   const visibleFilms = getVisibleFilms();
   const selectedFilm = movieList.find((item) => item.id === selectedFilmId) || null;
   if (selectedFilmId && !selectedFilm) selectedFilmId = null;
+  const readyCount = movieList.filter((item) => !item.watched).length;
   const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
   const suggesters = [...new Map(movieList.map((item) => [item.suggestedById, item.suggestedBy])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   return `
     <section class="list-view" aria-labelledby="list-title">
       <header class="list-hero">
-        <div><span class="eyebrow">The Discordians · Shared watchlist</span><h1 id="list-title" class="page-title">Collective Film Library</h1><p class="page-subtitle">Our shared collection of films to watch or appreciate</p></div>
-        <div class="list-hero-actions"><button class="primary-button" type="button" data-open-film><span class="material-symbols-outlined" aria-hidden="true">add</span> Add film to library</button><button class="secondary-button" type="button" data-open-party>Watch a Film <span class="material-symbols-outlined" aria-hidden="true">casino</span></button></div>
+        <div class="list-hero-copy">
+          <span class="eyebrow">Cine-Cord · Shared with the group</span>
+          <div class="list-title-line"><h1 id="list-title" class="page-title">The List</h1><span class="list-count"><span>${movieList.length} ${movieList.length === 1 ? "film" : "films"}</span><span class="list-count-ready">· ${readyCount} ready</span></span></div>
+          <p class="page-subtitle">The Discordians’ shared film library. Everything here is visible to every approved member.</p>
+        </div>
+        <div class="list-hero-actions"><button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">casino</span>Watch a Film</button><button class="secondary-button" type="button" data-open-film aria-label="Add film to library"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add film</button></div>
       </header>
       <div class="list-toolbar">
         <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search the list" aria-label="Search The List" /></label>
-        <div class="filter-tabs" aria-label="Filter The List">${["all", "ready", "watched"].map((filter) => `<button type="button" class="filter-tab ${listFilter === filter ? "is-active" : ""}" data-list-filter="${filter}">${filter[0].toUpperCase()}${filter.slice(1)}</button>`).join("")}</div>
-        <button class="mobile-filter-toggle" type="button" data-toggle-list-filters aria-expanded="${listFiltersOpen}"><span><span class="material-symbols-outlined" aria-hidden="true">tune</span>Filters &amp; sort</span><span class="material-symbols-outlined" aria-hidden="true">${listFiltersOpen ? "expand_less" : "expand_more"}</span></button>
+        <button class="mobile-filter-toggle" type="button" data-toggle-list-filters aria-expanded="${listFiltersOpen}" aria-label="${listFiltersOpen ? "Hide" : "Show"} filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${listFiltersOpen ? "expand_less" : "expand_more"}</span></button>
+        <div class="filter-tabs ${listFiltersOpen ? "is-open" : ""}" aria-label="Filter The List">${["all", "ready", "watched"].map((filter) => `<button type="button" class="filter-tab ${listFilter === filter ? "is-active" : ""}" data-list-filter="${filter}">${filter[0].toUpperCase()}${filter.slice(1)}</button>`).join("")}</div>
         <div class="list-filter-controls ${listFiltersOpen ? "is-open" : ""}">
           <label class="compact-select"><span class="sr-only">Genre</span><select id="genre-filter" aria-label="Filter by genre"><option value="all">All genres</option>${genres.map((genre) => `<option value="${escapeHTML(genre.toLowerCase())}" ${genreFilter === genre.toLowerCase() ? "selected" : ""}>${escapeHTML(genre)}</option>`).join("")}</select></label>
           <label class="compact-select"><span class="sr-only">Added by</span><select id="member-filter" aria-label="Filter by who added it"><option value="all">Added by anyone</option>${suggesters.map(([id, name]) => `<option value="${escapeHTML(id)}" ${memberFilter === id ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
@@ -1742,7 +1747,7 @@ function renderQueueRoulette() {
   return `
     <section class="roulette-game ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? "has-result" : ""}" aria-labelledby="roulette-title">
       <header class="roulette-header">
-        <div><span class="eyebrow">Pick Tonight · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
+        <div><span class="eyebrow">Watch a Film · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
         <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
       </header>
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
@@ -1754,7 +1759,7 @@ function renderPick() {
   const candidateCount = movieList.filter((item) => !item.watched).length;
   return `
     <section class="page-view" aria-labelledby="pick-title">
-      <header class="page-header"><div><span class="eyebrow">${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}</span><h1 id="pick-title" class="page-title">Pick Tonight</h1><p class="page-subtitle">Choose the group, choose the rules, then let the website settle the argument.</p></div><button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></header>
+      <header class="page-header"><div><span class="eyebrow">${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}</span><h1 id="pick-title" class="page-title">Watch a Film</h1><p class="page-subtitle">Choose the group, choose the rules, then let the website settle the argument.</p></div><button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></header>
       <div class="pick-callout"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
       <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
     </section>`;
@@ -1941,7 +1946,7 @@ function renderStats() {
   const favourite = [...ready].sort((a, b) => b.votes - a.votes)[0];
   return `
     <section class="page-view" aria-labelledby="stats-title">
-      <header class="page-header"><div><span class="eyebrow">List behaviour, not Journal history</span><h1 id="stats-title" class="page-title">List Stats</h1><p class="page-subtitle">A small snapshot of suggestions and votes. Selection-game awards arrive later.</p></div></header>
+      <header class="page-header"><div><span class="eyebrow">List behaviour, not Journal history</span><h1 id="stats-title" class="page-title">Group Stats</h1><p class="page-subtitle">A small snapshot of shared suggestions and votes. Selection-game awards arrive later.</p></div></header>
       <div class="list-stat-grid"><article><span class="material-symbols-outlined" aria-hidden="true">movie</span><strong>${ready.length}</strong><p>Films ready to watch</p></article><article><span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span><strong>${totalVotes}</strong><p>Total active votes</p></article><article><span class="material-symbols-outlined" aria-hidden="true">done_all</span><strong>${watched.length}</strong><p>Marked as watched</p></article></div>
       <div class="stat-feature-list"><article><span class="eyebrow">Current favourite</span><h2>${favourite ? escapeHTML(favourite.title) : "No votes yet"}</h2><p>${favourite ? `${favourite.votes} ${favourite.votes === 1 ? "vote" : "votes"}` : "Vote on The List to create a frontrunner."}</p></article><article><span class="eyebrow">Longest waiting</span><h2>${oldest ? escapeHTML(oldest.title) : "Nothing waiting"}</h2><p>${oldest ? escapeHTML(formatWaitingTime(oldest.createdAt)) : "Add a suggestion to begin the queue."}</p></article></div>
     </section>`;
@@ -1960,17 +1965,43 @@ function renderMembers() {
     </section>`;
 }
 
+function navigationAreaForView(view) {
+  return view === "members" ? "admin" : "cine-cord";
+}
+
+function revealActiveMobileDestination() {
+  if (!window.matchMedia("(max-width: 860px)").matches) return;
+  const activeDestination = document.querySelector(".nav-area.is-open .nav-item.is-active");
+  window.requestAnimationFrame(() => activeDestination?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+}
+
 function updateShellState() {
   const hasWorkspace = Boolean(authUser && activeGroup);
   const hasDiscordServerProfile = Boolean(currentProfile?.discordServerDisplayName);
   const isAdmin = hasWorkspace && isCurrentAdmin();
+  const activeArea = navigationAreaForView(currentView);
   document.body.classList.toggle("is-locked", !hasWorkspace);
   document.body.classList.toggle("is-admin", isAdmin);
   document.body.classList.toggle("has-film-detail", hasWorkspace && currentView === "list" && Boolean(selectedFilmId));
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !isAdmin; });
+  document.querySelectorAll("[data-nav-area]").forEach((area) => {
+    const unavailable = area.classList.contains("is-unavailable");
+    const isOpen = !unavailable && area.dataset.navArea === activeArea;
+    const toggle = area.querySelector("[data-nav-area-toggle]");
+    area.classList.toggle("is-open", isOpen);
+    if (!toggle) return;
+    toggle.disabled = !hasWorkspace || (area.dataset.navArea === "admin" && !isAdmin);
+    toggle.classList.toggle("is-active", hasWorkspace && isOpen);
+    toggle.setAttribute("aria-expanded", String(hasWorkspace && isOpen));
+    if (toggle.disabled) toggle.setAttribute("aria-disabled", "true");
+    else toggle.removeAttribute("aria-disabled");
+  });
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.disabled = !hasWorkspace || (button.dataset.view === "members" && !isAdmin);
-    button.classList.toggle("is-active", hasWorkspace && button.dataset.view === currentView);
+    const isActive = hasWorkspace && button.dataset.view === currentView;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
   if (sessionPanel) sessionPanel.hidden = !authUser;
   if (sessionName) sessionName.textContent = currentProfile?.discordServerDisplayName || currentProfile?.displayName || authUser?.email || "Signed in";
@@ -1982,6 +2013,7 @@ function updateShellState() {
     else sessionAvatar.removeAttribute("src");
   }
   if (discordProfileRefresh) discordProfileRefresh.hidden = !hasWorkspace || !discordAuthEnabled;
+  revealActiveMobileDestination();
 }
 
 function bindListSearch() {
@@ -2877,6 +2909,8 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const areaButton = event.target.closest("[data-nav-area-toggle]");
+  if (areaButton && !areaButton.disabled) { navigate(areaButton.dataset.defaultView); return; }
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) { navigate(viewButton.dataset.view); return; }
   if (event.target.closest("[data-toggle-auth-mode]")) { authMode = authMode === "signin" ? "signup" : "signin"; render(); return; }
@@ -3462,6 +3496,20 @@ partyForm.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const navDestination = event.target.closest?.(".nav-destinations .nav-item");
+  if (navDestination && window.matchMedia("(max-width: 860px)").matches && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+    const destinations = [...navDestination.closest(".nav-destinations").querySelectorAll(".nav-item:not(:disabled)")];
+    const currentIndex = destinations.indexOf(navDestination);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? destinations.length - 1
+        : Math.min(destinations.length - 1, Math.max(0, currentIndex + (event.key === "ArrowRight" ? 1 : -1)));
+    event.preventDefault();
+    destinations[nextIndex]?.focus();
+    destinations[nextIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return;
+  }
   if (event.key !== "Escape") return;
   if (!journalDeleteModal.hidden) { closeJournalDeleteModal(); return; }
   if (selectedFilmId) { selectedFilmId = null; render(); return; }
