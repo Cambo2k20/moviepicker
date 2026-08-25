@@ -29,16 +29,24 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
 test("area navigation keeps future sections truthful and available routes working", async ({ page }) => {
   const cineCordArea = page.locator('[data-nav-area="cine-cord"]');
   const myCinema = page.locator('[data-nav-area="my-cinema"] .nav-area-toggle');
+  const myCinemaArea = page.locator('[data-nav-area="my-cinema"]');
   const discover = page.locator('[data-nav-area="discover"] .nav-area-toggle');
   const memberProfiles = page.getByRole("button", { name: /Member Profiles/ });
 
   await expect(cineCordArea).toHaveClass(/is-open/);
   await expect(page.locator('[data-view="list"]')).toHaveAttribute("aria-current", "page");
-  await expect(myCinema).toBeDisabled();
-  await expect(myCinema).toContainText(/Private.*Coming soon|Private.*Soon/);
+  await expect(myCinema).toBeEnabled();
+  await expect(myCinema).toContainText("Private");
   await expect(discover).toBeDisabled();
   await expect(discover).toContainText(/Private.*Coming soon|Private.*Soon/);
   await expect(memberProfiles).toBeDisabled();
+
+  await myCinema.click();
+  await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
+  await expect(myCinemaArea).toHaveClass(/is-open/);
+  await expect(page.locator('[data-view="my-films"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: /^Overview(?: Coming soon)?$/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^My Lists(?: Coming soon)?$/ })).toBeDisabled();
 
   await page.locator('[data-nav-area="admin"] .nav-area-toggle').click();
   await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
@@ -90,13 +98,15 @@ test("phone keeps the complete list filters behind the compact filter control", 
 });
 
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop", "Desktop detail-drawer artwork is covered once.");
+  test.skip(testInfo.project.name !== "desktop", "Desktop film-detail artwork is covered once.");
 
   await page.setViewportSize({ width: 1590, height: 1272 });
   await expect(page.getByRole("button", { name: "Add film to library" })).toBeVisible();
   await expect(page.locator(".list-hero-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
 
   await page.locator("[data-select-film]").first().click();
+  await expect(page.locator(".film-detail-view")).toBeVisible();
+  await expect(page.locator(".film-detail-drawer")).toHaveCount(0);
   const detailPoster = page.locator(".detail-poster");
   await expect(detailPoster).toBeVisible();
   await expect(page.locator("[data-shortlist-film]")).toHaveCount(0);
@@ -121,6 +131,73 @@ test("list actions and desktop film artwork remain clear", async ({ page }, test
 
   const viewportOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(viewportOverflow).toBeLessThanOrEqual(1);
+});
+
+test("My Films stays private and the unified detail follows its entry context", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Context ordering is covered once on desktop.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await expect(page.locator(".personal-poster-card")).toHaveCount(4);
+  await page.getByRole("searchbox", { name: "Search My Films" }).fill("matrix");
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+
+  const panelHeadings = await page.locator(".film-context-panel .context-panel-header").evaluateAll((headers) => headers.map((header) => header.textContent.trim()));
+  expect(panelHeadings[0]).toContain("My Cinema");
+  expect(panelHeadings[1]).toContain("Cine-Cord");
+  await expect(page.locator(".shared-panel")).toHaveClass(/is-compact/);
+
+  await page.getByRole("button", { name: "Back to My Films" }).click();
+  await expect(page.getByRole("searchbox", { name: "Search My Films" })).toHaveValue("matrix");
+  await expect(page.locator(".personal-poster-card")).toHaveCount(1);
+});
+
+test("private reactions save one level and preserve an explicit Did Not Finish state", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The complete reaction keyboard contract is covered once.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+  const didNotFinishState = page.locator('[data-personal-state="DID_NOT_FINISH"]');
+  await didNotFinishState.click();
+
+  const savedReaction = page.getByRole("radio", { name: "Level 4 of 5, Really liked it" });
+  await savedReaction.focus();
+  await savedReaction.press("Home");
+  await expect(page.getByRole("radio", { name: "Level 1 of 5, Didn’t like it" })).toHaveAttribute("aria-checked", "true");
+  await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".reaction-control [role='status']")).toContainText("Saved, Didn’t like it");
+
+  await page.getByRole("button", { name: "Clear reaction" }).click();
+  await expect(page.getByText("No reaction yet", { exact: true })).toBeVisible();
+  await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("switch", { name: /Favourite/ })).toHaveAttribute("aria-checked", "true");
+});
+
+test("phone collapses a saved reaction and expands five full-width touch rows", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "phone", "The saved phone reaction state is phone-specific.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+  await expect(page.locator(".reaction-mobile-summary")).toBeVisible();
+  await expect(page.locator(".reaction-grid")).toBeHidden();
+
+  await page.getByRole("button", { name: "Change reaction" }).click();
+  const reactions = page.locator("[data-reaction-value]");
+  await expect(reactions).toHaveCount(5);
+  await expect(reactions.first()).toBeVisible();
+  const rowHeights = await reactions.evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().height)));
+  expect(rowHeights.every((height) => height >= 56)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+});
+
+test("tablet keeps all five reaction choices on one row", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "tablet", "The tablet reaction layout is tablet-specific.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+  const grid = page.locator(".reaction-grid");
+  await expect(grid).toBeVisible();
+  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(5);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });
 
 test("the available game and watch-party dialog stay truthful and in-bounds", async ({ page }) => {

@@ -277,3 +277,95 @@ No actionable P0, P1 or P2 differences remain. No P3 follow-up is required for t
 - [x] Unit tests, build and complete Playwright suite passed.
 
 final result: passed
+
+# My Cinema film detail and five-level reaction design QA
+
+## Comparison target
+
+- Release scope: Decision 010, Phase 2A, implementing Decisions 003, 003A, 004 and 006.
+- Source visual truth: the six Claude V2 boards supplied on 25 August 2026:
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection.png`
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection (1).png`
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection (2).png`
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection (3).png`
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection (4).png`
+  - `C:\Users\Cambo\Downloads\Film Detail and Reaction v2-selection (5).png`
+- Rendered implementation: `http://127.0.0.1:4181/moviepicker/?design-preview#my-films` in the Codex in-app Browser.
+- State: approved preview member, Pulp Fiction present in both My Cinema and Cine-Cord, saved level 4 reaction, Favourite on, with My Cinema or Cine-Cord leading according to entry context.
+
+## Viewports, normalization and evidence
+
+The source boards are presentation canvases containing multiple frames and notes. Their app frames were cropped first, then normalized to the browser screenshot pixels before being placed beside the implementation. Browser captures use the requested CSS viewport; the raster buffer excludes the browser scrollbar and a small amount of host chrome.
+
+| Surface and state | CSS viewport | Normalized source pixels | Implementation pixels | Density normalization | Implementation screenshot |
+| --- | ---: | ---: | ---: | --- | --- |
+| Desktop, My Cinema origin, saved level 4 | 1363 × 852 (1440 × 900 design target) | 1364 × 853 | 1364 × 853 | The `2880 × 1800` @2x source frame was reduced to `1440 × 900`, then matched to the browser raster. | `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\desktop-my-cinema-origin-final.png` |
+| Tablet, saved level 4 | 768 × 1025 (768 × 1024 target) | 757 × 1010 | 757 × 1010 | The `1536 × 2048` @2x source frame was reduced to `768 × 1024`, then matched to the browser raster. | `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\tablet-film-detail-final.png` |
+| Phone, Want to Watch and no reaction | 390 × 844 | 379 × 819 | 379 × 819 | The `780 × 1688` @2x source frame was reduced to `390 × 844`, then matched to the browser raster. | `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\phone-before-rating-final.png` |
+| Phone, saved level 4 with editor expanded | 390 × 844 | 379 × 819 | 379 × 819 | The `780 × 1688` @2x source frame was reduced to `390 × 844`, then matched to the browser raster. | `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\phone-saved-expanded-final.png` |
+
+Full-view comparison evidence, with Claude V2 on the left and the local Phase 2A implementation on the right:
+
+- `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\comparisons\desktop-comparison.png`
+- `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\comparisons\tablet-comparison.png`
+- `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\comparisons\phone-before-comparison.png`
+- `C:\Users\Cambo\AppData\Local\Temp\cine-cord-phase2a-qa-20260825\comparisons\phone-saved-expanded-comparison.png`
+
+The saved/expanded phone comparison is also the focused control comparison: at `379 × 819` the summary, Change/Clear actions, current state, Favourite, editor heading, focusable close control and first reaction row remain readable. A separate crop would not reveal additional detail.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the implementation retains Barlow Condensed for film/display headings, Space Grotesk for interface copy and the established monospace label stack. Heading scale, uppercase hierarchy, compact metadata, label spacing and mobile wrapping follow the reference without clipping.
+- Spacing and layout rhythm: desktop keeps the poster/facts rail beside context-ordered panels; tablet uses the film-specific sticky header and poster/title split; phone switches from a large poster-led no-reaction state to the compact saved-reaction layout. Panel borders, violet rules, control spacing and practical touch targets match the source intent.
+- Colors and visual tokens: the existing Discordians charcoal, graphite, grey, white and electric-violet tokens are reused. Saved, focus, active, disabled, private and shared states remain distinct without adding a competing palette.
+- Image quality and asset fidelity: the implementation uses the real Pulp Fiction TMDB poster and all five supplied aligned V2 transparent reaction PNGs. Images keep their intended aspect ratios and use `object-fit`; no placeholder, CSS-drawn, inline-SVG or emoji replacement was introduced.
+- Copy and content: the five approved labels are exact. Privacy consequences are explicit. The implementation deliberately says `TMDB ID 680` instead of presenting the mock's unsupported `TMDB 8.5`, omits a duplicate Suggest action when the film is already shared, and uses real session/Journal facts rather than simulated values.
+- Icons: the existing Material Symbols family supplies back, vote, Favourite, close, search and state marks with consistent weight and alignment.
+- Accessibility and behavior: reactions form one labelled radiogroup with roving tab stops, arrow/Home/End selection, `aria-checked`, a polite save announcement and visible focus. Favourite is a switch, state buttons expose pressed state, and the compact phone state chip expands all three legal states so a member can still choose Did Not Finish while retaining a reaction. Reduced motion removes reaction transitions.
+
+## Primary interactions and runtime checks
+
+- Opened Pulp Fiction from My Films and from The List; the private or shared panel leads according to origin.
+- Switched between Cine-Cord and My Cinema contexts; the full detail destination returned to the top rather than retaining an invalid panel scroll offset.
+- Verified no-reaction, saved, Change reaction, Clear, Favourite, Watched, Want to Watch and Did Not Finish states.
+- Verified Did Not Finish retains a saved level 4 reaction, then restored Watched.
+- Opened the compact phone state editor: all three states became reachable; selecting a state collapsed it again.
+- Searched My Films for `Pulp`, opened details, returned, and confirmed the search remained `Pulp` before clearing it.
+- Checked desktop, tablet and phone document widths; no horizontal page overflow was present.
+- Browser console contained Vite debug/connect messages only, with no application warning or error.
+
+## Comparison history
+
+1. Iteration 1 — blocked by P1: the saved phone layout placed personal state controls before the reaction summary and removed the summary when Change reaction opened. Fix: keep the saved summary and actions first, then place the state controls and a separately bordered expanded editor beneath them. Post-fix evidence: `phone-saved-expanded-comparison.png`.
+2. Iteration 2 — blocked by P2: the first phone no-reaction layout used the compact poster/title treatment intended only for an existing reaction. Fix: add the source's centred large poster and title-below composition for films without a personal reaction, while retaining the compact saved layout. Post-fix evidence: `phone-before-comparison.png` and `phone-saved-expanded-comparison.png`.
+3. Iteration 3 — blocked by P2: the existing member brand header consumed approximately 86 px above the film detail at tablet and phone widths. Fix: use the source's sticky film-detail return header on detail pages while preserving the already-shipped bottom navigation. Post-fix evidence: `tablet-comparison.png` and both phone comparisons.
+4. Iteration 4 — blocked by P2: showing all three state buttons in the default saved phone summary pushed the expanded reaction editor materially lower than the source. Fix: show the current state and Favourite in one row; selecting the current state opens all three states, preserving the DNF-with-reaction path. Post-fix evidence: `phone-saved-expanded-comparison.png` and the browser-tested state editor.
+5. Final pass — no actionable P0, P1 or P2 typography, layout, color, imagery, copy, icon, interaction, accessibility or responsive findings remain.
+
+## Intentional product differences
+
+- The existing approved two-tier phone/tablet navigation remains. Claude's isolated detail frames draw only the primary row, so the implementation reserves more bottom space while keeping every destination reachable and all detail content scrollable.
+- Suggest for Cine-Cord is absent when the film is already on the shared list. Repeating that action would be false and could create a duplicate.
+- Director, certification and TMDB vote average are not invented because the current canonical movie row does not store those fields.
+- The screen uses live or preview workspace facts for votes, sessions and Journal history rather than Claude's presentation-only values.
+
+## Findings
+
+- No actionable P0, P1 or P2 findings remain.
+- P3: Claude notes that the popcorn cup is unusually bright at very small sizes. Removing it cleanly requires a new render from the 3D source; raster erasure would damage the chair and edge light, so the aligned supplied V2 artwork is retained for this release.
+- Complete automated validation passed: 45 unit tests, the production build and emitted-asset check, 55 local database/RLS integration tests, and the isolated Playwright suite on port 4183 with 39 passed and 29 intentionally skipped across phone, tablet, narrow-desktop and desktop projects.
+
+## Implementation checklist
+
+- [x] Replace the selected-film drawer with one contextual full-detail destination.
+- [x] Add My Films search, filters, sort, add-film and private film cards.
+- [x] Keep shared and private controls separate and ordered by entry context.
+- [x] Implement the five-level reaction, Favourite and three personal states.
+- [x] Implement no-reaction, saved, expanded, cleared and DNF-with-reaction behavior.
+- [x] Match desktop, tablet and phone source states with real poster and reaction assets.
+- [x] Preserve mobile navigation, scrollability, practical targets and keyboard/screen-reader semantics.
+- [x] Compare source and implementation in the same composite inputs and recheck after fixes.
+- [x] Check app-origin console output and responsive overflow.
+- [x] Run the complete isolated Playwright suite across all four responsive projects.
+
+final result: passed
