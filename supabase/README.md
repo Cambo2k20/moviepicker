@@ -87,7 +87,7 @@ The frontend remains compatible with the previous function response because a mi
 
 ## Phase 2A personal-film foundation
 
-`20260825021731_add_personal_films.sql` begins the local Phase 2A implementation. It creates one owner-private `personal_films` row per member and canonical movie, containing only the current state, one nullable 1–5 enjoyment rating and the independent Favourite marker. Reviews, private notes, viewing events and personal-list membership remain later migrations.
+`20260825132802_add_personal_films.sql` begins the local Phase 2A implementation. It creates one owner-private `personal_films` row per member and canonical movie, containing only the current state, one nullable 1–5 enjoyment rating and the independent Favourite marker. Reviews, private notes, viewing events and personal-list membership remain later migrations.
 
 The table is owner-only through RLS and also requires the owner to retain approved group membership. Administrators cannot inspect another member's rows. Membership removal hides retained data immediately, while Auth-account deletion cascades through `profiles` and removes the personal rows. Browser privileges are column-limited: members cannot rewrite ownership, canonical identity or audit timestamps.
 
