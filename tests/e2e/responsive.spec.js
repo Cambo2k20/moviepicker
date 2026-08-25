@@ -28,18 +28,51 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
   const grid = page.locator(".poster-grid");
   await expect(grid).toBeVisible();
   const breakpoints = [
-    { width: 1326, height: 780, columns: 6 },
+    { width: 1326, height: 780, columns: 5 },
     { width: 1440, height: 900, columns: 6 },
-    { width: 1600, height: 900, columns: 7 },
+    { width: 1600, height: 900, columns: 6 },
   ];
 
   for (const viewport of breakpoints) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     const columns = await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
-    expect(columns).toBe(viewport.columns);
+    expect(columns, `${viewport.width}px library column count`).toBe(viewport.columns);
     const viewportOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(viewportOverflow).toBeLessThanOrEqual(1);
+  }
+});
+
+test("shared and personal desktop libraries use the same poster scale", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The desktop poster scale is covered once.");
+
+  for (const viewport of [
+    { width: 1920, height: 1080, tolerance: 1 },
+    { width: 2560, height: 1440, tolerance: 3 },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const measurements = {};
+    for (const route of ["list", "my-films"]) {
+      await page.goto(`/moviepicker/?design-preview#${route}`);
+      await expect(page.getByRole("heading", { name: route === "list" ? "The List" : "My Films", exact: true })).toBeVisible();
+      const selector = route === "list" ? ".poster-grid" : ".personal-poster-grid";
+      measurements[route] = await page.locator(selector).evaluate((grid) => {
+        const card = grid.querySelector(".poster-card, .personal-poster-card");
+        return {
+          cardWidth: card.getBoundingClientRect().width,
+          columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+          pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+    }
+
+    expect(
+      Math.abs(measurements.list.cardWidth - measurements["my-films"].cardWidth),
+      `${viewport.width}px poster width difference`,
+    ).toBeLessThanOrEqual(viewport.tolerance);
+    expect(measurements.list.columns, `${viewport.width}px poster column count`).toBe(measurements["my-films"].columns);
+    expect(measurements.list.pageOverflow).toBeLessThanOrEqual(1);
+    expect(measurements["my-films"].pageOverflow).toBeLessThanOrEqual(1);
   }
 });
 

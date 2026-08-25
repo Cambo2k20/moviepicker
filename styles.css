@@ -2962,7 +2962,7 @@ legend,
 
 .poster-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(148px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(165px, 100%), 1fr));
   gap: 26px 18px;
   min-width: 0;
 }
