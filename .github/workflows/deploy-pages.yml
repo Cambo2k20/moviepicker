@@ -16,7 +16,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Start isolated local Supabase services
+        run: npx supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Run authenticated Supabase integration tests
+        run: npm run test:db
+      - name: Stop local Supabase services
+        if: always()
+        continue-on-error: true
+        run: npx supabase stop --no-backup
+
   build-and-deploy:
+    needs: database
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -28,6 +50,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Verify production migration parity
+        env:
+          SUPABASE_MIGRATION_DB_URL: ${{ secrets.SUPABASE_MIGRATION_DB_URL }}
+        run: npm run verify:migrations:remote
       - run: npm run test:unit
       - run: npm run build
       - run: npx playwright install --with-deps chromium

@@ -57,10 +57,11 @@ npm run test:e2e
 
 - `test:unit` covers Roulette rules, the Discord OAuth and sign-in boundary,
   Discord server-profile safety, Discord Journal payload safety and the
-  historical Journal parser.
+  historical Journal parser, optional workspace-failure isolation and the
+  production migration-parity parser.
 - `build` creates `dist/` and fails if a bundled local asset is missing or an unbundled source path remains.
 - `test:e2e` runs the available-mode, image and overflow checks at `390 × 844`, `768 × 1024`, `1142 × 912` and `1440 × 900`. It runs entirely in `?design-preview`, so it proves the interface, not the database.
-- `test:db` runs the Supabase integration suite. It needs a local database and is therefore not part of `npm test` or CI:
+- `test:db` runs the Supabase integration suite. It is not part of the short `npm test` command; CI and the Pages deployment workflow start an isolated loopback Supabase stack before running it. To run it locally:
 
 ```bash
 npx supabase start
@@ -71,7 +72,9 @@ npm run test:db
 
 ## Deployment
 
-`vite.config.js` builds for the GitHub Pages base path `/moviepicker/`. The `Deploy GitHub Pages` workflow validates the project, uploads `dist/` and deploys it on pushes to `main` or a manual workflow dispatch.
+`vite.config.js` builds for the GitHub Pages base path `/moviepicker/`. The `Deploy GitHub Pages` workflow validates the project against a real local Supabase stack, confirms that the checked-in and production migration ledgers match, uploads `dist/` and deploys it on pushes to `main` or a manual workflow dispatch.
+
+The `github-pages` environment must contain a protected `SUPABASE_MIGRATION_DB_URL` secret. Set it to a percent-encoded Postgres connection URL for the production Supabase project. The secret is only read by the `main` deployment job; it is never exposed to pull-request jobs. A missing secret, a pending local migration or a migration found only on production blocks the site deployment before any Pages artifact is uploaded.
 
 GitHub repository settings must use **Pages → Build and deployment → Source: GitHub Actions** before that workflow can replace the older raw-source Pages deployment. Adding the workflow does not change the live site by itself.
 

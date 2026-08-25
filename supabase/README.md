@@ -162,7 +162,7 @@ Fixture setup and ground-truth reads go through `psql` as `postgres` rather than
 
 The harness refuses non-loopback API URLs and derives the database container name from this repository's `project_id`. This is deliberate: the fixtures truncate application tables and delete local Auth users, so `test:db` must never be pointed at a hosted project or an arbitrary Docker container.
 
-The suite is not wired into CI, because CI has no database service. Run it locally before changing anything under `supabase/`.
+The suite runs in both pull-request CI and the Pages deployment workflow. Each job starts this repository's isolated loopback Supabase stack, applies the complete migration chain and stops the containers afterward. Keep running it locally before changing anything under `supabase/`; CI is a second gate, not a substitute for inspecting the database behavior you changed.
 
 `config.toml` was added so the stack can be started at all. Two deliberate choices in it:
 
