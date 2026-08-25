@@ -161,6 +161,7 @@ function authAdminClient() {
 export function resetWorkspace() {
   runSql(`
     truncate table
+      public.personal_films,
       public.journal_archive_entries,
       public.discord_publications,
       public.discord_identities,

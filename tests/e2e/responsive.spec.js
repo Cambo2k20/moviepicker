@@ -26,19 +26,163 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
   }
 });
 
+test("the unified application canvas scales to a comfortable high-resolution density", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The high-resolution canvas contract is covered once.");
+
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const ultrawide = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell");
+    const sidebar = document.querySelector(".sidebar");
+    const shellBox = shell.getBoundingClientRect();
+    const sidebarBox = sidebar.getBoundingClientRect();
+    return {
+      rootZoom: getComputedStyle(document.documentElement).zoom,
+      shellLeft: Math.round(shellBox.left),
+      shellRight: Math.round(shellBox.right),
+      shellWidth: Math.round(shellBox.width),
+      leftGutter: Math.round(shellBox.left),
+      rightGutter: Math.round(window.innerWidth - shellBox.right),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      sidebarWidth: Math.round(sidebarBox.width),
+      sidebarHeight: Math.round(sidebarBox.height),
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      shellBackground: getComputedStyle(shell).backgroundColor,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(ultrawide.rootZoom).toBe("1.5");
+  expect(ultrawide.shellWidth).toBeGreaterThanOrEqual(ultrawide.viewportWidth - 16);
+  expect(ultrawide.shellLeft).toBe(0);
+  expect(ultrawide.shellRight).toBeGreaterThanOrEqual(ultrawide.viewportWidth - 16);
+  expect(ultrawide.leftGutter).toBe(0);
+  expect(ultrawide.rightGutter).toBeLessThanOrEqual(16);
+  expect(ultrawide.sidebarWidth).toBe(402);
+  expect(ultrawide.sidebarHeight).toBe(ultrawide.viewportHeight);
+  expect(ultrawide.bodyBackground).toBe(ultrawide.shellBackground);
+  expect(ultrawide.overflow).toBeLessThanOrEqual(1);
+
+  await page.getByRole("button", { name: "Add film to library" }).click();
+  const dialogGeometry = await page.locator("#film-modal").evaluate((element) => {
+    const layer = element.getBoundingClientRect();
+    const dialog = element.querySelector('[role="dialog"]').getBoundingClientRect();
+    return {
+      layerTop: Math.round(layer.top),
+      layerRight: Math.round(layer.right),
+      layerBottom: Math.round(layer.bottom),
+      layerLeft: Math.round(layer.left),
+      dialogFits: dialog.top >= 0 && dialog.right <= window.innerWidth && dialog.bottom <= window.innerHeight && dialog.left >= 0,
+    };
+  });
+  expect(dialogGeometry).toEqual({
+    layerTop: 0,
+    layerRight: 2560,
+    layerBottom: 1440,
+    layerLeft: 0,
+    dialogFits: true,
+  });
+  await page.getByRole("button", { name: "Close Add Film form" }).click();
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const standardDesktop = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell").getBoundingClientRect();
+    const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+    return {
+      rootZoom: getComputedStyle(document.documentElement).zoom,
+      shellWidth: Math.round(shell.width),
+      shellLeft: Math.round(shell.left),
+      sidebarWidth: Math.round(sidebar.width),
+      sidebarHeight: Math.round(sidebar.height),
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(standardDesktop).toEqual({
+    rootZoom: "1",
+    shellWidth: 1920,
+    shellLeft: 0,
+    sidebarWidth: 268,
+    sidebarHeight: 1080,
+    overflow: 0,
+  });
+
+  const pages = [
+    ["list", "The List"],
+    ["pick", "Watch a Film"],
+    ["sessions", "Sessions"],
+    ["journal", "The Journal"],
+    ["stats", "Group Stats"],
+    ["my-films", "My Films"],
+    ["members", "Members"],
+  ];
+
+  for (const [route, heading] of pages) {
+    await page.goto(`/moviepicker/?design-preview#${route}`);
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    const header = await page.locator(".layout-page-header").evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const rootBox = document.querySelector("#view-root").getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const titleStyle = getComputedStyle(element.querySelector("h1"));
+      return {
+        background: style.backgroundColor,
+        borderTopWidth: style.borderTopWidth,
+        height: Math.round(box.height),
+        leftGutter: Math.round(box.left - rootBox.left),
+        titleSize: titleStyle.fontSize,
+      };
+    });
+    expect(header.background).toBe("rgba(0, 0, 0, 0)");
+    expect(header.borderTopWidth).toBe("0px");
+    expect(header.leftGutter).toBe(44);
+    expect(header.titleSize).toBe("56px");
+    expect(header.height).toBeGreaterThanOrEqual(97);
+    expect(header.height).toBeLessThanOrEqual(108);
+  }
+
+  await page.goto("/moviepicker/?design-preview#list");
+  const controls = await page.evaluate(() => {
+    const select = document.querySelector(".list-toolbar select");
+    const selectStyle = getComputedStyle(select);
+    return {
+      heights: [...document.querySelectorAll(".list-toolbar input, .list-toolbar select, .filter-tabs")]
+        .map((element) => Math.round(element.getBoundingClientRect().height)),
+      appearance: selectStyle.appearance,
+      backgroundImage: selectStyle.backgroundImage,
+    };
+  });
+  expect(controls.heights.every((height) => height === 44)).toBe(true);
+  expect(controls.appearance).toBe("none");
+  expect(controls.backgroundImage).not.toBe("none");
+
+  await page.goto("/moviepicker/?design-preview#pick");
+  await expect(page.locator(".page-view .primary-button")).toHaveCount(1);
+  await expect(page.locator(".page-view .primary-button")).toHaveText("Start a Session");
+  await expect(page.locator(".mode-row.layout-container.layout-container-shared")).toHaveCount(3);
+});
+
 test("area navigation keeps future sections truthful and available routes working", async ({ page }) => {
   const cineCordArea = page.locator('[data-nav-area="cine-cord"]');
   const myCinema = page.locator('[data-nav-area="my-cinema"] .nav-area-toggle');
+  const myCinemaArea = page.locator('[data-nav-area="my-cinema"]');
   const discover = page.locator('[data-nav-area="discover"] .nav-area-toggle');
   const memberProfiles = page.getByRole("button", { name: /Member Profiles/ });
 
   await expect(cineCordArea).toHaveClass(/is-open/);
   await expect(page.locator('[data-view="list"]')).toHaveAttribute("aria-current", "page");
-  await expect(myCinema).toBeDisabled();
-  await expect(myCinema).toContainText(/Private.*Coming soon|Private.*Soon/);
+  await expect(myCinema).toBeEnabled();
+  await expect(myCinema).toContainText("Private");
   await expect(discover).toBeDisabled();
   await expect(discover).toContainText(/Private.*Coming soon|Private.*Soon/);
   await expect(memberProfiles).toBeDisabled();
+
+  await myCinema.click();
+  await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
+  await expect(myCinemaArea).toHaveClass(/is-open/);
+  await expect(page.locator('[data-view="my-films"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: /^Overview(?: Coming soon)?$/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^My Lists(?: Coming soon)?$/ })).toBeDisabled();
 
   await page.locator('[data-nav-area="admin"] .nav-area-toggle').click();
   await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
@@ -90,13 +234,15 @@ test("phone keeps the complete list filters behind the compact filter control", 
 });
 
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop", "Desktop detail-drawer artwork is covered once.");
+  test.skip(testInfo.project.name !== "desktop", "Desktop film-detail artwork is covered once.");
 
   await page.setViewportSize({ width: 1590, height: 1272 });
   await expect(page.getByRole("button", { name: "Add film to library" })).toBeVisible();
-  await expect(page.locator(".list-hero-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
+  await expect(page.locator(".page-header-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
 
   await page.locator("[data-select-film]").first().click();
+  await expect(page.locator(".film-detail-view")).toBeVisible();
+  await expect(page.locator(".film-detail-drawer")).toHaveCount(0);
   const detailPoster = page.locator(".detail-poster");
   await expect(detailPoster).toBeVisible();
   await expect(page.locator("[data-shortlist-film]")).toHaveCount(0);
@@ -121,6 +267,73 @@ test("list actions and desktop film artwork remain clear", async ({ page }, test
 
   const viewportOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(viewportOverflow).toBeLessThanOrEqual(1);
+});
+
+test("My Films stays private and the unified detail follows its entry context", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Context ordering is covered once on desktop.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await expect(page.locator(".personal-poster-card")).toHaveCount(4);
+  await page.getByRole("searchbox", { name: "Search My Films" }).fill("matrix");
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+
+  const panelHeadings = await page.locator(".film-context-panel .context-panel-header").evaluateAll((headers) => headers.map((header) => header.textContent.trim()));
+  expect(panelHeadings[0]).toContain("My Cinema");
+  expect(panelHeadings[1]).toContain("Cine-Cord");
+  await expect(page.locator(".shared-panel")).toHaveClass(/is-compact/);
+
+  await page.getByRole("button", { name: "Back to My Films" }).click();
+  await expect(page.getByRole("searchbox", { name: "Search My Films" })).toHaveValue("matrix");
+  await expect(page.locator(".personal-poster-card")).toHaveCount(1);
+});
+
+test("private reactions save one level and preserve an explicit Did Not Finish state", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The complete reaction keyboard contract is covered once.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+  const didNotFinishState = page.locator('[data-personal-state="DID_NOT_FINISH"]');
+  await didNotFinishState.click();
+
+  const savedReaction = page.getByRole("radio", { name: "Level 4 of 5, Really liked it" });
+  await savedReaction.focus();
+  await savedReaction.press("Home");
+  await expect(page.getByRole("radio", { name: "Level 1 of 5, Didn’t like it" })).toHaveAttribute("aria-checked", "true");
+  await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".reaction-control [role='status']")).toContainText("Saved, Didn’t like it");
+
+  await page.getByRole("button", { name: "Clear reaction" }).click();
+  await expect(page.getByText("No reaction yet", { exact: true })).toBeVisible();
+  await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("switch", { name: /Favourite/ })).toHaveAttribute("aria-checked", "true");
+});
+
+test("phone collapses a saved reaction and expands five full-width touch rows", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "phone", "The saved phone reaction state is phone-specific.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+  await expect(page.locator(".reaction-mobile-summary")).toBeVisible();
+  await expect(page.locator(".reaction-grid")).toBeHidden();
+
+  await page.getByRole("button", { name: "Change reaction" }).click();
+  const reactions = page.locator("[data-reaction-value]");
+  await expect(reactions).toHaveCount(5);
+  await expect(reactions.first()).toBeVisible();
+  const rowHeights = await reactions.evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().height)));
+  expect(rowHeights.every((height) => height >= 56)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+});
+
+test("tablet keeps all five reaction choices on one row", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "tablet", "The tablet reaction layout is tablet-specific.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for The Matrix" }).click();
+  const grid = page.locator(".reaction-grid");
+  await expect(grid).toBeVisible();
+  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(5);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });
 
 test("the available game and watch-party dialog stay truthful and in-bounds", async ({ page }) => {
@@ -201,9 +414,121 @@ test("the signed-in shell shows the Discord server profile without overflowing",
 test("the master Journal keeps archives read-only and current entries actionable", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Journal" }).click();
   await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
-  await expect(page.locator(".journal-totals")).toContainText("2 archived");
-  await expect(page.locator(".journal-totals")).toContainText("1 editable");
+  await expect(page.locator(".journal-header .eyebrow")).toContainText("2 archived");
+  await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
   await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  if (testInfo.project.name === "phone") {
+    const narrowCardGeometry = await page.evaluate(() => ({
+      documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      cards: [...document.querySelectorAll(".journal-entry-card")].map((card) => {
+        const bodyRect = card.querySelector(".journal-entry-body").getBoundingClientRect();
+        const actionsRect = card.querySelector(".journal-entry-actions").getBoundingClientRect();
+        const actionButtons = card.querySelector(".journal-entry-action-buttons");
+        const buttonRects = [...actionButtons.children].map((button) => button.getBoundingClientRect());
+        return {
+          footerDirection: getComputedStyle(card.querySelector(".journal-entry-actions")).flexDirection,
+          actionColumns: getComputedStyle(actionButtons).gridTemplateColumns.split(" ").length,
+          footerBelowBody: Math.round(actionsRect.top - bodyRect.bottom),
+          footerOverflow: actionsRect.width < card.querySelector(".journal-entry-actions").scrollWidth,
+          buttonsFillFooter: buttonRects.every((rect) => Math.abs(rect.width - actionButtons.getBoundingClientRect().width) <= 1),
+          minimumButtonHeight: Math.min(...buttonRects.map((rect) => Math.round(rect.height))),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        };
+      }),
+    }));
+    expect(narrowCardGeometry.documentOverflow).toBeLessThanOrEqual(1);
+    expect(narrowCardGeometry.cards.every(({ footerDirection, actionColumns }) => footerDirection === "column" && actionColumns === 1)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ footerBelowBody }) => footerBelowBody === 0)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ footerOverflow, buttonsFillFooter }) => !footerOverflow && buttonsFillFooter)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ minimumButtonHeight }) => minimumButtonHeight >= 44)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ contentOverflow }) => contentOverflow <= 1)).toBe(true);
+  }
+  if (testInfo.project.name === "tablet") {
+    const tabletCardGeometry = await page.evaluate(() => ({
+      documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      cards: [...document.querySelectorAll(".journal-entry-card")].map((card) => {
+        const footer = card.querySelector(".journal-entry-actions");
+        const actionButtons = card.querySelector(".journal-entry-action-buttons");
+        return {
+          footerDirection: getComputedStyle(footer).flexDirection,
+          actionColumns: getComputedStyle(actionButtons).gridTemplateColumns.split(" ").length,
+          footerOverflow: footer.scrollWidth - footer.clientWidth,
+          minimumButtonHeight: Math.min(...[...actionButtons.children].map((button) => Math.round(button.getBoundingClientRect().height))),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        };
+      }),
+    }));
+    expect(tabletCardGeometry.documentOverflow).toBeLessThanOrEqual(1);
+    expect(tabletCardGeometry.cards.map(({ footerDirection }) => footerDirection)).toEqual(["column", "column", "column"]);
+    expect(tabletCardGeometry.cards.map(({ actionColumns }) => actionColumns)).toEqual([2, 1, 1]);
+    expect(tabletCardGeometry.cards.every(({ footerOverflow, contentOverflow }) => footerOverflow <= 1 && contentOverflow <= 1)).toBe(true);
+    expect(tabletCardGeometry.cards.every(({ minimumButtonHeight }) => minimumButtonHeight >= 44)).toBe(true);
+  }
+  if (testInfo.project.name === "desktop") {
+    const journalGeometry = await page.evaluate(() => {
+      const list = document.querySelector(".journal-entry-list");
+      const cards = [...document.querySelectorAll(".journal-entry-card")];
+      const currentCard = cards[0];
+      const currentBody = currentCard.querySelector(".journal-entry-body");
+      const currentActions = currentCard.querySelector(".journal-entry-actions");
+      const currentTitle = currentCard.querySelector("h2");
+      const currentYear = currentCard.querySelector(".journal-entry-year");
+      const listStyle = getComputedStyle(list);
+      const bodyRect = currentBody.getBoundingClientRect();
+      const actionsRect = currentActions.getBoundingClientRect();
+      const titleRect = currentTitle.getBoundingClientRect();
+      const yearRect = currentYear.getBoundingClientRect();
+      return {
+        listWidth: Math.round(list.getBoundingClientRect().width),
+        listMarginTop: Math.round(Number.parseFloat(listStyle.marginTop)),
+        listGap: Math.round(Number.parseFloat(listStyle.gap)),
+        cards: cards.map((card) => ({
+          width: Math.round(card.getBoundingClientRect().width),
+          height: Math.round(card.getBoundingClientRect().height),
+          titleSize: Math.round(Number.parseFloat(getComputedStyle(card.querySelector("h2")).fontSize)),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        })),
+        footerWidth: Math.round(actionsRect.width),
+        footerHeight: Math.round(actionsRect.height),
+        footerBelowBody: Math.round(actionsRect.top - bodyRect.bottom),
+        footerDirection: getComputedStyle(currentActions).flexDirection,
+        footerOverflow: currentActions.scrollWidth - currentActions.clientWidth,
+        titleYearGap: Math.round(yearRect.left - titleRect.right),
+        actionCounts: cards.map((card) => card.querySelectorAll(".journal-entry-action-buttons > *").length),
+        actionOrder: [...currentCard.querySelectorAll(".journal-entry-action-buttons > *")].map((action) => action.textContent.replace(action.querySelector(".material-symbols-outlined")?.textContent || "", "").trim()),
+        actionLevels: [...currentCard.querySelectorAll(".journal-entry-action-buttons > *")].map((action) => action.classList.contains("primary-button") ? "primary" : (action.classList.contains("secondary-button") ? "secondary" : "quiet")),
+        title: currentTitle.textContent.trim(),
+        year: currentYear.textContent.trim(),
+        facts: [...currentCard.querySelectorAll(".journal-entry-fact")].map((fact) => fact.textContent.trim().replace(/\s+/g, " ")),
+        comment: currentCard.querySelector(".journal-entry-comment").textContent.trim(),
+      };
+    });
+    const { cards, ...journalLayout } = journalGeometry;
+    expect(journalLayout).toEqual({
+      listWidth: 1000,
+      listMarginTop: 12,
+      listGap: 20,
+      footerWidth: 998,
+      footerHeight: 60,
+      footerBelowBody: 0,
+      footerDirection: "row",
+      footerOverflow: 0,
+      titleYearGap: 10,
+      actionCounts: [4, 1, 1],
+      actionOrder: ["Update Discord post", "View in Discord", "Copy for Discord", "Edit"],
+      actionLevels: ["primary", "secondary", "quiet", "quiet"],
+      title: "Filth",
+      year: "2013",
+      facts: ["Viewers — Dean, Kieran", "Recorded by Cameron"],
+      comment: "Same rules still apply — corrected on Cine-Cord after posting.",
+    });
+    expect(cards.map(({ width, titleSize, contentOverflow }) => ({ width, titleSize, contentOverflow }))).toEqual([
+      { width: 1000, titleSize: 28, contentOverflow: 1 },
+      { width: 1000, titleSize: 25, contentOverflow: 1 },
+      { width: 1000, titleSize: 28, contentOverflow: 1 },
+    ]);
+    expect(cards.every(({ height }) => height >= 216 && height <= 220)).toBe(true);
+  }
   await expect(page.locator(".journal-entry-card.is-archive [data-edit-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-delete-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-journal-entry-form]")).toHaveCount(0);
@@ -244,7 +569,7 @@ test("the master Journal keeps archives read-only and current entries actionable
     await page.getByRole("button", { name: "Delete entry" }).click();
     await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
     await expect(page.locator("#toast")).toContainText("and its Discord post were deleted");
-    await expect(page.locator(".journal-totals")).toContainText("0 editable");
+    await expect(page.locator(".journal-header .eyebrow")).toContainText("0 editable");
     await expect(page.locator(".journal-entry-card")).toHaveCount(0);
   }
 
@@ -267,7 +592,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   if (testInfo.project.name === "desktop") {
     await page.setViewportSize({ width: 1430, height: 804 });
     const titleFontSize = await page.locator("#roulette-title").evaluate((title) => parseFloat(getComputedStyle(title).fontSize));
-    expect(titleFontSize).toBe(65);
+    expect(titleFontSize).toBe(56);
   }
 
   const chanceRows = page.locator(".roulette-chance-strip .roulette-chance-row");

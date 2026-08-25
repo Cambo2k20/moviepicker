@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260825-area-navigation-v41" />
+  <link rel="stylesheet" href="./styles.css?v=20260825-layout-system-v15" />
 </head>
 <body>
   <div class="app-shell">
@@ -53,10 +53,16 @@
           </div>
         </section>
 
-        <section class="nav-area is-unavailable" data-nav-area="my-cinema">
-          <button class="nav-area-toggle" type="button" disabled aria-disabled="true">
-            <span class="nav-area-copy"><strong>My Cinema</strong><small><span class="nav-status-wide">Private · Coming soon</span><span class="nav-status-compact">Private · Soon</span></small></span>
+        <section class="nav-area" data-nav-area="my-cinema">
+          <button class="nav-area-toggle" type="button" data-nav-area-toggle="my-cinema" data-default-view="my-films" aria-expanded="false" aria-controls="my-cinema-destinations">
+            <span class="nav-area-copy"><strong>My Cinema</strong><small>Private</small></span>
+            <span class="nav-area-chevron material-symbols-outlined" aria-hidden="true">chevron_right</span>
           </button>
+          <div id="my-cinema-destinations" class="nav-destinations">
+            <button class="nav-item is-unavailable" type="button" disabled aria-disabled="true"><span class="nav-marker" aria-hidden="true"></span><span>Overview</span><small>Coming soon</small></button>
+            <button class="nav-item" type="button" data-view="my-films"><span class="nav-marker" aria-hidden="true"></span><span>My Films</span></button>
+            <button class="nav-item is-unavailable" type="button" disabled aria-disabled="true"><span class="nav-marker" aria-hidden="true"></span><span>My Lists</span><small>Coming soon</small></button>
+          </div>
         </section>
 
         <section class="nav-area is-unavailable" data-nav-area="discover">
@@ -126,7 +132,7 @@
             <label class="choice-row is-unavailable"><input type="radio" name="mode" value="Reel Bracket" disabled /><span><strong>Reel Bracket · Coming soon</strong><small>Head-to-head voting is not implemented yet.</small></span></label>
           </div>
         </fieldset>
-        <button class="primary-button full-width" type="submit">Create Watch Party <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+        <button class="primary-button full-width" type="submit">Create Watch Party</button>
       </form>
     </section>
   </div>
@@ -136,14 +142,14 @@
       <button class="icon-button modal-close" type="button" data-close-film aria-label="Close Add Film form">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
-      <p class="eyebrow">Shared list</p>
+      <p id="film-form-eyebrow" class="eyebrow">Shared list</p>
       <h2 id="film-form-title">Add a film</h2>
       <p id="film-form-intro" class="modal-intro">Search TMDB for the correct film, poster and details.</p>
 
       <form id="film-form" class="access-form">
         <label><span>Film title</span><input name="title" required maxlength="200" placeholder="What should we watch?" /></label>
         <label><span>Release year <small>(optional)</small></span><input name="year" inputmode="numeric" maxlength="4" placeholder="e.g. 1982" /></label>
-        <button class="primary-button full-width" type="submit">Find Movie <span class="material-symbols-outlined" aria-hidden="true">search</span></button>
+        <button class="primary-button full-width" type="submit"><span class="material-symbols-outlined" aria-hidden="true">search</span>Find Movie</button>
       </form>
 
       <div id="film-search-status" class="film-search-status" role="status" aria-live="polite" hidden></div>
@@ -182,6 +188,6 @@
       }
     }
   </script>
-  <script type="module" src="./app.js?v=20260825-area-navigation-v36"></script>
+  <script type="module" src="./app.js?v=20260825-layout-system-v15"></script>
 </body>
 </html>

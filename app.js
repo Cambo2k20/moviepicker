@@ -16,6 +16,16 @@ import {
   preferredAuthDisplayName,
   withoutOAuthError,
 } from "./auth-core.js";
+import {
+  PERSONAL_FILM_STATES,
+  REACTION_LEVELS,
+  applyPersonalFilmPatch,
+  findFilmByIdentity,
+  getVisiblePersonalFilms,
+  normalisePersonalFilm,
+  personalStateLabel,
+  reactionForValue,
+} from "./personal-films-core.js";
 
 const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
@@ -38,6 +48,13 @@ const imageAssets = {
   andrew: new URL("./assets/avatar-andrew.png", import.meta.url).href,
   ross: new URL("./assets/avatar-ross.png", import.meta.url).href,
   journalFallback: new URL("./assets/hero-journal-web.png", import.meta.url).href,
+  reactions: {
+    1: new URL("./assets/reaction-1-didnt-like-it-v2.png", import.meta.url).href,
+    2: new URL("./assets/reaction-2-not-for-me-v2.png", import.meta.url).href,
+    3: new URL("./assets/reaction-3-it-was-okay-v2.png", import.meta.url).href,
+    4: new URL("./assets/reaction-4-really-liked-it-v2.png", import.meta.url).href,
+    5: new URL("./assets/reaction-5-loved-it-v2.png", import.meta.url).href,
+  },
 };
 const knownAvatars = {
   cameron: imageAssets.cameron,
@@ -67,6 +84,7 @@ const journalDeleteConfirm = document.querySelector("#journal-delete-confirm");
 const partyMembers = document.querySelector("#party-members");
 const partyForm = document.querySelector("#party-form");
 const filmForm = document.querySelector("#film-form");
+const filmFormEyebrow = document.querySelector("#film-form-eyebrow");
 const filmFormTitle = document.querySelector("#film-form-title");
 const filmFormIntro = document.querySelector("#film-form-intro");
 const filmSearchStatus = document.querySelector("#film-search-status");
@@ -91,6 +109,7 @@ let members = [];
 let accessRequest = null;
 let joinRequests = [];
 let movieList = [];
+let personalFilms = [];
 let activeSession = null;
 let sessionHistory = [];
 let journalCatalog = [];
@@ -120,11 +139,20 @@ let listSort = "votes";
 let genreFilter = "all";
 let memberFilter = "all";
 let listFiltersOpen = false;
+let myFilmsQuery = "";
+let myFilmsFilter = "all";
+let myFilmsSort = "updated";
+let myFilmsFiltersOpen = false;
 let selectedFilmId = null;
+let filmDetailReturnScrollY = 0;
+let reactionEditorExpanded = false;
+let personalStateEditorExpanded = false;
+let reactionLiveMessage = "";
 let rouletteState = null;
 let rouletteSpinTimer = null;
 let rouletteSpinToken = 0;
 let filmEditingId = null;
+let filmModalPurpose = "shared";
 let pendingFilmDraft = null;
 let authMode = "signin";
 let discordAuthEnabled = false;
@@ -156,7 +184,8 @@ function persistDesignPreviewWorkspace() {
       journalSessionId,
       discordDraft,
       previewNextEntryNumber,
-      watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn }) => ({ id, watched, watchCount, lastWatchedOn })),
+      personalFilms,
+      watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn, votes, votedByMe }) => ({ id, watched, watchCount, lastWatchedOn, votes, votedByMe })),
     }));
   } catch { /* a full or blocked store must not break the preview */ }
 }
@@ -172,8 +201,11 @@ function restoreDesignPreviewWorkspace() {
       item.watched = Boolean(entry.watched);
       item.watchCount = Number(entry.watchCount) || 0;
       item.lastWatchedOn = entry.lastWatchedOn || null;
+      if (Number.isFinite(Number(entry.votes))) item.votes = Math.max(0, Number(entry.votes));
+      if (Object.hasOwn(entry, "votedByMe")) item.votedByMe = Boolean(entry.votedByMe);
     }
   }
+  if (Array.isArray(saved.personalFilms)) personalFilms = saved.personalFilms.map(normalisePersonalFilm);
   activeSession = saved.activeSession || null;
   sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
   journalSessionId = null;
@@ -223,6 +255,7 @@ function loadDesignPreviewWorkspace() {
   movieList = [
     { id: "preview-alien", title: "Alien", year: 1979, posterUrl: "https://image.tmdb.org/t/p/w500/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg", runtime: 117, genres: ["Horror", "Science Fiction"], overview: "During its return to Earth, the crew of the commercial spacecraft Nostromo encounters a deadly lifeform.", createdAt: "2025-11-02T20:00:00Z", suggestedBy: "Dean", suggestedById: "preview-dean", votes: 3, votedByMe: false, watched: false, tmdbId: 348 },
     { id: "preview-matrix", title: "The Matrix", year: 1999, posterUrl: "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", runtime: 136, genres: ["Action", "Science Fiction"], overview: "A computer hacker discovers that the world he knows is a simulated reality and joins a rebellion to break free.", createdAt: "2026-01-14T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 2, votedByMe: true, watched: false, tmdbId: 603 },
+    { id: "preview-pulp-fiction", title: "Pulp Fiction", year: 1994, posterUrl: "https://image.tmdb.org/t/p/w500/d5iIlFn5s0ImszYzBPb8JPIfbXD.jpg", runtime: 154, genres: ["Crime", "Drama"], overview: "The lives of two mob hitmen, a boxer, a gangster’s wife and a pair of diner bandits intertwine in four tales of violence and redemption.", createdAt: "2026-03-14T20:00:00Z", suggestedBy: "Dean", suggestedById: "preview-dean", votes: 3, votedByMe: false, watched: false, tmdbId: 680 },
     { id: "preview-home-alone", title: "Home Alone", year: 1990, posterUrl: "https://image.tmdb.org/t/p/w500/onTSipZ8R3bliBdKfPtsDuHTdlL.jpg", runtime: 103, genres: ["Comedy", "Family"], overview: "An eight-year-old is accidentally left home alone and must defend the house from two determined burglars.", createdAt: "2026-03-18T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 771 },
     { id: "preview-interstellar", title: "Interstellar", year: 2014, posterUrl: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", runtime: 169, genres: ["Adventure", "Drama", "Science Fiction"], overview: "Explorers travel through a wormhole in space in an attempt to ensure humanity's survival.", createdAt: "2026-05-10T20:00:00Z", suggestedBy: "Andrew", suggestedById: "preview-andrew", votes: 4, votedByMe: false, watched: false, tmdbId: 157336 },
     { id: "preview-fight-club", title: "Fight Club", year: 1999, posterUrl: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", runtime: 139, genres: ["Drama"], overview: "A disillusioned office worker and a soap maker form an underground club that evolves into something far larger.", createdAt: "2026-06-07T20:00:00Z", suggestedBy: "Ross", suggestedById: "preview-ross", votes: 2, votedByMe: false, watched: false, tmdbId: 550 },
@@ -230,7 +263,62 @@ function loadDesignPreviewWorkspace() {
     { id: "preview-inception", title: "Inception", year: 2010, posterUrl: "https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", runtime: 148, genres: ["Action", "Science Fiction", "Thriller"], overview: "A skilled extractor is offered a chance to erase his past crimes by planting an idea in another person's mind.", createdAt: "2026-07-24T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 3, votedByMe: false, watched: false, tmdbId: 27205 },
     { id: "preview-martian", title: "The Martian", year: 2015, posterUrl: "https://image.tmdb.org/t/p/w500/5BHuvQ6p9kfc091Z8RiFNhCwL4b.jpg", runtime: 144, genres: ["Adventure", "Drama", "Science Fiction"], overview: "An astronaut stranded on Mars must rely on ingenuity and determination while Earth works to bring him home.", createdAt: "2026-08-20T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 286217 },
   ];
-  for (const item of movieList) item.watchCount = 0;
+  for (const item of movieList) {
+    item.movieId = `preview-movie-${item.tmdbId}`;
+    item.watchCount = 0;
+  }
+  personalFilms = [
+    normalisePersonalFilm({
+      id: "preview-personal-pulp-fiction",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      state: "WATCHED",
+      rating: 4,
+      isFavourite: true,
+      createdAt: "2026-03-14T20:00:00Z",
+      updatedAt: "2026-08-24T20:00:00Z",
+      title: "Pulp Fiction",
+      year: 1994,
+      tmdbId: 680,
+      posterPath: "/d5iIlFn5s0ImszYzBPb8JPIfbXD.jpg",
+      runtime: 154,
+      genres: ["Crime", "Drama"],
+      overview: "The lives of two mob hitmen, a boxer, a gangster’s wife and a pair of diner bandits intertwine in four tales of violence and redemption.",
+    }),
+    normalisePersonalFilm({
+      ...movieList.find((item) => item.tmdbId === 603),
+      id: "preview-personal-matrix",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-603",
+      state: "WATCHED",
+      rating: 4,
+      isFavourite: true,
+      createdAt: "2026-01-15T20:00:00Z",
+      updatedAt: "2026-08-21T20:00:00Z",
+    }),
+    normalisePersonalFilm({
+      ...movieList.find((item) => item.tmdbId === 348),
+      id: "preview-personal-alien",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-348",
+      state: "WANT_TO_WATCH",
+      rating: null,
+      isFavourite: false,
+      createdAt: "2026-08-17T20:00:00Z",
+      updatedAt: "2026-08-17T20:00:00Z",
+    }),
+    normalisePersonalFilm({
+      ...movieList.find((item) => item.tmdbId === 129),
+      id: "preview-personal-spirited-away",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-129",
+      state: "WATCHED",
+      rating: 5,
+      isFavourite: false,
+      createdAt: "2026-07-04T20:00:00Z",
+      updatedAt: "2026-08-12T20:00:00Z",
+    }),
+  ];
   isLoading = false;
   restoreDesignPreviewWorkspace();
   journalCatalog = [
@@ -398,7 +486,8 @@ function filmPoster(item) {
 }
 
 function tmdbPoster(path, size = "w500") {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : imageAssets.journalFallback;
+  if (!path) return imageAssets.journalFallback;
+  return path.startsWith("http") ? path : `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
 function runtimeLabel(item) {
@@ -1233,6 +1322,31 @@ function metadataPayload(movie) {
 }
 
 async function lookupMovie(body) {
+  if (designPreviewMode) {
+    const catalog = [...new Map([...movieList, ...personalFilms].map((film) => [Number(film.tmdbId), film])).values()];
+    if (body?.action === "search") {
+      const query = String(body.query || "").trim().toLocaleLowerCase();
+      const year = body.year === null || body.year === undefined || body.year === "" ? null : Number(body.year);
+      const matches = catalog
+        .filter((film) => (!query || film.title.toLocaleLowerCase().includes(query)) && (!year || Number(film.year) === year))
+        .slice(0, 6)
+        .map((film) => ({ tmdbId: film.tmdbId, title: film.title, year: film.year, posterPath: film.posterPath || film.posterUrl, overview: film.overview }));
+      return { matches };
+    }
+    if (body?.action === "details") {
+      const film = catalog.find((candidate) => Number(candidate.tmdbId) === Number(body.tmdbId));
+      return { movie: film ? {
+        movieId: film.movieId,
+        tmdbId: film.tmdbId,
+        title: film.title,
+        year: film.year,
+        posterPath: film.posterPath || film.posterUrl,
+        runtime: film.runtime,
+        genres: film.genres,
+        overview: film.overview,
+      } : null };
+    }
+  }
   const { data, error } = await supabase.functions.invoke("movie-lookup", { body });
   if (error) {
     let message = error.message || "Movie lookup failed.";
@@ -1246,6 +1360,93 @@ async function lookupMovie(body) {
   }
   if (data?.error) throw new Error(data.error);
   return data;
+}
+
+const PERSONAL_FILM_SELECT = "id,owner_id,movie_id,state,rating,is_favourite,created_at,updated_at,movies(id,tmdb_id,title,release_year,poster_path,runtime_minutes,genres,overview,metadata_updated_at)";
+
+function personalWritePatch(existing, patch) {
+  const payload = {};
+  if (Object.hasOwn(patch, "state")) payload.state = patch.state;
+  if (Object.hasOwn(patch, "rating")) payload.rating = patch.rating;
+  if (Object.hasOwn(patch, "isFavourite")) payload.is_favourite = Boolean(patch.isFavourite);
+  if (Object.hasOwn(patch, "state") && (patch.state === "WANT_TO_WATCH" || patch.state === null) && existing?.rating !== null) payload.rating = null;
+  return payload;
+}
+
+function replacePersonalFilm(film) {
+  const existingIndex = personalFilms.findIndex((candidate) => candidate.id === film.id);
+  if (existingIndex >= 0) personalFilms.splice(existingIndex, 1, film);
+  else personalFilms.unshift(film);
+}
+
+async function savePersonalFilm(movie, patch) {
+  if (!authUser || !activeGroup || !movie?.movieId) throw new Error("This film needs matched movie details before it can be saved privately.");
+  const existing = findFilmByIdentity(personalFilms, movie);
+  const writePatch = personalWritePatch(existing, patch);
+  if (designPreviewMode) {
+    const saved = applyPersonalFilmPatch(existing, movie, patch, {
+      id: existing?.id || `preview-personal-${movie.tmdbId || Date.now()}`,
+      ownerId: authUser.id,
+    });
+    replacePersonalFilm(saved);
+    persistDesignPreviewWorkspace();
+    return saved;
+  }
+
+  const query = existing
+    ? supabase.from("personal_films").update(writePatch).eq("id", existing.id)
+    : supabase.from("personal_films").insert({ owner_id: authUser.id, movie_id: movie.movieId, ...writePatch });
+  const { data, error } = await query.select(PERSONAL_FILM_SELECT).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("No private film row was saved. Refresh before trying again.");
+  const saved = normalisePersonalFilm(data);
+  replacePersonalFilm(saved);
+  return saved;
+}
+
+async function removePersonalFilm(film) {
+  const existing = findFilmByIdentity(personalFilms, film);
+  if (!existing) return;
+  if (designPreviewMode) {
+    personalFilms = personalFilms.filter((candidate) => candidate.id !== existing.id);
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { data, error } = await supabase.from("personal_films").delete().eq("id", existing.id).select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The private film was not removed. Refresh before trying again.");
+  personalFilms = personalFilms.filter((candidate) => candidate.id !== existing.id);
+}
+
+async function suggestPersonalFilm(movie) {
+  if (!authUser || !activeGroup || !movie?.movieId) throw new Error("This film needs matched movie details before it can be suggested.");
+  const existing = findFilmByIdentity(movieList, movie);
+  if (existing) return existing;
+  if (designPreviewMode) {
+    const item = {
+      ...movie,
+      id: `preview-shared-${movie.tmdbId || Date.now()}`,
+      suggestedById: authUser.id,
+      suggestedBy: currentProfile?.displayName || "Cameron",
+      createdAt: new Date().toISOString(),
+      watched: false,
+      watchCount: 0,
+      votes: 0,
+      votedByMe: false,
+    };
+    movieList.push(item);
+    persistDesignPreviewWorkspace();
+    return item;
+  }
+  const { data, error } = await supabase.from("queue_items").insert({
+    group_id: activeGroup.id,
+    suggested_by: authUser.id,
+    ...metadataPayload(movie),
+  }).select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The shared suggestion was not saved. Refresh before trying again.");
+  await loadWorkspace();
+  return findFilmByIdentity(movieList, movie);
 }
 
 async function saveMovie(movie = null) {
@@ -1522,40 +1723,208 @@ function renderFilmCard(item) {
     </article>`;
 }
 
-function renderFilmDetails(item) {
+function selectedFilmContext() {
+  if (currentView === "my-films") {
+    const personal = personalFilms.find((film) => film.id === selectedFilmId) || null;
+    if (!personal) return null;
+    const shared = findFilmByIdentity(movieList, personal);
+    return { origin: "my-films", movie: personal, personal, shared };
+  }
+  const shared = movieList.find((film) => film.id === selectedFilmId) || null;
+  if (!shared) return null;
+  const personal = findFilmByIdentity(personalFilms, shared);
+  return { origin: "list", movie: personal ? { ...shared, ...personal } : shared, personal, shared };
+}
+
+function filmMatchesSession(film, session) {
+  const selected = selectedFilmForSession(session);
+  return Boolean(selected && findFilmByIdentity([selected], film));
+}
+
+function renderReactionControl(movie, personal) {
+  const savedReaction = reactionForValue(personal?.rating);
+  const collapsedOnPhone = Boolean(savedReaction && !reactionEditorExpanded);
+  const savedMessage = savedReaction ? `Saved · ${savedReaction.label}` : "No reaction yet";
   return `
-    <button class="detail-scrim" type="button" data-close-film-details aria-label="Close film details"></button>
-    <aside class="film-detail-drawer" aria-labelledby="film-detail-title" tabindex="-1">
-      <div class="detail-drawer-head"><span class="eyebrow">Selected film</span><button class="icon-button" type="button" data-close-film-details aria-label="Close film details"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
-      <div class="detail-poster ${item.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${item.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
-      <div class="detail-title-row"><div><h2 id="film-detail-title">${escapeHTML(item.title)}</h2><p>${item.year ? escapeHTML(item.year) : "Year pending"}</p></div><span class="status-pill ${item.watched ? "watched" : "ready"}">${escapeHTML(watchHistoryLabel(item))}</span></div>
-      <div class="detail-facts"><span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>${escapeHTML(runtimeLabel(item))}</span>${item.genres.map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>
-      <dl class="detail-ledger"><div><dt>Added by</dt><dd><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" />${escapeHTML(item.suggestedBy)}</dd></div><div><dt>On the list</dt><dd>${escapeHTML(formatAddedDate(item.createdAt))}</dd></div><div><dt>Group votes</dt><dd>${item.votes}</dd></div></dl>
-      <p class="detail-overview">${escapeHTML(item.overview || "Full movie details will appear here once this list entry is matched with TMDB. You can still vote for it and use it in Watch a Film now.")}</p>
-      <div class="detail-actions">
-        <button class="secondary-button" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${item.votedByMe ? "Remove vote" : "Vote"} · ${item.votes}</button>
-        ${canManageFilm(item) ? `<button class="detail-text-action" type="button" data-match-film="${item.id}">${item.tmdbId ? "Refresh movie details" : "Find poster and details"}</button><button class="detail-text-action" type="button" data-toggle-watched="${item.id}">${item.watched ? "Return to ready list" : "Mark as watched"}</button><button class="detail-text-action danger" type="button" data-remove-film="${item.id}">Remove from list</button>` : ""}
+    <section class="reaction-control ${savedReaction ? "has-saved-reaction" : ""} ${collapsedOnPhone ? "is-collapsed-phone" : ""}" aria-labelledby="reaction-question">
+      <div class="reaction-heading"><span id="reaction-question">How much did you enjoy it?</span><strong>${escapeHTML(savedMessage)}</strong></div>
+      ${savedReaction ? `<div class="reaction-mobile-summary"><img src="${escapeHTML(imageAssets.reactions[savedReaction.value])}" alt="" /><span><small>Saved · Level ${savedReaction.value} of 5</small><strong>${escapeHTML(savedReaction.label)}</strong></span></div><div class="reaction-mobile-actions"><button class="secondary-button" type="button" data-change-reaction>Change reaction</button><button class="detail-text-action" type="button" data-clear-reaction>Clear</button></div>` : ""}
+      <div class="reaction-editor-shell">
+        ${savedReaction ? `<div class="reaction-mobile-editor-heading"><span>Change reaction · Expanded</span><button class="icon-button" type="button" data-collapse-reaction aria-label="Close reaction choices"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>` : ""}
+        <div class="reaction-grid" role="radiogroup" aria-labelledby="reaction-question">${REACTION_LEVELS.map((reaction, index) => {
+        const selected = reaction.value === savedReaction?.value;
+        const tabIndex = selected || (!savedReaction && index === 0) ? 0 : -1;
+        return `<button class="reaction-choice ${selected ? "is-saved" : ""}" type="button" role="radio" aria-checked="${selected}" aria-label="Level ${reaction.value} of 5, ${escapeHTML(reaction.label)}" tabindex="${tabIndex}" data-reaction-value="${reaction.value}"><span class="reaction-number" aria-hidden="true">${reaction.value}</span><span class="reaction-art"><img src="${escapeHTML(imageAssets.reactions[reaction.value])}" alt="" />${selected ? `<span class="reaction-check material-symbols-outlined" aria-hidden="true">check</span>` : ""}</span><strong>${escapeHTML(reaction.label)}</strong></button>`;
+        }).join("")}</div>
       </div>
-    </aside>`;
+      <p class="reaction-consequence">Rating adds this film to My Cinema and marks it Watched. A Did Not Finish state stays Did Not Finish. Your reaction stays private and never changes Cine-Cord.</p>
+      ${savedReaction ? `<button class="detail-text-action reaction-clear-desktop" type="button" data-clear-reaction>Clear reaction</button>` : ""}
+      <span class="sr-only" role="status" aria-live="polite">${escapeHTML(reactionLiveMessage)}</span>
+    </section>`;
+}
+
+function renderPageHeader({ id, eyebrow, title, description = "", actions = "", className = "", titleClass = "page-title" }) {
+  return `
+    <header class="page-header layout-page-header ${className}">
+      <div class="layout-page-header-copy">
+        <span class="eyebrow">${escapeHTML(eyebrow)}</span>
+        <h1 id="${id}" class="${titleClass}">${escapeHTML(title)}</h1>
+        ${description ? `<p class="page-subtitle">${escapeHTML(description)}</p>` : ""}
+      </div>
+      ${actions ? `<div class="page-header-actions">${actions}</div>` : ""}
+    </header>`;
+}
+
+function renderPrivateFilmPanel(context) {
+  const { movie, personal } = context;
+  if (!personal) {
+    return `
+      <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
+        <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Not in your library</span><small>Adding is private · The group is not told</small></header>
+        <div class="private-empty-actions">
+          <button class="secondary-button" type="button" data-personal-state="WANT_TO_WATCH" ${movie.movieId ? "" : "disabled"}><span class="material-symbols-outlined" aria-hidden="true">add</span>Add to Want to Watch</button>
+          <button class="secondary-button" type="button" data-open-reaction ${movie.movieId ? "" : "disabled"}>I have seen it — rate it</button>
+          <p>${movie.movieId ? "Rating opens the five reactions and adds the film to My Cinema for you only." : "Match this film with TMDB before saving private state."}</p>
+        </div>
+        ${reactionEditorExpanded && movie.movieId ? renderReactionControl(movie, null) : ""}
+      </section>`;
+  }
+
+  const stateButtons = PERSONAL_FILM_STATES.map((state) => {
+    const active = personal.state === state.value;
+    const phoneStateEditorAttributes = active && personal.rating
+      ? `data-toggle-personal-state-editor aria-expanded="${personalStateEditorExpanded}" aria-label="Change state, currently ${escapeHTML(state.label)}"`
+      : "";
+    return `<button class="private-state-button ${active ? "is-active" : ""}" type="button" data-personal-state="${state.value}" aria-pressed="${active}" ${phoneStateEditorAttributes}>${active ? `<span class="nav-marker" aria-hidden="true"></span>` : ""}${escapeHTML(state.label)}</button>`;
+  }).join("");
+  const savedPhoneReaction = personal.rating ? "has-phone-saved-reaction" : "";
+  const collapsedPhoneReaction = personal.rating && !reactionEditorExpanded ? "has-collapsed-phone-reaction" : "";
+  return `
+    <section class="film-context-panel private-panel layout-container layout-container-private ${savedPhoneReaction} ${collapsedPhoneReaction} ${personalStateEditorExpanded ? "is-phone-state-editor-open" : ""}" aria-labelledby="private-panel-title">
+      <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Private to you</span><small>Only you can see this · Saved as you go</small></header>
+      <div class="private-controls">
+        <div class="private-state-group" role="group" aria-label="My film state">${stateButtons}</div>
+        <button class="favourite-switch ${personal.isFavourite ? "is-active" : ""}" type="button" role="switch" aria-checked="${personal.isFavourite}" data-toggle-favourite><span class="material-symbols-outlined" aria-hidden="true">favorite</span>Favourite <small>${personal.isFavourite ? "On" : "Off"}</small></button>
+      </div>
+      ${renderReactionControl(movie, personal)}
+      <div class="private-panel-actions"><button class="detail-text-action" type="button" data-remove-personal-film>Remove from My Cinema</button><span>Private notes, reviews and rewatches arrive in Phase 2B.</span></div>
+    </section>`;
+}
+
+function renderSharedFilmPanel(context) {
+  const { movie, shared, origin } = context;
+  if (!shared) {
+    return `
+      <section class="film-context-panel shared-panel layout-container layout-container-neutral is-empty" aria-labelledby="shared-panel-title">
+        <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Not on the shared list</span><small>Suggesting is a deliberate, separate action</small></header>
+        <div class="shared-empty-actions"><button class="secondary-button" type="button" data-suggest-personal-film>Suggest for Cine-Cord</button><p>Your state, reaction and Favourite stay private if you do. Suggesting adds the film to The List with your name — it does not publish your reaction.</p></div>
+      </section>`;
+  }
+
+  const matchingSessions = [activeSession, ...sessionHistory].filter((session) => session && filmMatchesSession(movie, session));
+  const journalEntries = matchingSessions.map((session) => session.journalEntry).filter(Boolean);
+  if (origin === "my-films") {
+    return `
+      <section class="film-context-panel shared-panel layout-container layout-container-shared is-compact" aria-labelledby="shared-panel-title">
+        <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Shared with the group</span><small>This film is also on the shared list</small></header>
+        <div class="shared-compact-row"><button class="secondary-button" type="button" data-vote="${shared.id}" ${shared.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${shared.votedByMe ? "Remove vote" : "Vote for this film"} · ${shared.votes}</button><p>${escapeHTML(watchHistoryLabel(shared))} by the group · suggested by ${escapeHTML(shared.suggestedBy)}${matchingSessions.length ? ` · ${matchingSessions.length} ${matchingSessions.length === 1 ? "session" : "sessions"}` : ""}</p><button class="detail-text-action" type="button" data-open-detail-area="list">Open in Cine-Cord</button></div>
+      </section>`;
+  }
+
+  return `
+    <section class="film-context-panel shared-panel layout-container layout-container-shared" aria-labelledby="shared-panel-title">
+      <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Shared with the group</span><small>Everyone approved can see this</small></header>
+      <div class="shared-panel-body">
+        <div class="shared-primary-actions"><button class="primary-button" type="button" data-vote="${shared.id}" ${shared.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${shared.votedByMe ? "Remove vote" : "Vote for this film"} <small>${shared.votes} ${shared.votes === 1 ? "vote" : "votes"}</small></button><span class="group-status">Group status: <strong>${escapeHTML(watchHistoryLabel(shared))}</strong></span>${activeSession ? `<button class="secondary-button" type="button" data-open-current-session>Open current session</button>` : `<button class="secondary-button" type="button" data-open-party>Start a session</button>`}</div>
+        <dl class="shared-film-ledger"><div><dt>Suggested by</dt><dd>${escapeHTML(shared.suggestedBy)} · ${escapeHTML(formatAddedDate(shared.createdAt))}</dd></div><div><dt>Sessions</dt><dd>${matchingSessions.length ? `${matchingSessions.length} recorded` : "No group session yet"}</dd></div><div><dt>Journal</dt><dd>${journalEntries.length ? `${journalEntries.length} ${journalEntries.length === 1 ? "entry" : "entries"}` : "No group entry yet"}</dd></div></dl>
+        <p>Voting, sessions and Journal facts are group data. Nothing here changes your private library.</p>
+      </div>
+    </section>`;
+}
+
+function renderFilmDetails() {
+  const context = selectedFilmContext();
+  if (!context) return currentView === "my-films" ? renderMyFilms() : renderList();
+  const { movie, origin } = context;
+  const backLabel = origin === "my-films" ? "My Films" : "The List";
+  const detailMeta = [movie.year, movie.runtime ? `${movie.runtime} min` : null, ...movie.genres].filter(Boolean).join(" · ");
+  const panels = origin === "my-films"
+    ? `${renderPrivateFilmPanel(context)}${renderSharedFilmPanel(context)}`
+    : `${renderSharedFilmPanel(context)}${renderPrivateFilmPanel(context)}`;
+  return `
+    <section class="film-detail-view ${origin === "my-films" ? "is-private-origin" : "is-shared-origin"} ${context.personal?.rating ? "has-personal-reaction" : "has-no-personal-reaction"}" aria-labelledby="film-detail-title" tabindex="-1">
+      ${renderPageHeader({
+        id: "film-detail-title",
+        eyebrow: origin === "my-films" ? "My Cinema · Private to you" : "Cine-Cord · Shared with the group",
+        title: movie.title,
+        description: detailMeta || "Movie details",
+        titleClass: "film-page-title",
+        className: "film-detail-page-header",
+        actions: `<button class="quiet-button film-detail-back" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${escapeHTML(backLabel)}</button>`,
+      })}
+      <div class="film-detail-layout">
+        <aside class="film-detail-sidebar">
+          <div class="detail-poster ${movie.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(movie))}" alt="${movie.posterUrl ? `${escapeHTML(movie.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${movie.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
+          <dl class="film-fact-card"><div><dt>Year</dt><dd>${movie.year || "Pending"}</dd></div><div><dt>Runtime</dt><dd>${escapeHTML(runtimeLabel(movie))}</dd></div><div><dt>Genres</dt><dd>${movie.genres.length ? movie.genres.map(escapeHTML).join(" · ") : "Pending"}</dd></div>${movie.tmdbId ? `<div><dt>TMDB ID</dt><dd>${movie.tmdbId}</dd></div>` : ""}</dl>
+        </aside>
+        <div class="film-detail-content">
+          <p class="film-detail-overview">${escapeHTML(movie.overview || "Full movie details will appear here once this film is matched with TMDB.")}</p>
+          <div class="film-context-panels">${panels}</div>
+        </div>
+      </div>
+    </section>`;
+}
+
+function renderPersonalFilmCard(item) {
+  const reaction = reactionForValue(item.rating);
+  return `
+    <article class="poster-card personal-poster-card">
+      <button class="poster-card-open" type="button" data-select-film="${item.id}" aria-label="View details for ${escapeHTML(item.title)}">
+        <span class="poster-frame ${item.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" loading="lazy" /><span class="status-pill personal-state">${escapeHTML(personalStateLabel(item.state))}</span>${item.isFavourite ? `<span class="personal-favourite material-symbols-outlined" aria-label="Favourite">favorite</span>` : ""}</span>
+        <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
+      </button>
+      <footer class="personal-card-footer">${reaction ? `<span class="personal-card-reaction"><img src="${escapeHTML(imageAssets.reactions[reaction.value])}" alt="" /><strong>${escapeHTML(reaction.label)}</strong></span>` : `<span>No reaction yet</span>`}<span>Private</span></footer>
+    </article>`;
+}
+
+function renderMyFilms() {
+  const selectedFilm = personalFilms.find((item) => item.id === selectedFilmId) || null;
+  if (selectedFilmId && !selectedFilm) selectedFilmId = null;
+  if (selectedFilm) return renderFilmDetails();
+  const visibleFilms = getVisiblePersonalFilms(personalFilms, { query: myFilmsQuery, filter: myFilmsFilter, sort: myFilmsSort });
+  return `
+    <section class="page-view list-view my-films-view" aria-labelledby="my-films-title">
+      ${renderPageHeader({
+        id: "my-films-title",
+        eyebrow: `My Cinema · Private to you · ${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}`,
+        title: "My Films",
+        description: "Your private films, states, reactions and Favourites. Nothing is shared unless you deliberately suggest it to Cine-Cord.",
+        className: "list-hero my-films-hero",
+        actions: `<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
+      })}
+      <div class="list-toolbar my-films-toolbar"><label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="my-films-search" type="search" value="${escapeHTML(myFilmsQuery)}" placeholder="Search My Films" aria-label="Search My Films" /></label><button class="mobile-filter-toggle" type="button" data-toggle-my-films-filters aria-expanded="${myFilmsFiltersOpen}" aria-label="${myFilmsFiltersOpen ? "Hide" : "Show"} My Films filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${myFilmsFiltersOpen ? "expand_less" : "expand_more"}</span></button><div class="filter-tabs my-film-filter-tabs ${myFilmsFiltersOpen ? "is-open" : ""}" aria-label="Filter My Films">${[["all", "All"], ["want", "Want to Watch"], ["watched", "Watched"], ["dnf", "Did Not Finish"], ["favourites", "Favourites"]].map(([value, label]) => `<button type="button" class="filter-tab ${myFilmsFilter === value ? "is-active" : ""}" data-my-films-filter="${value}">${label}</button>`).join("")}</div><div class="list-filter-controls my-film-sort-control ${myFilmsFiltersOpen ? "is-open" : ""}"><label class="compact-select"><span class="sr-only">Sort My Films</span><select id="my-films-sort" aria-label="Sort My Films"><option value="updated" ${myFilmsSort === "updated" ? "selected" : ""}>Recently updated</option><option value="added" ${myFilmsSort === "added" ? "selected" : ""}>Recently added</option><option value="title" ${myFilmsSort === "title" ? "selected" : ""}>Title A–Z</option></select></label></div></div>
+      <div class="poster-grid personal-poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderPersonalFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">theaters</span><h2>${personalFilms.length ? "No films match that view." : "My Cinema is empty."}</h2><p>${personalFilms.length ? "Try another search or filter." : "Add something you want to watch, or rate a film you have already seen."}</p><button class="secondary-button" type="button" data-open-personal-film>Add a film</button></div>`}</div>
+    </section>`;
 }
 
 function renderList() {
   const visibleFilms = getVisibleFilms();
   const selectedFilm = movieList.find((item) => item.id === selectedFilmId) || null;
   if (selectedFilmId && !selectedFilm) selectedFilmId = null;
+  if (selectedFilm) return renderFilmDetails();
   const readyCount = movieList.filter((item) => !item.watched).length;
   const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
   const suggesters = [...new Map(movieList.map((item) => [item.suggestedById, item.suggestedBy])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   return `
-    <section class="list-view" aria-labelledby="list-title">
-      <header class="list-hero">
-        <div class="list-hero-copy">
-          <span class="eyebrow">Cine-Cord · Shared with the group</span>
-          <div class="list-title-line"><h1 id="list-title" class="page-title">The List</h1><span class="list-count"><span>${movieList.length} ${movieList.length === 1 ? "film" : "films"}</span><span class="list-count-ready">· ${readyCount} ready</span></span></div>
-          <p class="page-subtitle">The Discordians’ shared film library. Everything here is visible to every approved member.</p>
-        </div>
-        <div class="list-hero-actions"><button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">casino</span>Watch a Film</button><button class="secondary-button" type="button" data-open-film aria-label="Add film to library"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add film</button></div>
-      </header>
+    <section class="page-view list-view" aria-labelledby="list-title">
+      ${renderPageHeader({
+        id: "list-title",
+        eyebrow: `Cine-Cord · Shared with the group · ${movieList.length} ${movieList.length === 1 ? "film" : "films"} · ${readyCount} ready`,
+        title: "The List",
+        description: "The Discordians’ shared film library. Everything here is visible to every approved member.",
+        className: "list-hero",
+        actions: `<button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">casino</span>Watch a Film</button><button class="secondary-button" type="button" data-open-film aria-label="Add film to library"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add film</button>`,
+      })}
       <div class="list-toolbar">
         <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search the list" aria-label="Search The List" /></label>
         <button class="mobile-filter-toggle" type="button" data-toggle-list-filters aria-expanded="${listFiltersOpen}" aria-label="${listFiltersOpen ? "Hide" : "Show"} filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${listFiltersOpen ? "expand_less" : "expand_more"}</span></button>
@@ -1566,9 +1935,8 @@ function renderList() {
           <label class="compact-select sort-field"><span class="sr-only">Sort</span><select id="list-sort" aria-label="Sort The List"><option value="votes" ${listSort === "votes" ? "selected" : ""}>Most voted</option><option value="oldest" ${listSort === "oldest" ? "selected" : ""}>Longest waiting</option><option value="newest" ${listSort === "newest" ? "selected" : ""}>Newest</option></select></label>
         </div>
       </div>
-      <div class="library-layout ${selectedFilm ? "has-selection" : ""}">
+      <div class="library-layout">
         <div class="poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">movie</span><h2>${movieList.length ? "No films match that view." : "The List is empty."}</h2><p>${movieList.length ? "Try another search or filter." : "Add the first suggestion and give the group something to argue about."}</p><button class="secondary-button" type="button" data-open-film>Add a film</button></div>`}</div>
-        ${selectedFilm ? renderFilmDetails(selectedFilm) : ""}
       </div>
     </section>`;
 }
@@ -1747,10 +2115,13 @@ function renderQueueRoulette() {
     : selectedFilmForSession(activeSession);
   return `
     <section class="roulette-game ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? "has-result" : ""}" aria-labelledby="roulette-title">
-      <header class="roulette-header">
-        <div><span class="eyebrow">Watch a Film · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
-        <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
-      </header>
+      ${renderPageHeader({
+        id: "roulette-title",
+        eyebrow: "Watch a Film · Weighted chaos",
+        title: "Queue Roulette",
+        className: "roulette-header",
+        actions: `<button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>`,
+      })}
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
     </section>`;
 }
@@ -1760,9 +2131,15 @@ function renderPick() {
   const candidateCount = movieList.filter((item) => !item.watched).length;
   return `
     <section class="page-view" aria-labelledby="pick-title">
-      <header class="page-header"><div><span class="eyebrow">${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}</span><h1 id="pick-title" class="page-title">Watch a Film</h1><p class="page-subtitle">Choose the group, choose the rules, then let the website settle the argument.</p></div><button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></header>
-      <div class="pick-callout"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
-      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
+      ${renderPageHeader({
+        id: "pick-title",
+        eyebrow: `Cine-Cord · ${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}`,
+        title: "Watch a Film",
+        description: "Choose the group, choose the rules, then let the website settle the argument.",
+        actions: `<button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session</button>`,
+      })}
+      <div class="pick-callout layout-container layout-container-neutral"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
+      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row layout-container layout-container-shared ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
     </section>`;
 }
 
@@ -1775,9 +2152,19 @@ function renderSessions() {
   const activeEditor = sessionEditorMode(activeSession);
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then finish its Journal handoff. Once an entry is saved, the session moves to The Journal.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${renderPageHeader({
+        id: "sessions-title",
+        eyebrow: "Cine-Cord · Movie-night records",
+        title: "Sessions",
+        description: "Record the film and viewers, then hand the finished entry to The Journal.",
+        actions: activeSession?.mode === "Queue Roulette"
+          ? `<button class="primary-button" type="button" data-continue-roulette>Open current session</button>`
+          : activeSession
+            ? ""
+            : `<button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">add</span>Pick a Movie</button>`,
+      })}
       ${activeSession ? `
-        <article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">
+        <article class="active-session session-feature layout-container layout-container-shared ${rouletteWinner ? "has-film" : ""}">
           ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
           <div class="active-session-head">
             <div>
@@ -1787,13 +2174,13 @@ function renderSessions() {
               <p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film was" : "films were"} available when this session started.</p>
             </div>
             <div class="session-actions">
-              ${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
+              ${activeSession.mode === "Queue Roulette" ? `<button class="secondary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
               ${activeCanManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-review-session-watched="${escapeHTML(activeSession.id)}"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}
               ${activeCanManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}
             </div>
           </div>
         </article>
-        ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Pick a Movie</button></div>`}
+        ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p></div>`}
       ${journalIsWatched ? `<section class="session-journal-open" aria-label="Journal post for ${escapeHTML(openJournalFor.selectedFilm?.title || "this session")}">${renderDiscordTemplate(openJournalFor, selectedFilmForSession(openJournalFor))}</section>` : ""}
       ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Journal outstanding</span><h2 id="watched-history-title">Watched sessions awaiting an entry</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
         const film = selectedFilmForSession(session);
@@ -1802,7 +2189,7 @@ function renderSessions() {
         const canEditJournal = canManageJournalEntry(session.journalEntry, session);
         const journalLabel = session.journalEntry ? (canEditJournal ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
         const canOpenJournal = canEditJournal || canManage || session.journalEntry;
-        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+        return `<div class="session-history-item"><article class="session-history-row layout-container layout-container-neutral">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
       }).join("")}</div></section>` : ""}
     </section>`;
 }
@@ -1873,6 +2260,13 @@ function renderJournalEditor(entry) {
     </form>`;
 }
 
+function journalTitleFitClass(title) {
+  const length = [...String(title || "").trim()].length;
+  if (length > 30) return "is-very-long";
+  if (length > 18) return "is-long";
+  return "";
+}
+
 function renderJournalCard(entry) {
   const isArchive = entry.sourceType === "DISCORD_ARCHIVE";
   const isEditing = !isArchive
@@ -1882,33 +2276,43 @@ function renderJournalCard(entry) {
   const publication = entry.publication;
   const hasDiscordMessage = Boolean(entry.discordUrl || publication?.discord_message_id);
   const isOutOfDate = Boolean(entry.discordOutOfDate || publication?.status === "UPDATE_FAILED");
-  const isSyncing = journalSyncPendingId === entry.journalEntryId || ["POSTING", "UPDATING"].includes(publication?.status);
+  const isSyncing = !isArchive
+    && Boolean(entry.journalEntryId)
+    && (journalSyncPendingId === entry.journalEntryId || ["POSTING", "UPDATING"].includes(publication?.status));
   const sourceCopy = isArchive
     ? `${entry.volumeName} · Original Discord message`
     : `Cine-Cord · Created by ${entry.authorName}`;
-  const discordState = !isArchive && hasDiscordMessage
-    ? (isOutOfDate ? `<span class="journal-discord-state is-stale"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
-    : "";
+  const actionStateClass = isArchive
+    ? "is-archive"
+    : (hasDiscordMessage ? (isOutOfDate ? "is-stale" : "is-current") : "is-not-posted");
+  const discordState = isArchive
+    ? ""
+    : (hasDiscordMessage
+      ? (isOutOfDate ? `<span class="journal-discord-state is-stale" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
+      : `<span class="journal-discord-state is-not-posted" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">draft</span>Not posted to Discord</span>`);
   return `
-    <article class="journal-entry-card ${isArchive ? "is-archive" : "is-current"} ${isEditing ? "is-editing" : ""}">
+    <article class="journal-entry-card layout-container ${isArchive ? "layout-container-neutral is-archive" : "layout-container-shared is-current"} ${isEditing ? "is-editing" : ""}">
       <div class="journal-entry-head">
         <div><span class="journal-entry-number">Entry #${escapeHTML(entry.entryLabel)}</span><span class="journal-source-label">${escapeHTML(sourceCopy)}</span></div>
         <span class="status-pill ${entry.status === "DNF" ? "journal-dnf" : "watched"}">${escapeHTML(journalStatusLabel(entry.status))}</span>
       </div>
-      <div class="journal-entry-main">
-        <div><h2>${escapeHTML(entry.title)}</h2><p class="journal-entry-meta">${entry.year ? escapeHTML(entry.year) : "Year not recorded"} · ${entry.watchedAt ? escapeHTML(formatAddedDate(entry.watchedAt)) : "Watch date not recorded"}</p></div>
-        <dl><div><dt>Viewers</dt><dd>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</dd></div><div><dt>Recorded by</dt><dd>${escapeHTML(entry.authorName)}</dd></div></dl>
-        ${entry.comment ? `<blockquote>${escapeHTML(entry.comment)}</blockquote>` : ""}
-        ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
+      <div class="journal-entry-body">
+        <div class="journal-entry-copy">
+          <div class="journal-entry-title-line"><h2 class="${journalTitleFitClass(entry.title)}" title="${escapeHTML(entry.title)}">${escapeHTML(entry.title)}</h2><span class="journal-entry-year">${entry.year ? escapeHTML(entry.year) : "Year not recorded"}</span></div>
+          <p class="journal-entry-fact"><span>Viewers — </span><strong>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</strong></p>
+          <p class="journal-entry-fact"><span>Recorded by </span><strong>${escapeHTML(entry.authorName)}</strong></p>
+          ${entry.comment ? `<p class="journal-entry-comment">${escapeHTML(entry.comment)}</p>` : ""}
+          ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
+        </div>
       </div>
-      <footer class="journal-entry-actions">
-        <div>${discordState}</div>
-        <div>
-          ${!isArchive ? `<button class="secondary-button compact" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
-          ${entry.canEdit ? `<button class="secondary-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
-          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="primary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
-          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
-          ${entry.discordUrl ? `<a class="secondary-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer">${isArchive ? "Open original" : "View in Discord"}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}
+      <footer class="journal-entry-actions ${actionStateClass} ${isSyncing ? "is-syncing" : ""}" aria-label="Actions for ${escapeHTML(entry.title)}">
+        ${discordState}
+        <div class="journal-entry-action-buttons">
+          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="primary-button compact journal-action-primary" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact journal-action-setup" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
+          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact journal-action-primary" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
+          ${entry.discordUrl ? `<a class="secondary-button compact journal-action-destination" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>${isArchive ? "Open original" : "View in Discord"}</a>` : ""}
+          ${!isArchive ? `<button class="quiet-button compact journal-action-utility journal-action-copy" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
+          ${entry.canEdit ? `<button class="quiet-button compact journal-action-utility journal-action-edit" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
         </div>
       </footer>
       ${isEditing ? renderJournalEditor(entry) : ""}
@@ -1925,7 +2329,13 @@ function renderJournal() {
   const archiveCount = journalCatalog.length - currentCount;
   return `
     <section class="page-view journal-view" aria-labelledby="journal-title">
-      <header class="page-header journal-header"><div><span class="eyebrow">${journalCatalog.length.toLocaleString()} movie-night records</span><h1 id="journal-title" class="page-title">The Journal</h1><p class="page-subtitle">One searchable history across all three Discord channels and every new Cine-Cord entry. The Discord originals stay exactly where they are.</p></div><div class="journal-totals"><span><strong>${archiveCount.toLocaleString()}</strong> archived</span><span><strong>${currentCount.toLocaleString()}</strong> editable</span></div></header>
+      ${renderPageHeader({
+        id: "journal-title",
+        eyebrow: `${journalCatalog.length.toLocaleString()} movie-night records · ${archiveCount.toLocaleString()} archived · ${currentCount.toLocaleString()} editable`,
+        title: "The Journal",
+        description: "Search every preserved Discord entry and new Cine-Cord movie night in one history.",
+        className: "journal-header",
+      })}
       <div class="journal-toolbar">
         <label class="search-field journal-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="journal-search" type="search" value="${escapeHTML(journalQuery)}" placeholder="Search titles or entry numbers" aria-label="Search the Journal" /></label>
         <label class="compact-select"><span class="sr-only">Source</span><select id="journal-source-filter" aria-label="Filter Journal by source"><option value="all">All sources</option><option value="CINE_CORD" ${journalSourceFilter === "CINE_CORD" ? "selected" : ""}>Cine-Cord entries</option>${sources.map((source) => `<option value="${escapeHTML(source)}" ${journalSourceFilter === source ? "selected" : ""}>${escapeHTML(source)}</option>`).join("")}</select></label>
@@ -1947,9 +2357,14 @@ function renderStats() {
   const favourite = [...ready].sort((a, b) => b.votes - a.votes)[0];
   return `
     <section class="page-view" aria-labelledby="stats-title">
-      <header class="page-header"><div><span class="eyebrow">List behaviour, not Journal history</span><h1 id="stats-title" class="page-title">Group Stats</h1><p class="page-subtitle">A small snapshot of shared suggestions and votes. Selection-game awards arrive later.</p></div></header>
-      <div class="list-stat-grid"><article><span class="material-symbols-outlined" aria-hidden="true">movie</span><strong>${ready.length}</strong><p>Films ready to watch</p></article><article><span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span><strong>${totalVotes}</strong><p>Total active votes</p></article><article><span class="material-symbols-outlined" aria-hidden="true">done_all</span><strong>${watched.length}</strong><p>Marked as watched</p></article></div>
-      <div class="stat-feature-list"><article><span class="eyebrow">Current favourite</span><h2>${favourite ? escapeHTML(favourite.title) : "No votes yet"}</h2><p>${favourite ? `${favourite.votes} ${favourite.votes === 1 ? "vote" : "votes"}` : "Vote on The List to create a frontrunner."}</p></article><article><span class="eyebrow">Longest waiting</span><h2>${oldest ? escapeHTML(oldest.title) : "Nothing waiting"}</h2><p>${oldest ? escapeHTML(formatWaitingTime(oldest.createdAt)) : "Add a suggestion to begin the queue."}</p></article></div>
+      ${renderPageHeader({
+        id: "stats-title",
+        eyebrow: "Cine-Cord · Shared list behaviour",
+        title: "Group Stats",
+        description: "A snapshot of shared suggestions and votes. Selection-game awards arrive later.",
+      })}
+      <div class="list-stat-grid"><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">movie</span><strong>${ready.length}</strong><p>Films ready to watch</p></article><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span><strong>${totalVotes}</strong><p>Total active votes</p></article><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">done_all</span><strong>${watched.length}</strong><p>Marked as watched</p></article></div>
+      <div class="stat-feature-list"><article class="layout-container layout-container-shared"><span class="eyebrow">Current favourite</span><h2>${favourite ? escapeHTML(favourite.title) : "No votes yet"}</h2><p>${favourite ? `${favourite.votes} ${favourite.votes === 1 ? "vote" : "votes"}` : "Vote on The List to create a frontrunner."}</p></article><article class="layout-container layout-container-shared"><span class="eyebrow">Longest waiting</span><h2>${oldest ? escapeHTML(oldest.title) : "Nothing waiting"}</h2><p>${oldest ? escapeHTML(formatWaitingTime(oldest.createdAt)) : "Add a suggestion to begin the queue."}</p></article></div>
     </section>`;
 }
 
@@ -1959,15 +2374,22 @@ function renderMembers() {
   const sortedMembers = [...members].sort((a, b) => a.role !== b.role ? (a.role === "admin" ? -1 : 1) : a.name.localeCompare(b.name));
   return `
     <section class="page-view" aria-labelledby="members-title">
-      <header class="page-header"><div><span class="eyebrow">Website access · Admin only</span><h1 id="members-title" class="page-title">Members</h1><p class="page-subtitle">Approve friends, keep list names consistent and control access to Cine-Cord.</p></div><span class="member-count">${members.length} approved</span></header>
-      <article class="invite-panel"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
-      <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="primary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="text-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
-      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="text-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
+      ${renderPageHeader({
+        id: "members-title",
+        eyebrow: `Admin only · ${members.length} approved ${members.length === 1 ? "member" : "members"}`,
+        title: "Members",
+        description: "Approve friends, keep list names consistent and control access to Cine-Cord.",
+      })}
+      <article class="invite-panel layout-container layout-container-neutral"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
+      <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row layout-container layout-container-neutral"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="secondary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="quiet-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
+      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
     </section>`;
 }
 
 function navigationAreaForView(view) {
-  return view === "members" ? "admin" : "cine-cord";
+  if (view === "members") return "admin";
+  if (view === "my-films") return "my-cinema";
+  return "cine-cord";
 }
 
 function revealActiveMobileDestination() {
@@ -1983,7 +2405,7 @@ function updateShellState() {
   const activeArea = navigationAreaForView(currentView);
   document.body.classList.toggle("is-locked", !hasWorkspace);
   document.body.classList.toggle("is-admin", isAdmin);
-  document.body.classList.toggle("has-film-detail", hasWorkspace && currentView === "list" && Boolean(selectedFilmId));
+  document.body.classList.toggle("has-film-detail", hasWorkspace && ["list", "my-films"].includes(currentView) && Boolean(selectedFilmId));
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !isAdmin; });
   document.querySelectorAll("[data-nav-area]").forEach((area) => {
     const unavailable = area.classList.contains("is-unavailable");
@@ -2030,6 +2452,24 @@ function bindListSearch() {
   });
 }
 
+function bindMyFilmsSearch() {
+  const search = document.querySelector("#my-films-search");
+  search?.addEventListener("input", (event) => {
+    myFilmsQuery = event.target.value;
+    root.innerHTML = renderMyFilms();
+    updateShellState();
+    bindMyFilmsSearch();
+    const refreshed = document.querySelector("#my-films-search");
+    refreshed?.focus();
+    refreshed?.setSelectionRange(refreshed.value.length, refreshed.value.length);
+  });
+  const sort = document.querySelector("#my-films-sort");
+  sort?.addEventListener("change", (event) => {
+    myFilmsSort = event.target.value;
+    render();
+  });
+}
+
 function bindJournalSearch() {
   const search = document.querySelector("#journal-search");
   search?.addEventListener("input", (event) => {
@@ -2060,11 +2500,12 @@ function render() {
     updateShellState();
     return;
   }
-  const renderers = { list: renderList, pick: renderPick, sessions: renderSessions, journal: renderJournal, stats: renderStats, members: renderMembers };
+  const renderers = { list: renderList, "my-films": renderMyFilms, pick: renderPick, sessions: renderSessions, journal: renderJournal, stats: renderStats, members: renderMembers };
   if (!renderers[currentView] || (currentView === "members" && !isCurrentAdmin())) currentView = "list";
   root.innerHTML = renderers[currentView]();
   updateShellState();
   if (currentView === "list") bindListSearch();
+  if (currentView === "my-films") bindMyFilmsSearch();
   if (currentView === "journal") bindJournalSearch();
 }
 
@@ -2072,7 +2513,10 @@ function navigate(view) {
   if (!authUser || !activeGroup) return;
   if (view === "members" && !isCurrentAdmin()) return;
   currentView = legacyViewMap[view] || view;
-  if (currentView !== "list") selectedFilmId = null;
+  selectedFilmId = null;
+  reactionEditorExpanded = false;
+  personalStateEditorExpanded = false;
+  reactionLiveMessage = "";
   window.location.hash = currentView;
   render();
   root.focus({ preventScroll: true });
@@ -2438,15 +2882,19 @@ async function spinRoulette(vetoParticipantId = null) {
   }, spinDuration);
 }
 
-function openFilmModal(item = null) {
+function openFilmModal(item = null, purpose = "shared") {
+  filmModalPurpose = purpose;
   filmEditingId = item?.id || null;
   pendingFilmDraft = null;
   filmForm.reset();
   clearFilmMatches();
-  filmFormTitle.textContent = item ? "Match movie details" : "Add a film";
+  if (filmFormEyebrow) filmFormEyebrow.textContent = purpose === "personal" ? "My Cinema · Private" : "Cine-Cord · Shared list";
+  filmFormTitle.textContent = item ? "Match movie details" : purpose === "personal" ? "Add to My Cinema" : "Add a film";
   filmFormIntro.textContent = item
     ? "Search for the correct TMDB result to add or refresh its poster, runtime, genres and synopsis."
-    : "Search TMDB for the correct film, poster and details.";
+    : purpose === "personal"
+      ? "Search for a film to add privately. It will start in Want to Watch and will not be added to Cine-Cord."
+      : "Search TMDB for the correct film, poster and details.";
   filmForm.elements.title.value = item?.title || "";
   filmForm.elements.year.value = item?.year || "";
   filmModal.hidden = false;
@@ -2458,6 +2906,7 @@ function closeFilmModal() {
   filmModal.hidden = true;
   document.body.style.overflow = "";
   filmEditingId = null;
+  filmModalPurpose = "shared";
   pendingFilmDraft = null;
   filmForm.reset();
   clearFilmMatches();
@@ -2473,6 +2922,7 @@ async function loadWorkspace(providerToken = null) {
   accessRequest = null;
   joinRequests = [];
   movieList = [];
+  personalFilms = [];
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -2506,11 +2956,12 @@ async function loadWorkspace(providerToken = null) {
       discordProfileSyncError = error.message;
     }
   }
-  const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
+  const [profilesResult, membershipsResult, identitiesResult, queueResult, personalFilmsResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
     supabase.from("discord_identities").select("profile_id,display_name,avatar_url,synced_at"),
     supabase.from("queue_items").select("*").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
+    supabase.from("personal_films").select(PERSONAL_FILM_SELECT).eq("owner_id", authUser.id).order("updated_at", { ascending: false }),
     supabase.from("queue_votes").select("queue_item_id,user_id,created_at"),
     supabase.from("group_join_requests").select("id,group_id,user_id,requester_email,requested_display_name,created_at,updated_at").eq("group_id", activeGroup.id).order("created_at", { ascending: true }),
     supabase.from("movie_sessions").select("*").eq("group_id", activeGroup.id).in("status", ["ACTIVE", "CONFIRMED"]).order("started_at", { ascending: false }).limit(1).maybeSingle(),
@@ -2522,7 +2973,7 @@ async function loadWorkspace(providerToken = null) {
     supabase.from("discord_publications").select("*"),
     fetchAllJournalCatalog(activeGroup.id),
   ]);
-  const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
+  const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, personalFilmsResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
   if (firstError) throw firstError;
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
@@ -2571,6 +3022,7 @@ async function loadWorkspace(providerToken = null) {
       overview: item.overview || ""
     };
   });
+  personalFilms = (personalFilmsResult.data || []).map(normalisePersonalFilm);
   const participantsBySession = new Map();
   for (const participant of participantsResult.data || []) {
     const current = participantsBySession.get(participant.session_id) || [];
@@ -2677,7 +3129,8 @@ async function loadWorkspace(providerToken = null) {
     : null;
   sessionHistory = sessions.filter((session) => session.status === "WATCHED");
   if (activeSession?.mode === "Queue Roulette") rouletteState = restoreRouletteState(activeSession);
-  if (selectedFilmId && !movieList.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
+  const selectedCollection = currentView === "my-films" ? personalFilms : movieList;
+  if (selectedFilmId && !selectedCollection.some((item) => item.id === selectedFilmId)) selectedFilmId = null;
 }
 
 async function syncSession(session) {
@@ -2690,6 +3143,7 @@ async function syncSession(session) {
   accessRequest = null;
   joinRequests = [];
   movieList = [];
+  personalFilms = [];
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -2884,12 +3338,12 @@ document.addEventListener("submit", async (event) => {
       if (matches.length) {
         renderFilmMatches(matches);
       } else {
-        setFilmSearchStatus("No matching films were found. Try a broader title or add it without artwork.", "warning");
-        filmManualAdd.hidden = Boolean(filmEditingId);
+        setFilmSearchStatus(filmModalPurpose === "personal" ? "No matching films were found. Try a broader title." : "No matching films were found. Try a broader title or add it without artwork.", "warning");
+        filmManualAdd.hidden = Boolean(filmEditingId) || filmModalPurpose === "personal";
       }
     } catch (error) {
-      setFilmSearchStatus(`${error.message} You can still keep the website list usable without artwork.`, "warning");
-      filmManualAdd.hidden = Boolean(filmEditingId);
+      setFilmSearchStatus(filmModalPurpose === "personal" ? error.message : `${error.message} You can still keep the website list usable without artwork.`, "warning");
+      filmManualAdd.hidden = Boolean(filmEditingId) || filmModalPurpose === "personal";
     } finally {
       submit.disabled = false;
       submit.innerHTML = `Find Movie <span class="material-symbols-outlined" aria-hidden="true">search</span>`;
@@ -3116,27 +3570,201 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-open-film]")) { openFilmModal(); return; }
+  if (event.target.closest("[data-open-personal-film]")) { openFilmModal(null, "personal"); return; }
   if (event.target.closest("[data-close-film]") || event.target === filmModal) { closeFilmModal(); return; }
   if (event.target.closest("[data-open-party]")) { openPartyModal(); return; }
   if (event.target.closest("[data-close-modal]") || event.target === partyModal) { closePartyModal(); return; }
 
   const filterButton = event.target.closest("[data-list-filter]");
   if (filterButton) { listFilter = filterButton.dataset.listFilter; render(); return; }
+  const myFilmsFilterButton = event.target.closest("[data-my-films-filter]");
+  if (myFilmsFilterButton) { myFilmsFilter = myFilmsFilterButton.dataset.myFilmsFilter; render(); return; }
   if (event.target.closest("[data-toggle-list-filters]")) {
     listFiltersOpen = !listFiltersOpen;
     render();
     window.requestAnimationFrame(() => document.querySelector("[data-toggle-list-filters]")?.focus({ preventScroll: true }));
     return;
   }
+  if (event.target.closest("[data-toggle-my-films-filters]")) {
+    myFilmsFiltersOpen = !myFilmsFiltersOpen;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-toggle-my-films-filters]")?.focus({ preventScroll: true }));
+    return;
+  }
 
   const selectFilmButton = event.target.closest("[data-select-film]");
   if (selectFilmButton) {
+    filmDetailReturnScrollY = window.scrollY;
     selectedFilmId = selectFilmButton.dataset.selectFilm;
+    reactionEditorExpanded = false;
+    personalStateEditorExpanded = false;
+    reactionLiveMessage = "";
     render();
-    window.requestAnimationFrame(() => document.querySelector(".film-detail-drawer")?.focus({ preventScroll: true }));
+    window.scrollTo({ top: 0, behavior: "auto" });
+    window.requestAnimationFrame(() => document.querySelector(".film-detail-view")?.focus({ preventScroll: true }));
     return;
   }
-  if (event.target.closest("[data-close-film-details]")) { selectedFilmId = null; render(); return; }
+  if (event.target.closest("[data-close-film-details]")) {
+    const previousFilmId = selectedFilmId;
+    selectedFilmId = null;
+    reactionEditorExpanded = false;
+    personalStateEditorExpanded = false;
+    reactionLiveMessage = "";
+    render();
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" });
+      document.querySelector(`[data-select-film="${CSS.escape(previousFilmId || "")}"]`)?.focus({ preventScroll: true });
+    });
+    return;
+  }
+
+  const detailAreaButton = event.target.closest("[data-open-detail-area]");
+  if (detailAreaButton) {
+    const context = selectedFilmContext();
+    const destination = detailAreaButton.dataset.openDetailArea;
+    const destinationFilm = destination === "my-films" ? context?.personal : context?.shared;
+    if (!destinationFilm) return;
+    currentView = destination;
+    selectedFilmId = destinationFilm.id;
+    reactionEditorExpanded = false;
+    personalStateEditorExpanded = false;
+    window.history.replaceState(null, "", `#${destination}`);
+    render();
+    window.scrollTo({ top: 0, behavior: "auto" });
+    window.requestAnimationFrame(() => document.querySelector(".film-detail-view")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  if (event.target.closest("[data-open-reaction]")) {
+    reactionEditorExpanded = true;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-reaction-value]")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-change-reaction]")) {
+    reactionEditorExpanded = true;
+    personalStateEditorExpanded = false;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-reaction-value][aria-checked='true']")?.focus({ preventScroll: true }));
+    return;
+  }
+  if (event.target.closest("[data-collapse-reaction]")) {
+    reactionEditorExpanded = false;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-change-reaction]")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  const stateEditorButton = event.target.closest("[data-toggle-personal-state-editor]");
+  if (stateEditorButton && window.matchMedia("(max-width: 640px)").matches) {
+    personalStateEditorExpanded = !personalStateEditorExpanded;
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-toggle-personal-state-editor]")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  const personalStateButton = event.target.closest("[data-personal-state]");
+  if (personalStateButton) {
+    const context = selectedFilmContext();
+    if (!context?.movie?.movieId) return;
+    const previousRating = context.personal?.rating;
+    personalStateButton.disabled = true;
+    try {
+      await savePersonalFilm(context.movie, { state: personalStateButton.dataset.personalState });
+      personalStateEditorExpanded = false;
+      reactionLiveMessage = "";
+      render();
+      const cleared = previousRating !== null && personalStateButton.dataset.personalState === "WANT_TO_WATCH";
+      showToast(`${context.movie.title} is ${personalStateLabel(personalStateButton.dataset.personalState)} in My Cinema.${cleared ? " Its reaction was cleared." : ""}`);
+    } catch (error) {
+      personalStateButton.disabled = false;
+      showToast(`Private state was not saved: ${error.message}`);
+    }
+    return;
+  }
+
+  const reactionButton = event.target.closest("[data-reaction-value]");
+  if (reactionButton) {
+    const context = selectedFilmContext();
+    if (!context?.movie?.movieId) return;
+    reactionButton.disabled = true;
+    const reaction = reactionForValue(reactionButton.dataset.reactionValue);
+    try {
+      await savePersonalFilm(context.movie, { rating: reaction.value });
+      reactionEditorExpanded = false;
+      personalStateEditorExpanded = false;
+      reactionLiveMessage = `Saved, ${reaction.label}.`;
+      render();
+      window.requestAnimationFrame(() => document.querySelector(`[data-reaction-value="${reaction.value}"]`)?.focus({ preventScroll: true }));
+    } catch (error) {
+      reactionButton.disabled = false;
+      showToast(`Reaction was not saved: ${error.message}`);
+    }
+    return;
+  }
+
+  const favouriteButton = event.target.closest("[data-toggle-favourite]");
+  if (favouriteButton) {
+    const context = selectedFilmContext();
+    if (!context?.personal) return;
+    favouriteButton.disabled = true;
+    try {
+      const saved = await savePersonalFilm(context.movie, { isFavourite: !context.personal.isFavourite });
+      render();
+      showToast(`${context.movie.title} ${saved.isFavourite ? "marked as a Favourite" : "removed from Favourites"}.`);
+    } catch (error) {
+      favouriteButton.disabled = false;
+      showToast(`Favourite was not changed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-clear-reaction]")) {
+    const context = selectedFilmContext();
+    if (!context?.personal?.rating) return;
+    try {
+      await savePersonalFilm(context.movie, { rating: null });
+      reactionEditorExpanded = false;
+      personalStateEditorExpanded = false;
+      reactionLiveMessage = "Reaction cleared. Film state and Favourite unchanged.";
+      render();
+      showToast(`Reaction cleared for ${context.movie.title}. Its state and Favourite were not changed.`);
+    } catch (error) {
+      showToast(`Reaction was not cleared: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-remove-personal-film]")) {
+    const context = selectedFilmContext();
+    if (!context?.personal || !window.confirm(`Remove ${context.movie.title} from My Cinema? This does not change Cine-Cord.`)) return;
+    try {
+      await removePersonalFilm(context.movie);
+      if (currentView === "my-films") selectedFilmId = null;
+      reactionEditorExpanded = false;
+      personalStateEditorExpanded = false;
+      render();
+      showToast(`${context.movie.title} removed from My Cinema. Cine-Cord was not changed.`);
+    } catch (error) {
+      showToast(`The film was not removed from My Cinema: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-suggest-personal-film]")) {
+    const context = selectedFilmContext();
+    if (!context?.movie) return;
+    try {
+      await suggestPersonalFilm(context.movie);
+      render();
+      showToast(`${context.movie.title} suggested for Cine-Cord. Your private state and reaction remain private.`);
+    } catch (error) {
+      showToast(`The film was not suggested: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-open-current-session]")) { navigate(activeSession?.mode === "Queue Roulette" ? "pick" : "sessions"); return; }
 
   const matchFilmButton = event.target.closest("[data-match-film]");
   if (matchFilmButton) {
@@ -3153,6 +3781,19 @@ document.addEventListener("click", async (event) => {
     try {
       const { movie } = await lookupMovie({ action: "details", tmdbId: Number(movieMatchButton.dataset.selectMovieMatch) });
       if (!movie) throw new Error("The movie details could not be loaded.");
+      if (filmModalPurpose === "personal") {
+        const existingPersonalFilm = findFilmByIdentity(personalFilms, movie);
+        const saved = existingPersonalFilm || await savePersonalFilm(movie, { state: "WANT_TO_WATCH" });
+        closeFilmModal();
+        currentView = "my-films";
+        selectedFilmId = saved.id;
+        reactionEditorExpanded = false;
+        personalStateEditorExpanded = false;
+        window.history.replaceState(null, "", "#my-films");
+        render();
+        showToast(existingPersonalFilm ? `${saved.title} is already in My Cinema.` : `${saved.title} added privately to Want to Watch.`);
+        return;
+      }
       const result = await saveMovie(movie);
       closeFilmModal();
       await loadWorkspace();
@@ -3167,7 +3808,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-add-film-manually]")) {
-    if (!pendingFilmDraft || filmEditingId) return;
+    if (!pendingFilmDraft || filmEditingId || filmModalPurpose === "personal") return;
     filmManualAdd.disabled = true;
     try {
       const result = await saveMovie();
@@ -3187,6 +3828,14 @@ document.addEventListener("click", async (event) => {
     const item = movieList.find((candidate) => candidate.id === voteButton.dataset.vote);
     if (!item || item.watched) return;
     voteButton.disabled = true;
+    if (designPreviewMode) {
+      item.votes = Math.max(0, item.votes + (item.votedByMe ? -1 : 1));
+      item.votedByMe = !item.votedByMe;
+      persistDesignPreviewWorkspace();
+      render();
+      showToast(item.votedByMe ? `Vote added for ${item.title}.` : `Vote removed from ${item.title}.`);
+      return;
+    }
     const query = item.votedByMe ? supabase.from("queue_votes").delete().eq("queue_item_id", item.id).eq("user_id", authUser.id) : supabase.from("queue_votes").insert({ queue_item_id: item.id, user_id: authUser.id });
     const { data, error } = await query.select("queue_item_id").maybeSingle();
     if (error) { voteButton.disabled = false; showToast(`Vote was not changed: ${error.message}`); return; }
@@ -3500,6 +4149,20 @@ partyForm.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const reactionChoice = event.target.closest?.("[data-reaction-value]");
+  if (reactionChoice && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+    const choices = [...reactionChoice.closest("[role='radiogroup']").querySelectorAll("[data-reaction-value]")];
+    const currentIndex = choices.indexOf(reactionChoice);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? choices.length - 1
+        : Math.min(choices.length - 1, Math.max(0, currentIndex + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1)));
+    event.preventDefault();
+    choices[nextIndex]?.focus();
+    choices[nextIndex]?.click();
+    return;
+  }
   const navDestination = event.target.closest?.(".nav-destinations .nav-item");
   if (navDestination && window.matchMedia("(max-width: 860px)").matches && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
     const destinations = [...navDestination.closest(".nav-destinations").querySelectorAll(".nav-item:not(:disabled)")];
@@ -3516,7 +4179,15 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key !== "Escape") return;
   if (!journalDeleteModal.hidden) { closeJournalDeleteModal(); return; }
-  if (selectedFilmId) { selectedFilmId = null; render(); return; }
+  if (selectedFilmId) {
+    selectedFilmId = null;
+    reactionEditorExpanded = false;
+    personalStateEditorExpanded = false;
+    reactionLiveMessage = "";
+    render();
+    window.requestAnimationFrame(() => window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" }));
+    return;
+  }
   if (!partyModal.hidden) closePartyModal();
   if (!filmModal.hidden) closeFilmModal();
 });
@@ -3524,7 +4195,13 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("hashchange", () => {
   const requestedView = window.location.hash.replace("#", "");
   const nextView = legacyViewMap[requestedView] || requestedView;
-  if (nextView && nextView !== currentView && authUser && activeGroup) { currentView = nextView; render(); }
+  if (nextView && nextView !== currentView && authUser && activeGroup) {
+    currentView = nextView;
+    selectedFilmId = null;
+    reactionEditorExpanded = false;
+    personalStateEditorExpanded = false;
+    render();
+  }
 });
 
 if (designPreviewMode) {
