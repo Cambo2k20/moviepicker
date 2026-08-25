@@ -43,6 +43,35 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
   }
 });
 
+test("narrow desktop keeps every My Films filter visible", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The narrow desktop toolbar is covered once.");
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.goto("/moviepicker/?design-preview#my-films");
+  await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
+
+  const filters = page.locator(".my-film-filter-tabs");
+  await expect(filters.locator(".filter-tab")).toHaveCount(5);
+  const geometry = await filters.evaluate((element) => {
+    const container = element.getBoundingClientRect();
+    const tabs = [...element.querySelectorAll(".filter-tab")].map((tab) => {
+      const box = tab.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+      };
+    });
+    return {
+      allVisible: tabs.every((tab) => tab.left >= container.left - 1 && tab.right <= container.right + 1),
+      pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+
+  expect(geometry.allVisible).toBe(true);
+  expect(geometry.pageOverflow).toBeLessThanOrEqual(1);
+  await expect(page.locator("#my-films-sort")).toBeVisible();
+});
+
 test("the unified application canvas scales to a comfortable high-resolution density", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "The high-resolution canvas contract is covered once.");
 
