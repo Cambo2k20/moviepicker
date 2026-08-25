@@ -6,6 +6,7 @@ This repository contains **Discordians / Cine-Cord**, a private, membership-gate
 
 ## Working agreement
 
+- Never begin working without getting confirmation, If i ask you about something always explain your plan for doing it and wait until i agree. 
 - Never merge, auto-merge, rebase, delete or force-update a branch unless Cameron explicitly requests it.
 - Never commit directly to `main`. Work on a focused `feature/`, `fix/` or `codex/` branch.
 - Before editing, inspect the active branch and compare it with `main`; this repository may contain important unmerged work.
