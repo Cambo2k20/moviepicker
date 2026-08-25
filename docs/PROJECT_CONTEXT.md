@@ -21,9 +21,17 @@ authenticate successfully.
 
 ## Current implemented boundary
 
-This section describes the committed feature/session-journal-handoff checkout
-at commit f2ddd4f. A build or commit does not prove that matching migrations,
-Edge Functions or frontend assets have been deployed to production.
+This section describes the authoritative `main` checkout. The latest
+shipped-state audit on 25 August 2026 verified commit `ade6374` in the checkout,
+on `origin/main` and in the successful GitHub Pages deployment. That commit is
+audit evidence, not a permanent boundary: recheck the current branch, deployed
+frontend and hosted migration ledger before relying on it later.
+
+A build or commit does not by itself prove that matching migrations, Edge
+Functions or frontend assets have been deployed to production. The Pages
+workflow now blocks deployment unless production migration parity, local
+authenticated database integration tests, unit tests, the production build and
+end-to-end tests all pass.
 
 ### Authentication and membership
 
@@ -49,6 +57,29 @@ Approved members can:
 
 External movie-database credentials remain in the Edge Function environment.
 The browser receives safe film results only.
+
+### My Cinema and My Films
+
+My Cinema is an implemented private area for approved members. My Films is its
+only available view; Overview and My Lists remain disabled Coming soon
+placeholders.
+
+My Films currently supports:
+
+- Protected personal film search through the existing movie-lookup Edge
+  Function
+- Private film records based on canonical movie identity
+- Want to Watch, Watched and Did Not Finish states
+- One current five-level enjoyment reaction per film
+- A separate Favourite marker
+- Search, state and Favourite filters, and sorting
+- A unified film-detail view that visibly separates owner-only My Cinema data
+  from shared Cine-Cord data
+- Automatic persistence of private changes to the signed-in owner's record
+
+Candidate reaction artwork is implemented, but final production acceptance is
+not recorded. Private notes, reviews, viewing-event history and personal lists
+are not implemented. Discover remains unavailable.
 
 ### Queue Roulette
 
@@ -148,7 +179,8 @@ member-profile directory.
 - **Journal** — current and imported historical watched-film record
 - **Movie-night session** — persistent room containing participants, game
   state, selected film and watch handoff
-- **My Cinema** — approved future private personal-library area; not shipped
+- **My Cinema** — implemented private personal-library area; My Films is
+  shipped while Overview and My Lists remain unavailable
 - **Discover** — approved future private recommendation area; not shipped
 
 ## Current persistence
@@ -164,11 +196,14 @@ Implemented persistence includes:
 - Current Journal entries and viewers
 - Read-only imported Journal volumes and archive entries
 - Explicit Discord publication records
+- Canonical movie records independent from shared or personal membership
+- Owner-only personal-film records with state, current reaction and Favourite
 
 Not implemented:
 
-- Personal My Cinema records, states, ratings, Favourites and lists
 - Personal viewing-event history
+- Private notes and reviews
+- Personal lists and list ordering
 - Curated profile publications and group profile directory
 - Discover feedback or recommendation profiles
 - Archive-entry claims
