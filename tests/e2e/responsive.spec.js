@@ -417,6 +417,118 @@ test("the master Journal keeps archives read-only and current entries actionable
   await expect(page.locator(".journal-header .eyebrow")).toContainText("2 archived");
   await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
   await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  if (testInfo.project.name === "phone") {
+    const narrowCardGeometry = await page.evaluate(() => ({
+      documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      cards: [...document.querySelectorAll(".journal-entry-card")].map((card) => {
+        const bodyRect = card.querySelector(".journal-entry-body").getBoundingClientRect();
+        const actionsRect = card.querySelector(".journal-entry-actions").getBoundingClientRect();
+        const actionButtons = card.querySelector(".journal-entry-action-buttons");
+        const buttonRects = [...actionButtons.children].map((button) => button.getBoundingClientRect());
+        return {
+          footerDirection: getComputedStyle(card.querySelector(".journal-entry-actions")).flexDirection,
+          actionColumns: getComputedStyle(actionButtons).gridTemplateColumns.split(" ").length,
+          footerBelowBody: Math.round(actionsRect.top - bodyRect.bottom),
+          footerOverflow: actionsRect.width < card.querySelector(".journal-entry-actions").scrollWidth,
+          buttonsFillFooter: buttonRects.every((rect) => Math.abs(rect.width - actionButtons.getBoundingClientRect().width) <= 1),
+          minimumButtonHeight: Math.min(...buttonRects.map((rect) => Math.round(rect.height))),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        };
+      }),
+    }));
+    expect(narrowCardGeometry.documentOverflow).toBeLessThanOrEqual(1);
+    expect(narrowCardGeometry.cards.every(({ footerDirection, actionColumns }) => footerDirection === "column" && actionColumns === 1)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ footerBelowBody }) => footerBelowBody === 0)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ footerOverflow, buttonsFillFooter }) => !footerOverflow && buttonsFillFooter)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ minimumButtonHeight }) => minimumButtonHeight >= 44)).toBe(true);
+    expect(narrowCardGeometry.cards.every(({ contentOverflow }) => contentOverflow <= 1)).toBe(true);
+  }
+  if (testInfo.project.name === "tablet") {
+    const tabletCardGeometry = await page.evaluate(() => ({
+      documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      cards: [...document.querySelectorAll(".journal-entry-card")].map((card) => {
+        const footer = card.querySelector(".journal-entry-actions");
+        const actionButtons = card.querySelector(".journal-entry-action-buttons");
+        return {
+          footerDirection: getComputedStyle(footer).flexDirection,
+          actionColumns: getComputedStyle(actionButtons).gridTemplateColumns.split(" ").length,
+          footerOverflow: footer.scrollWidth - footer.clientWidth,
+          minimumButtonHeight: Math.min(...[...actionButtons.children].map((button) => Math.round(button.getBoundingClientRect().height))),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        };
+      }),
+    }));
+    expect(tabletCardGeometry.documentOverflow).toBeLessThanOrEqual(1);
+    expect(tabletCardGeometry.cards.map(({ footerDirection }) => footerDirection)).toEqual(["column", "column", "column"]);
+    expect(tabletCardGeometry.cards.map(({ actionColumns }) => actionColumns)).toEqual([2, 1, 1]);
+    expect(tabletCardGeometry.cards.every(({ footerOverflow, contentOverflow }) => footerOverflow <= 1 && contentOverflow <= 1)).toBe(true);
+    expect(tabletCardGeometry.cards.every(({ minimumButtonHeight }) => minimumButtonHeight >= 44)).toBe(true);
+  }
+  if (testInfo.project.name === "desktop") {
+    const journalGeometry = await page.evaluate(() => {
+      const list = document.querySelector(".journal-entry-list");
+      const cards = [...document.querySelectorAll(".journal-entry-card")];
+      const currentCard = cards[0];
+      const currentBody = currentCard.querySelector(".journal-entry-body");
+      const currentActions = currentCard.querySelector(".journal-entry-actions");
+      const currentTitle = currentCard.querySelector("h2");
+      const currentYear = currentCard.querySelector(".journal-entry-year");
+      const listStyle = getComputedStyle(list);
+      const bodyRect = currentBody.getBoundingClientRect();
+      const actionsRect = currentActions.getBoundingClientRect();
+      const titleRect = currentTitle.getBoundingClientRect();
+      const yearRect = currentYear.getBoundingClientRect();
+      return {
+        listWidth: Math.round(list.getBoundingClientRect().width),
+        listMarginTop: Math.round(Number.parseFloat(listStyle.marginTop)),
+        listGap: Math.round(Number.parseFloat(listStyle.gap)),
+        cards: cards.map((card) => ({
+          width: Math.round(card.getBoundingClientRect().width),
+          height: Math.round(card.getBoundingClientRect().height),
+          titleSize: Math.round(Number.parseFloat(getComputedStyle(card.querySelector("h2")).fontSize)),
+          contentOverflow: card.scrollHeight - card.clientHeight,
+        })),
+        footerWidth: Math.round(actionsRect.width),
+        footerHeight: Math.round(actionsRect.height),
+        footerBelowBody: Math.round(actionsRect.top - bodyRect.bottom),
+        footerDirection: getComputedStyle(currentActions).flexDirection,
+        footerOverflow: currentActions.scrollWidth - currentActions.clientWidth,
+        titleYearGap: Math.round(yearRect.left - titleRect.right),
+        actionCounts: cards.map((card) => card.querySelectorAll(".journal-entry-action-buttons > *").length),
+        actionOrder: [...currentCard.querySelectorAll(".journal-entry-action-buttons > *")].map((action) => action.textContent.replace(action.querySelector(".material-symbols-outlined")?.textContent || "", "").trim()),
+        actionLevels: [...currentCard.querySelectorAll(".journal-entry-action-buttons > *")].map((action) => action.classList.contains("primary-button") ? "primary" : (action.classList.contains("secondary-button") ? "secondary" : "quiet")),
+        title: currentTitle.textContent.trim(),
+        year: currentYear.textContent.trim(),
+        facts: [...currentCard.querySelectorAll(".journal-entry-fact")].map((fact) => fact.textContent.trim().replace(/\s+/g, " ")),
+        comment: currentCard.querySelector(".journal-entry-comment").textContent.trim(),
+      };
+    });
+    const { cards, ...journalLayout } = journalGeometry;
+    expect(journalLayout).toEqual({
+      listWidth: 1000,
+      listMarginTop: 12,
+      listGap: 20,
+      footerWidth: 998,
+      footerHeight: 60,
+      footerBelowBody: 0,
+      footerDirection: "row",
+      footerOverflow: 0,
+      titleYearGap: 10,
+      actionCounts: [4, 1, 1],
+      actionOrder: ["Update Discord post", "View in Discord", "Copy for Discord", "Edit"],
+      actionLevels: ["primary", "secondary", "quiet", "quiet"],
+      title: "Filth",
+      year: "2013",
+      facts: ["Viewers — Dean, Kieran", "Recorded by Cameron"],
+      comment: "Same rules still apply — corrected on Cine-Cord after posting.",
+    });
+    expect(cards.map(({ width, titleSize, contentOverflow }) => ({ width, titleSize, contentOverflow }))).toEqual([
+      { width: 1000, titleSize: 28, contentOverflow: 1 },
+      { width: 1000, titleSize: 25, contentOverflow: 1 },
+      { width: 1000, titleSize: 28, contentOverflow: 1 },
+    ]);
+    expect(cards.every(({ height }) => height >= 216 && height <= 220)).toBe(true);
+  }
   await expect(page.locator(".journal-entry-card.is-archive [data-edit-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-delete-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-journal-entry-form]")).toHaveCount(0);

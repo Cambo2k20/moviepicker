@@ -2260,6 +2260,13 @@ function renderJournalEditor(entry) {
     </form>`;
 }
 
+function journalTitleFitClass(title) {
+  const length = [...String(title || "").trim()].length;
+  if (length > 30) return "is-very-long";
+  if (length > 18) return "is-long";
+  return "";
+}
+
 function renderJournalCard(entry) {
   const isArchive = entry.sourceType === "DISCORD_ARCHIVE";
   const isEditing = !isArchive
@@ -2269,33 +2276,43 @@ function renderJournalCard(entry) {
   const publication = entry.publication;
   const hasDiscordMessage = Boolean(entry.discordUrl || publication?.discord_message_id);
   const isOutOfDate = Boolean(entry.discordOutOfDate || publication?.status === "UPDATE_FAILED");
-  const isSyncing = journalSyncPendingId === entry.journalEntryId || ["POSTING", "UPDATING"].includes(publication?.status);
+  const isSyncing = !isArchive
+    && Boolean(entry.journalEntryId)
+    && (journalSyncPendingId === entry.journalEntryId || ["POSTING", "UPDATING"].includes(publication?.status));
   const sourceCopy = isArchive
     ? `${entry.volumeName} · Original Discord message`
     : `Cine-Cord · Created by ${entry.authorName}`;
-  const discordState = !isArchive && hasDiscordMessage
-    ? (isOutOfDate ? `<span class="journal-discord-state is-stale"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
-    : "";
+  const actionStateClass = isArchive
+    ? "is-archive"
+    : (hasDiscordMessage ? (isOutOfDate ? "is-stale" : "is-current") : "is-not-posted");
+  const discordState = isArchive
+    ? ""
+    : (hasDiscordMessage
+      ? (isOutOfDate ? `<span class="journal-discord-state is-stale" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
+      : `<span class="journal-discord-state is-not-posted" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">draft</span>Not posted to Discord</span>`);
   return `
     <article class="journal-entry-card layout-container ${isArchive ? "layout-container-neutral is-archive" : "layout-container-shared is-current"} ${isEditing ? "is-editing" : ""}">
       <div class="journal-entry-head">
         <div><span class="journal-entry-number">Entry #${escapeHTML(entry.entryLabel)}</span><span class="journal-source-label">${escapeHTML(sourceCopy)}</span></div>
         <span class="status-pill ${entry.status === "DNF" ? "journal-dnf" : "watched"}">${escapeHTML(journalStatusLabel(entry.status))}</span>
       </div>
-      <div class="journal-entry-main">
-        <div><h2>${escapeHTML(entry.title)}</h2><p class="journal-entry-meta">${entry.year ? escapeHTML(entry.year) : "Year not recorded"} · ${entry.watchedAt ? escapeHTML(formatAddedDate(entry.watchedAt)) : "Watch date not recorded"}</p></div>
-        <dl><div><dt>Viewers</dt><dd>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</dd></div><div><dt>Recorded by</dt><dd>${escapeHTML(entry.authorName)}</dd></div></dl>
-        ${entry.comment ? `<blockquote>${escapeHTML(entry.comment)}</blockquote>` : ""}
-        ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
+      <div class="journal-entry-body">
+        <div class="journal-entry-copy">
+          <div class="journal-entry-title-line"><h2 class="${journalTitleFitClass(entry.title)}" title="${escapeHTML(entry.title)}">${escapeHTML(entry.title)}</h2><span class="journal-entry-year">${entry.year ? escapeHTML(entry.year) : "Year not recorded"}</span></div>
+          <p class="journal-entry-fact"><span>Viewers — </span><strong>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</strong></p>
+          <p class="journal-entry-fact"><span>Recorded by </span><strong>${escapeHTML(entry.authorName)}</strong></p>
+          ${entry.comment ? `<p class="journal-entry-comment">${escapeHTML(entry.comment)}</p>` : ""}
+          ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
+        </div>
       </div>
-      <footer class="journal-entry-actions">
-        <div>${discordState}</div>
-        <div>
-          ${!isArchive ? `<button class="secondary-button compact" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
-          ${entry.canEdit ? `<button class="quiet-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
-          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="secondary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
-          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="secondary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
-          ${entry.discordUrl ? `<a class="quiet-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>${isArchive ? "Open original" : "View in Discord"}</a>` : ""}
+      <footer class="journal-entry-actions ${actionStateClass} ${isSyncing ? "is-syncing" : ""}" aria-label="Actions for ${escapeHTML(entry.title)}">
+        ${discordState}
+        <div class="journal-entry-action-buttons">
+          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="primary-button compact journal-action-primary" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact journal-action-setup" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
+          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact journal-action-primary" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
+          ${entry.discordUrl ? `<a class="secondary-button compact journal-action-destination" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>${isArchive ? "Open original" : "View in Discord"}</a>` : ""}
+          ${!isArchive ? `<button class="quiet-button compact journal-action-utility journal-action-copy" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
+          ${entry.canEdit ? `<button class="quiet-button compact journal-action-utility journal-action-edit" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
         </div>
       </footer>
       ${isEditing ? renderJournalEditor(entry) : ""}
