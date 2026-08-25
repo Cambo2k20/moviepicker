@@ -85,6 +85,16 @@ Release order matters:
 
 The frontend remains compatible with the previous function response because a missing `movieId` is written as null. Deploying the new Edge Function before the migration is not compatible: its canonical upsert would fail because `public.movies` would not exist.
 
+## Phase 2A personal-film foundation
+
+`20260825021731_add_personal_films.sql` begins the local Phase 2A implementation. It creates one owner-private `personal_films` row per member and canonical movie, containing only the current state, one nullable 1–5 enjoyment rating and the independent Favourite marker. Reviews, private notes, viewing events and personal-list membership remain later migrations.
+
+The table is owner-only through RLS and also requires the owner to retain approved group membership. Administrators cannot inspect another member's rows. Membership removal hides retained data immediately, while Auth-account deletion cascades through `profiles` and removes the personal rows. Browser privileges are column-limited: members cannot rewrite ownership, canonical identity or audit timestamps.
+
+Rating insertion or change atomically marks the film `WATCHED` unless `DID_NOT_FINISH` is explicit. Clearing a rating leaves state and Favourite unchanged. Personal-film writes never add to or alter `queue_items`, so Suggest for Cine-Cord remains a separate future action.
+
+This Phase 2A migration is local-only until its implementation, tests and user-facing flows are reviewed and explicitly approved for production deployment.
+
 `20260824031315_add_discord_journal_publications.sql` adds the original publication record. `20260824122806_add_master_journal_and_discord_identities.sql` extends it for Phase 1, and `20260824143921_use_discord_server_profiles.sql` replaces the original account-wide identity cache with the verified The Discordians server profile. The caller must be the entry creator or an administrator; a new webhook post requires that caller's synchronised server display name/avatar, while later updates PATCH the stored Discord message ID without changing its original author. A unique row per Journal entry and the stored Discord message ID prevent ordinary duplicate posts. Runtime, genres, current viewers, status and the optional comment are built from canonical database values; Discord mentions are disabled. Manual **Copy for Discord** remains available even when a server profile has not been connected.
 
 Set the webhook in the hosted project's Edge Function secrets, then deploy the function with the platform JWT gateway disabled:
@@ -161,4 +171,4 @@ The suite is not wired into CI, because CI has no database service. Run it local
 
 ## Current persistence boundary
 
-The canonical movie catalogue, movie list, voting, sessions, watch history, Journal drafts, current Journal entries, the historical Journal catalog, Discord server identities and explicit Discord Journal publications are persistent when their migrations are applied. Current entries can be reached from watched sessions or the top-level Journal. Personal My Cinema records, ratings, favourites and lists are not part of this foundation yet. Discord slash-command editing and modals, live multiplayer presence and Wrapped calculations remain outside this phase.
+The canonical movie catalogue, movie list, voting, sessions, watch history, Journal drafts, current Journal entries, the historical Journal catalog, Discord server identities and explicit Discord Journal publications are persistent when their migrations are applied. Current entries can be reached from watched sessions or the top-level Journal. The local Phase 2A branch adds private personal-film records, current states, ratings and Favourites; these are not yet deployed or exposed in the live frontend. Personal reviews, notes, viewing events and lists remain unbuilt. Discord slash-command editing and modals, live multiplayer presence and Wrapped calculations remain outside this phase.
