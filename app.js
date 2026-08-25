@@ -1220,6 +1220,7 @@ function renderFilmMatches(matches) {
 
 function metadataPayload(movie) {
   return {
+    movie_id: movie.movieId || null,
     title: movie.title,
     release_year: movie.year,
     tmdb_id: movie.tmdbId,
@@ -2227,6 +2228,7 @@ async function confirmMovieSession(winner) {
       selected_queue_item_id: winner.id,
       selected_title: winner.title,
       selected_release_year: winner.year || null,
+      selected_movie_id: winner.movieId || null,
       selected_tmdb_id: winner.tmdbId || null,
       selected_poster_path: winner.posterPath || null,
       selected_runtime_minutes: winner.runtime || null,
@@ -2561,6 +2563,7 @@ async function loadWorkspace(providerToken = null) {
       votedByMe: voters.includes(authUser.id),
       posterUrl,
       posterPath: item.poster_path || null,
+      movieId: item.movie_id || null,
       tmdbId: item.tmdb_id || null,
       metadataUpdatedAt: item.metadata_updated_at || null,
       runtime: Number(item.runtime_minutes) || null,
@@ -2612,6 +2615,7 @@ async function loadWorkspace(providerToken = null) {
       id: session.selected_queue_item_id || `session-${session.id}`,
       title: session.selected_title,
       year: session.selected_release_year,
+      movieId: session.selected_movie_id || null,
       tmdbId: session.selected_tmdb_id,
       posterPath: session.selected_poster_path,
       posterUrl: session.selected_poster_path ? tmdbPoster(session.selected_poster_path) : null,

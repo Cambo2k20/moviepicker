@@ -143,13 +143,17 @@ function anonClient() {
   });
 }
 
-// The Auth admin API is a separate service from PostgREST and does accept the
-// service key, so user creation still goes through the supported path.
-function authAdminClient() {
+export function serviceDataClient() {
   const { apiUrl, serviceKey } = localEnv();
   return createClient(apiUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+// The Auth admin API is a separate service from PostgREST and does accept the
+// service key, so user creation still goes through the supported path.
+function authAdminClient() {
+  return serviceDataClient();
 }
 
 // Application tables only. public.groups keeps the row the base migration
@@ -166,6 +170,7 @@ export function resetWorkspace() {
       public.movie_sessions,
       public.queue_votes,
       public.queue_items,
+      public.movies,
       public.group_join_requests,
       public.group_memberships
     restart identity cascade;
