@@ -189,3 +189,91 @@ The source and implementation were placed in the same four comparison images bef
 - [x] Verify mobile/desktop layout, primary interactions and app-origin console logs
 
 final result: passed
+
+# Navigation design QA
+
+## Comparison target
+
+- Source visual truth:
+  - `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\claude-navigation-audit\03-proposal-mobile-list.png`
+  - `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\claude-navigation-audit\05-proposal-desktop.png`
+- Rendered implementation: `http://127.0.0.1:4178/moviepicker/?design-preview#list`
+- State: design-preview member/admin data, The List active, Cine-Cord open, My Cinema and Discover disabled as Private / Coming soon, Member Profiles disabled, Admin available to the preview administrator.
+
+## Viewports and evidence
+
+| Surface | CSS viewport | Source pixels | Implementation pixels | Density normalization | Implementation screenshot |
+| --- | ---: | ---: | ---: | --- | --- |
+| Phone | 390 × 843 (390 × 844 target) | 476 × 1029 | 476 × 1028 | In-app Browser reported DPR 0.82. Its integer viewport override produced a one-CSS-pixel height difference, so the implementation was scaled vertically by one output pixel only for the comparison board. | `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\implementation-phone-final-390x843-css.png` |
+| Tablet | 768 × 1024 | No tablet source supplied | 937 × 1249 | DPR 0.82; no source normalization. This is the approved responsive extrapolation of the phone two-tier navigation. | `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\implementation-tablet-final-768x1024-css.png` |
+| Desktop | 1440 × 900 | 1756 × 1097 | 1756 × 1098 | In-app Browser reported DPR 0.82. The source was scaled vertically by one output pixel only for the comparison board. | `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\implementation-desktop-final-1440x900-css.png` |
+
+Full-view comparison evidence, with source on the left and implementation on the right:
+
+- `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-phone-final.png`
+- `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-desktop-final.png`
+
+Focused comparison evidence was required because the full desktop board makes labels and small navigation states difficult to judge:
+
+- Phone title/header: `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-phone-header-final.png`
+- Phone two-tier navigation: `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-phone-nav-final.png`
+- Desktop nested rail: `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-desktop-sidebar-final.png`
+- Desktop title and controls: `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-desktop-header-final.png`
+
+## Comparison history
+
+### Iteration 1 — blocked
+
+- P1 — The old raster logo and profile-heavy phone header remained instead of the selected text title treatment. Evidence: `C:\Users\Cambo\.codex\visualizations\2026\08\24\01a034ab-d10c-7421-bbb0-1e1474cdaae0\navigation-implementation-qa\comparison-phone-initial.png` and `comparison-desktop-initial.png` in the same directory. This changed the selected hierarchy and did not address the title problem the design was commissioned to solve.
+- P2 — The phone displayed permanent All / Ready / Watched tabs plus a second Filters & sort row. That pushed the real posters materially farther below the fold than the source. Evidence: the same initial phone comparison.
+- P2 — The desktop title block had the old oversized heading and no shared header/filter frame, so its vertical rhythm and region proportions did not match the selected desktop source. Evidence: the initial desktop comparison.
+
+Fixes made:
+
+- Replaced the raster brand treatment with Barlow Condensed `The Discordians` and the monospace `Companion app` label at the source sizes.
+- Matched the phone and desktop title scale, desktop sidebar width, rail spacing, title/filter frame, and violet accent rule.
+- Combined phone search and filter access into one row while keeping every status, genre, member, and sort control available when the accessible filter button expands.
+- Kept the existing profile refresh and sign-out actions available as compact icon controls on phone rather than deleting working account functions omitted by the mock.
+
+### Iteration 2 — passed
+
+Post-fix full-view and focused evidence is listed above. The earlier P1/P2 differences are resolved.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Barlow Condensed, Space Grotesk and the existing monospace label stack match the source family and hierarchy. Brand, page title, small labels, counts, line height and wrapping were checked at phone, tablet and desktop sizes.
+- Spacing and layout rhythm: the 268 px desktop rail, 1440 × 900 title/filter frame, phone content gutters, two-tier footer heights, active destination visibility and poster grid spacing match the source intent without horizontal overflow.
+- Colors and visual tokens: the existing Discordians purple, grey and white tokens map directly to the source. Active, disabled, shared/private and focus states remain distinguishable.
+- Image quality and asset fidelity: real TMDB poster artwork is retained at full 2:3 proportions. The source's striped rectangles were presentation placeholders, not assets to reproduce. All preview posters and member avatars loaded successfully in browser and end-to-end checks.
+- Copy and content: `Cine-Cord`, `The List`, `Watch a Film`, `Group Stats`, `My Cinema`, `Discover`, `Member Profiles`, Shared, Private and Coming soon match the approved product direction. Dynamic preview counts intentionally differ from the mock data.
+- Icons: existing Material Symbols are used for functional controls; no emoji, CSS drawings, inline SVG approximations or placeholder artwork were introduced.
+- Accessibility and behaviour: active routes use `aria-current="page"`; unavailable areas use real disabled controls and `aria-disabled`; the phone filter toggle has changing accessible names; keyboard destination movement and auto-reveal are covered by Playwright at phone and tablet sizes.
+
+## Interactions and runtime checks
+
+- In-app Browser: expanded and collapsed phone filters, navigated to Group Stats, opened Admin / Members, returned to Cine-Cord / The List, and confirmed My Cinema and Discover remained disabled.
+- Automated browser suite: verified phone/tablet keyboard End + Enter navigation, active-item reveal, unavailable areas, text brand, account controls, poster prominence, dialogs, Journal and existing session flows.
+- Console: 0 errors and 0 warnings after the final phone, tablet and desktop navigation checks.
+- Responsive overflow: no horizontal document overflow at 390 × 843, 768 × 1024 or 1440 × 900.
+
+## Intentional differences from the visual source
+
+- Watch a Film is violet-primary on phone and desktop because that cross-viewport priority was explicitly approved.
+- Desktop uses six larger real posters at 1440 px rather than seven narrow striped placeholders; this was explicitly approved to preserve artwork prominence.
+- The web app does not reproduce the mock's simulated phone operating-system status bar.
+- Refresh profile and sign-out remain accessible even though the visual mock omits those working account actions.
+
+## Findings
+
+No actionable P0, P1 or P2 differences remain. No P3 follow-up is required for the navigation release.
+
+## Implementation checklist
+
+- [x] Source and implementation opened and compared together.
+- [x] Phone, tablet and desktop layouts checked.
+- [x] Typography, spacing, colors, image quality, copy, icons and interaction states checked.
+- [x] Initial P1/P2 findings fixed and recaptured.
+- [x] Console and overflow checked.
+- [x] Unit tests, build and complete Playwright suite passed.
+
+final result: passed

@@ -2,18 +2,18 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/moviepicker/?design-preview");
-  await expect(page.getByRole("heading", { name: "Collective Film Library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The List", exact: true })).toBeVisible();
 });
 
-test("large desktop library scales poster columns gradually", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop", "The stepped desktop breakpoints are covered once.");
+test("large desktop library keeps poster artwork prominent as space grows", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The responsive desktop grid is covered once.");
 
   const grid = page.locator(".poster-grid");
   await expect(grid).toBeVisible();
   const breakpoints = [
     { width: 1326, height: 780, columns: 6 },
-    { width: 1440, height: 900, columns: 7 },
-    { width: 1600, height: 900, columns: 8 },
+    { width: 1440, height: 900, columns: 6 },
+    { width: 1600, height: 900, columns: 7 },
   ];
 
   for (const viewport of breakpoints) {
@@ -26,12 +26,75 @@ test("large desktop library scales poster columns gradually", async ({ page }, t
   }
 });
 
+test("area navigation keeps future sections truthful and available routes working", async ({ page }) => {
+  const cineCordArea = page.locator('[data-nav-area="cine-cord"]');
+  const myCinema = page.locator('[data-nav-area="my-cinema"] .nav-area-toggle');
+  const discover = page.locator('[data-nav-area="discover"] .nav-area-toggle');
+  const memberProfiles = page.getByRole("button", { name: /Member Profiles/ });
+
+  await expect(cineCordArea).toHaveClass(/is-open/);
+  await expect(page.locator('[data-view="list"]')).toHaveAttribute("aria-current", "page");
+  await expect(myCinema).toBeDisabled();
+  await expect(myCinema).toContainText(/Private.*Coming soon|Private.*Soon/);
+  await expect(discover).toBeDisabled();
+  await expect(discover).toContainText(/Private.*Coming soon|Private.*Soon/);
+  await expect(memberProfiles).toBeDisabled();
+
+  await page.locator('[data-nav-area="admin"] .nav-area-toggle').click();
+  await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
+  await expect(page.locator('[data-nav-area="admin"]')).toHaveClass(/is-open/);
+  await expect(page.locator('[data-view="members"]')).toHaveAttribute("aria-current", "page");
+
+  await page.locator('[data-nav-area="cine-cord"] .nav-area-toggle').click();
+  await expect(page.getByRole("heading", { name: "The List", exact: true })).toBeVisible();
+  await expect(cineCordArea).toHaveClass(/is-open/);
+});
+
+test("phone and tablet destination row supports keyboard movement and reveals the active route", async ({ page }, testInfo) => {
+  test.skip(!["phone", "tablet"].includes(testInfo.project.name), "The two-tier footer is used on phone and tablet.");
+
+  const listDestination = page.locator('[data-view="list"]');
+  await listDestination.focus();
+  await listDestination.press("End");
+  await expect(page.locator('[data-view="stats"]')).toBeFocused();
+  await page.locator('[data-view="stats"]').press("Enter");
+  await expect(page.getByRole("heading", { name: "Group Stats", exact: true })).toBeVisible();
+
+  const bounds = await page.locator('[data-view="stats"]').evaluate((button) => {
+    const buttonBox = button.getBoundingClientRect();
+    const rowBox = button.closest(".nav-destinations").getBoundingClientRect();
+    return { buttonLeft: buttonBox.left, buttonRight: buttonBox.right, rowLeft: rowBox.left, rowRight: rowBox.right };
+  });
+  expect(bounds.buttonLeft).toBeGreaterThanOrEqual(bounds.rowLeft - 1);
+  expect(bounds.buttonRight).toBeLessThanOrEqual(bounds.rowRight + 1);
+});
+
+test("phone keeps the complete list filters behind the compact filter control", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "phone", "The compact filter control is phone-specific.");
+
+  const filterTabs = page.locator(".filter-tabs");
+  const filterControls = page.locator(".list-filter-controls");
+  await expect(filterTabs).toBeHidden();
+  await expect(filterControls).toBeHidden();
+
+  await page.getByRole("button", { name: "Show filters and sort" }).click();
+  await expect(page.getByRole("button", { name: "Hide filters and sort" })).toBeVisible();
+  await expect(filterTabs).toBeVisible();
+  await expect(filterControls).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ready", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Filter by genre" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Hide filters and sort" }).click();
+  await expect(filterTabs).toBeHidden();
+  await expect(filterControls).toBeHidden();
+});
+
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop detail-drawer artwork is covered once.");
 
   await page.setViewportSize({ width: 1590, height: 1272 });
   await expect(page.getByRole("button", { name: "Add film to library" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Watch a Film" })).toBeVisible();
+  await expect(page.locator(".list-hero-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
 
   await page.locator("[data-select-film]").first().click();
   const detailPoster = page.locator(".detail-poster");
@@ -87,12 +150,13 @@ test("the available game and watch-party dialog stay truthful and in-bounds", as
   expect(dialogOverflow).toBeLessThanOrEqual(1);
 });
 
-test("local application images resolve in the browser", async ({ page }) => {
-  const logo = page.locator(".brand-logo");
-  await expect(logo).toBeVisible();
-  expect(await logo.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+test("the text brand and local application images resolve in the browser", async ({ page }) => {
+  const brand = page.getByRole("link", { name: "Open The Discordians movie list" });
+  await expect(brand).toBeVisible();
+  await expect(brand).toContainText("The Discordians");
+  await expect(brand).toContainText("Companion app");
 
-  await page.getByRole("button", { name: "Members" }).click();
+  await page.locator('[data-nav-area="admin"] .nav-area-toggle').click();
   const memberCards = page.locator(".member-admin-row");
   await expect(memberCards).toHaveCount(5);
   const avatars = page.locator(".member-admin-identity img");

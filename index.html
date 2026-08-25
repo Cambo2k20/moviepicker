@@ -12,41 +12,73 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260824-logo-sidebar-v36" />
+  <link rel="stylesheet" href="./styles.css?v=20260825-area-navigation-v41" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Primary navigation">
       <div class="brand-block">
-        <a class="brand" href="#list" data-nav="list" aria-label="Open The Discordians movie list"><img class="brand-logo" src="./assets/discordians-logo.png" alt="" /></a>
+        <a class="brand" href="#list" data-nav="list" aria-label="Open The Discordians movie list">
+          <span class="brand-title">The Discordians</span>
+          <span class="brand-subtitle">Companion app</span>
+        </a>
         <span class="brand-rule"></span>
-        <span class="section-label">Cine-Cord</span>
       </div>
 
-      <nav class="primary-nav">
-        <button class="nav-item is-active" type="button" data-view="list">
-          <span class="material-symbols-outlined" aria-hidden="true">format_list_bulleted</span><span>The List</span>
-        </button>
-        <button class="nav-item" type="button" data-view="pick">
-          <span class="material-symbols-outlined" aria-hidden="true">casino</span><span>Pick Tonight</span>
-        </button>
-        <button class="nav-item" type="button" data-view="sessions">
-          <span class="material-symbols-outlined" aria-hidden="true">group</span><span>Sessions</span>
-        </button>
-        <button class="nav-item" type="button" data-view="journal">
-          <span class="material-symbols-outlined" aria-hidden="true">menu_book</span><span>Journal</span>
-        </button>
-        <button class="nav-item" type="button" data-view="stats">
-          <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span><span>List Stats</span>
-        </button>
-        <button class="nav-item" type="button" data-view="members" data-admin-only hidden>
-          <span class="material-symbols-outlined" aria-hidden="true">group</span><span>Members</span>
-        </button>
+      <nav class="primary-nav" aria-label="Explore Cine-Cord">
+        <section class="nav-area is-open" data-nav-area="cine-cord">
+          <button class="nav-area-toggle is-active" type="button" data-nav-area-toggle="cine-cord" data-default-view="list" aria-expanded="true" aria-controls="cine-cord-destinations">
+            <span class="nav-area-copy"><strong>Cine-Cord</strong><small>Shared</small></span>
+            <span class="nav-area-chevron material-symbols-outlined" aria-hidden="true">chevron_right</span>
+          </button>
+          <div id="cine-cord-destinations" class="nav-destinations">
+            <button class="nav-item is-active" type="button" data-view="list">
+              <span class="nav-marker" aria-hidden="true"></span><span>The List</span>
+            </button>
+            <button class="nav-item" type="button" data-view="pick">
+              <span class="nav-marker" aria-hidden="true"></span><span>Watch a Film</span>
+            </button>
+            <button class="nav-item" type="button" data-view="sessions">
+              <span class="nav-marker" aria-hidden="true"></span><span>Sessions</span>
+            </button>
+            <button class="nav-item" type="button" data-view="journal">
+              <span class="nav-marker" aria-hidden="true"></span><span>Journal</span>
+            </button>
+            <button class="nav-item" type="button" data-view="stats">
+              <span class="nav-marker" aria-hidden="true"></span><span>Group Stats</span>
+            </button>
+            <button class="nav-item is-unavailable" type="button" disabled aria-disabled="true">
+              <span class="nav-marker" aria-hidden="true"></span><span>Member Profiles</span><small>Coming soon</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="nav-area is-unavailable" data-nav-area="my-cinema">
+          <button class="nav-area-toggle" type="button" disabled aria-disabled="true">
+            <span class="nav-area-copy"><strong>My Cinema</strong><small><span class="nav-status-wide">Private · Coming soon</span><span class="nav-status-compact">Private · Soon</span></small></span>
+          </button>
+        </section>
+
+        <section class="nav-area is-unavailable" data-nav-area="discover">
+          <button class="nav-area-toggle" type="button" disabled aria-disabled="true">
+            <span class="nav-area-copy"><strong>Discover</strong><small><span class="nav-status-wide">Private · Coming soon</span><span class="nav-status-compact">Private · Soon</span></small></span>
+          </button>
+        </section>
+
+        <section class="nav-area" data-nav-area="admin" data-admin-only hidden>
+          <button class="nav-area-toggle" type="button" data-nav-area-toggle="admin" data-default-view="members" aria-expanded="false" aria-controls="admin-destinations">
+            <span class="nav-area-copy"><strong>Admin</strong><small>Admins</small></span>
+            <span class="nav-area-chevron material-symbols-outlined" aria-hidden="true">chevron_right</span>
+          </button>
+          <div id="admin-destinations" class="nav-destinations">
+            <button class="nav-item" type="button" data-view="members">
+              <span class="nav-marker" aria-hidden="true"></span><span>Members</span>
+            </button>
+          </div>
+        </section>
       </nav>
 
       <div class="sidebar-footer">
-        <span>The Discordian</span>
-        <span>Companion App</span>
         <div id="session-panel" class="session-panel" hidden>
           <div class="session-identity">
             <img id="session-avatar" class="session-avatar" alt="" hidden />
@@ -58,7 +90,7 @@
           <button id="discord-profile-refresh" class="discord-profile-refresh" type="button" data-refresh-discord-profile hidden aria-label="Refresh The Discordians server profile" title="Refresh The Discordians server profile">
             <span class="material-symbols-outlined" aria-hidden="true">sync</span><span class="discord-profile-refresh-label">Refresh Discord profile</span>
           </button>
-          <button class="session-sign-out" type="button" data-sign-out>Sign out</button>
+          <button class="session-sign-out" type="button" data-sign-out aria-label="Sign out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span class="session-sign-out-label">Sign out</span></button>
         </div>
       </div>
     </aside>
@@ -150,6 +182,6 @@
       }
     }
   </script>
-  <script type="module" src="./app.js?v=20260824-journal-delete-v34"></script>
+  <script type="module" src="./app.js?v=20260825-area-navigation-v36"></script>
 </body>
 </html>
