@@ -6,8 +6,12 @@ Approved: 24 August 2026
 
 Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 
-Current position: Phase 0 — documentation complete on
-codex/product-direction. Phases 1–5 have not started.
+Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
+identity, owner-only personal-film records, states, reactions and Favourites
+are shipped, while the remaining private-data foundation is not. Phase 2A is
+also in progress: its core My Films experience is deployed, but final reaction
+artwork acceptance and responsive release QA remain open. Phases 2B–5 have not
+started.
 
 ## Purpose and authority
 
@@ -210,7 +214,8 @@ Rules:
 
 ### Decision 003A — Rating interaction and artwork
 
-Status: Approved direction; final production assets are not yet created
+Status: Approved direction; candidate assets are implemented, but final
+production acceptance is not yet recorded
 
 Five numbered controls are used. Hover previews the label and artwork; keyboard
 focus provides the same preview; touch selects and shows the reaction. Hover or
@@ -540,7 +545,7 @@ clearly unavailable until the complete user-facing milestone passes its gates.
 
 #### Phase 0 — Documentation
 
-Status: Complete on codex/product-direction
+Status: Complete and maintained on main
 
 - Establish this document.
 - Correct stale current-state documents.
@@ -549,12 +554,21 @@ Status: Complete on codex/product-direction
 
 #### Phase 1 — Private data foundation
 
-Status: Not started
+Status: In progress
 
-- Define canonical movie identity and personal records.
-- Add viewing events, reactions, Favourites, reviews, lists, Discover feedback
-  and explicit profile-publication entities.
-- Use additive migrations, explicit grants and RLS.
+Shipped foundation:
+
+- Canonical movie identity and safe metadata
+- Owner-only personal-film records with states, reactions and Favourites
+- Additive migrations, explicit grants and owner-only RLS
+- Production migration-parity verification before frontend deployment
+
+Still required in this phase:
+
+- Add viewing events, private notes, reviews, lists, Discover feedback and
+  explicit profile-publication entities.
+- Define the restricted removed-member, export, deletion and historical-
+  identity foundations required by Decision 009.
 - Test several authenticated identities.
 - Leave current group behaviour unchanged.
 
@@ -563,11 +577,13 @@ or function definitions.
 
 #### Phase 2 — My Cinema Core
 
-Status: Not started
+Status: In progress through Phase 2A
 
 This is the first user-facing release, delivered through smaller batches:
 
 ##### Phase 2A — Personal film and reaction core
+
+Status: In progress; the core experience is deployed
 
 - Area-switching shell and My Films
 - Protected personal film search
@@ -580,7 +596,13 @@ before Phase 2A is released. Accessible text and controls may support
 development, but the approved user-facing reaction experience does not ship as
 a permanently text-only substitute.
 
+The deployed experience includes candidate reaction assets. Phase 2A remains
+open until Cameron accepts the final production set and responsive release QA
+passes without the known My Films overflow and control-row defects.
+
 ##### Phase 2B — History and personal detail
+
+Status: Not started
 
 - Viewing events
 - Current stable-identity Cine-Cord history linking
@@ -588,6 +610,8 @@ a permanently text-only substitute.
 - Per-film personal-data removal and source-linked hiding
 
 ##### Phase 2C — Overview and lists
+
+Status: Not started
 
 - Overview, My Films and My Lists as the complete three-view area
 - Built-in smart collections
