@@ -1763,11 +1763,23 @@ function renderReactionControl(movie, personal) {
     </section>`;
 }
 
+function renderPageHeader({ id, eyebrow, title, description = "", actions = "", className = "", titleClass = "page-title" }) {
+  return `
+    <header class="page-header layout-page-header ${className}">
+      <div class="layout-page-header-copy">
+        <span class="eyebrow">${escapeHTML(eyebrow)}</span>
+        <h1 id="${id}" class="${titleClass}">${escapeHTML(title)}</h1>
+        ${description ? `<p class="page-subtitle">${escapeHTML(description)}</p>` : ""}
+      </div>
+      ${actions ? `<div class="page-header-actions">${actions}</div>` : ""}
+    </header>`;
+}
+
 function renderPrivateFilmPanel(context) {
   const { movie, personal } = context;
   if (!personal) {
     return `
-      <section class="film-context-panel private-panel is-empty" aria-labelledby="private-panel-title">
+      <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
         <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Not in your library</span><small>Adding is private · The group is not told</small></header>
         <div class="private-empty-actions">
           <button class="secondary-button" type="button" data-personal-state="WANT_TO_WATCH" ${movie.movieId ? "" : "disabled"}><span class="material-symbols-outlined" aria-hidden="true">add</span>Add to Want to Watch</button>
@@ -1788,7 +1800,7 @@ function renderPrivateFilmPanel(context) {
   const savedPhoneReaction = personal.rating ? "has-phone-saved-reaction" : "";
   const collapsedPhoneReaction = personal.rating && !reactionEditorExpanded ? "has-collapsed-phone-reaction" : "";
   return `
-    <section class="film-context-panel private-panel ${savedPhoneReaction} ${collapsedPhoneReaction} ${personalStateEditorExpanded ? "is-phone-state-editor-open" : ""}" aria-labelledby="private-panel-title">
+    <section class="film-context-panel private-panel layout-container layout-container-private ${savedPhoneReaction} ${collapsedPhoneReaction} ${personalStateEditorExpanded ? "is-phone-state-editor-open" : ""}" aria-labelledby="private-panel-title">
       <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Private to you</span><small>Only you can see this · Saved as you go</small></header>
       <div class="private-controls">
         <div class="private-state-group" role="group" aria-label="My film state">${stateButtons}</div>
@@ -1803,7 +1815,7 @@ function renderSharedFilmPanel(context) {
   const { movie, shared, origin } = context;
   if (!shared) {
     return `
-      <section class="film-context-panel shared-panel is-empty" aria-labelledby="shared-panel-title">
+      <section class="film-context-panel shared-panel layout-container layout-container-neutral is-empty" aria-labelledby="shared-panel-title">
         <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Not on the shared list</span><small>Suggesting is a deliberate, separate action</small></header>
         <div class="shared-empty-actions"><button class="secondary-button" type="button" data-suggest-personal-film>Suggest for Cine-Cord</button><p>Your state, reaction and Favourite stay private if you do. Suggesting adds the film to The List with your name — it does not publish your reaction.</p></div>
       </section>`;
@@ -1813,14 +1825,14 @@ function renderSharedFilmPanel(context) {
   const journalEntries = matchingSessions.map((session) => session.journalEntry).filter(Boolean);
   if (origin === "my-films") {
     return `
-      <section class="film-context-panel shared-panel is-compact" aria-labelledby="shared-panel-title">
+      <section class="film-context-panel shared-panel layout-container layout-container-shared is-compact" aria-labelledby="shared-panel-title">
         <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Shared with the group</span><small>This film is also on the shared list</small></header>
         <div class="shared-compact-row"><button class="secondary-button" type="button" data-vote="${shared.id}" ${shared.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${shared.votedByMe ? "Remove vote" : "Vote for this film"} · ${shared.votes}</button><p>${escapeHTML(watchHistoryLabel(shared))} by the group · suggested by ${escapeHTML(shared.suggestedBy)}${matchingSessions.length ? ` · ${matchingSessions.length} ${matchingSessions.length === 1 ? "session" : "sessions"}` : ""}</p><button class="detail-text-action" type="button" data-open-detail-area="list">Open in Cine-Cord</button></div>
       </section>`;
   }
 
   return `
-    <section class="film-context-panel shared-panel" aria-labelledby="shared-panel-title">
+    <section class="film-context-panel shared-panel layout-container layout-container-shared" aria-labelledby="shared-panel-title">
       <header class="context-panel-header"><span id="shared-panel-title"><i aria-hidden="true"></i>Cine-Cord · Shared with the group</span><small>Everyone approved can see this</small></header>
       <div class="shared-panel-body">
         <div class="shared-primary-actions"><button class="primary-button" type="button" data-vote="${shared.id}" ${shared.watched ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span>${shared.votedByMe ? "Remove vote" : "Vote for this film"} <small>${shared.votes} ${shared.votes === 1 ? "vote" : "votes"}</small></button><span class="group-status">Group status: <strong>${escapeHTML(watchHistoryLabel(shared))}</strong></span>${activeSession ? `<button class="secondary-button" type="button" data-open-current-session>Open current session</button>` : `<button class="secondary-button" type="button" data-open-party>Start a session</button>`}</div>
@@ -1835,19 +1847,28 @@ function renderFilmDetails() {
   if (!context) return currentView === "my-films" ? renderMyFilms() : renderList();
   const { movie, origin } = context;
   const backLabel = origin === "my-films" ? "My Films" : "The List";
+  const detailMeta = [movie.year, movie.runtime ? `${movie.runtime} min` : null, ...movie.genres].filter(Boolean).join(" · ");
   const panels = origin === "my-films"
     ? `${renderPrivateFilmPanel(context)}${renderSharedFilmPanel(context)}`
     : `${renderSharedFilmPanel(context)}${renderPrivateFilmPanel(context)}`;
   return `
     <section class="film-detail-view ${origin === "my-films" ? "is-private-origin" : "is-shared-origin"} ${context.personal?.rating ? "has-personal-reaction" : "has-no-personal-reaction"}" aria-labelledby="film-detail-title" tabindex="-1">
-      <div class="film-detail-return"><button class="secondary-button" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${backLabel}</button><span><span class="film-detail-return-context">Returns to your place, search and filters intact</span><span class="film-detail-return-label">Film detail</span></span></div>
+      ${renderPageHeader({
+        id: "film-detail-title",
+        eyebrow: origin === "my-films" ? "My Cinema · Private to you" : "Cine-Cord · Shared with the group",
+        title: movie.title,
+        description: detailMeta || "Movie details",
+        titleClass: "film-page-title",
+        className: "film-detail-page-header",
+        actions: `<button class="quiet-button film-detail-back" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${escapeHTML(backLabel)}</button>`,
+      })}
       <div class="film-detail-layout">
         <aside class="film-detail-sidebar">
           <div class="detail-poster ${movie.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(movie))}" alt="${movie.posterUrl ? `${escapeHTML(movie.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${movie.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
           <dl class="film-fact-card"><div><dt>Year</dt><dd>${movie.year || "Pending"}</dd></div><div><dt>Runtime</dt><dd>${escapeHTML(runtimeLabel(movie))}</dd></div><div><dt>Genres</dt><dd>${movie.genres.length ? movie.genres.map(escapeHTML).join(" · ") : "Pending"}</dd></div>${movie.tmdbId ? `<div><dt>TMDB ID</dt><dd>${movie.tmdbId}</dd></div>` : ""}</dl>
         </aside>
         <div class="film-detail-content">
-          <header class="film-detail-heading"><div class="film-detail-title-line"><h1 id="film-detail-title">${escapeHTML(movie.title)}</h1>${movie.year ? `<span>${movie.year}</span>` : ""}</div><p class="film-detail-mobile-meta">${[movie.year, movie.runtime ? `${movie.runtime} min` : null, ...movie.genres].filter(Boolean).map(escapeHTML).join(" · ")}</p><p>${escapeHTML(movie.overview || "Full movie details will appear here once this film is matched with TMDB.")}</p></header>
+          <p class="film-detail-overview">${escapeHTML(movie.overview || "Full movie details will appear here once this film is matched with TMDB.")}</p>
           <div class="film-context-panels">${panels}</div>
         </div>
       </div>
@@ -1872,8 +1893,15 @@ function renderMyFilms() {
   if (selectedFilm) return renderFilmDetails();
   const visibleFilms = getVisiblePersonalFilms(personalFilms, { query: myFilmsQuery, filter: myFilmsFilter, sort: myFilmsSort });
   return `
-    <section class="list-view my-films-view" aria-labelledby="my-films-title">
-      <header class="list-hero my-films-hero"><div class="list-hero-copy"><span class="eyebrow">My Cinema · Private to you</span><div class="list-title-line"><h1 id="my-films-title" class="page-title">My Films</h1><span class="list-count">${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}</span></div><p class="page-subtitle">Your private films, states, reactions and Favourites. Nothing here is shared unless you deliberately suggest it to Cine-Cord.</p></div><div class="list-hero-actions"><button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button></div></header>
+    <section class="page-view list-view my-films-view" aria-labelledby="my-films-title">
+      ${renderPageHeader({
+        id: "my-films-title",
+        eyebrow: `My Cinema · Private to you · ${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}`,
+        title: "My Films",
+        description: "Your private films, states, reactions and Favourites. Nothing is shared unless you deliberately suggest it to Cine-Cord.",
+        className: "list-hero my-films-hero",
+        actions: `<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
+      })}
       <div class="list-toolbar my-films-toolbar"><label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="my-films-search" type="search" value="${escapeHTML(myFilmsQuery)}" placeholder="Search My Films" aria-label="Search My Films" /></label><button class="mobile-filter-toggle" type="button" data-toggle-my-films-filters aria-expanded="${myFilmsFiltersOpen}" aria-label="${myFilmsFiltersOpen ? "Hide" : "Show"} My Films filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${myFilmsFiltersOpen ? "expand_less" : "expand_more"}</span></button><div class="filter-tabs my-film-filter-tabs ${myFilmsFiltersOpen ? "is-open" : ""}" aria-label="Filter My Films">${[["all", "All"], ["want", "Want to Watch"], ["watched", "Watched"], ["dnf", "Did Not Finish"], ["favourites", "Favourites"]].map(([value, label]) => `<button type="button" class="filter-tab ${myFilmsFilter === value ? "is-active" : ""}" data-my-films-filter="${value}">${label}</button>`).join("")}</div><div class="list-filter-controls my-film-sort-control ${myFilmsFiltersOpen ? "is-open" : ""}"><label class="compact-select"><span class="sr-only">Sort My Films</span><select id="my-films-sort" aria-label="Sort My Films"><option value="updated" ${myFilmsSort === "updated" ? "selected" : ""}>Recently updated</option><option value="added" ${myFilmsSort === "added" ? "selected" : ""}>Recently added</option><option value="title" ${myFilmsSort === "title" ? "selected" : ""}>Title A–Z</option></select></label></div></div>
       <div class="poster-grid personal-poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderPersonalFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">theaters</span><h2>${personalFilms.length ? "No films match that view." : "My Cinema is empty."}</h2><p>${personalFilms.length ? "Try another search or filter." : "Add something you want to watch, or rate a film you have already seen."}</p><button class="secondary-button" type="button" data-open-personal-film>Add a film</button></div>`}</div>
     </section>`;
@@ -1888,15 +1916,15 @@ function renderList() {
   const genres = [...new Set(movieList.flatMap((item) => item.genres))].sort((a, b) => a.localeCompare(b));
   const suggesters = [...new Map(movieList.map((item) => [item.suggestedById, item.suggestedBy])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   return `
-    <section class="list-view" aria-labelledby="list-title">
-      <header class="list-hero">
-        <div class="list-hero-copy">
-          <span class="eyebrow">Cine-Cord · Shared with the group</span>
-          <div class="list-title-line"><h1 id="list-title" class="page-title">The List</h1><span class="list-count"><span>${movieList.length} ${movieList.length === 1 ? "film" : "films"}</span><span class="list-count-ready">· ${readyCount} ready</span></span></div>
-          <p class="page-subtitle">The Discordians’ shared film library. Everything here is visible to every approved member.</p>
-        </div>
-        <div class="list-hero-actions"><button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">casino</span>Watch a Film</button><button class="secondary-button" type="button" data-open-film aria-label="Add film to library"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add film</button></div>
-      </header>
+    <section class="page-view list-view" aria-labelledby="list-title">
+      ${renderPageHeader({
+        id: "list-title",
+        eyebrow: `Cine-Cord · Shared with the group · ${movieList.length} ${movieList.length === 1 ? "film" : "films"} · ${readyCount} ready`,
+        title: "The List",
+        description: "The Discordians’ shared film library. Everything here is visible to every approved member.",
+        className: "list-hero",
+        actions: `<button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">casino</span>Watch a Film</button><button class="secondary-button" type="button" data-open-film aria-label="Add film to library"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add film</button>`,
+      })}
       <div class="list-toolbar">
         <label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="list-search" type="search" value="${escapeHTML(listQuery)}" placeholder="Search the list" aria-label="Search The List" /></label>
         <button class="mobile-filter-toggle" type="button" data-toggle-list-filters aria-expanded="${listFiltersOpen}" aria-label="${listFiltersOpen ? "Hide" : "Show"} filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${listFiltersOpen ? "expand_less" : "expand_more"}</span></button>
@@ -2087,10 +2115,13 @@ function renderQueueRoulette() {
     : selectedFilmForSession(activeSession);
   return `
     <section class="roulette-game ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? "has-result" : ""}" aria-labelledby="roulette-title">
-      <header class="roulette-header">
-        <div><span class="eyebrow">Watch a Film · Weighted chaos</span><h1 id="roulette-title">Queue Roulette</h1></div>
-        <button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
-      </header>
+      ${renderPageHeader({
+        id: "roulette-title",
+        eyebrow: "Watch a Film · Weighted chaos",
+        title: "Queue Roulette",
+        className: "roulette-header",
+        actions: `<button class="icon-button roulette-close" type="button" data-close-roulette aria-label="Close Queue Roulette"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>`,
+      })}
       ${winner && ["reveal", "confirmed"].includes(rouletteState.phase) ? renderRouletteReveal(candidates, winner) : renderRouletteReady(candidates)}
     </section>`;
 }
@@ -2100,9 +2131,15 @@ function renderPick() {
   const candidateCount = movieList.filter((item) => !item.watched).length;
   return `
     <section class="page-view" aria-labelledby="pick-title">
-      <header class="page-header"><div><span class="eyebrow">${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}</span><h1 id="pick-title" class="page-title">Watch a Film</h1><p class="page-subtitle">Choose the group, choose the rules, then let the website settle the argument.</p></div><button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button></header>
-      <div class="pick-callout"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
-      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
+      ${renderPageHeader({
+        id: "pick-title",
+        eyebrow: `Cine-Cord · ${candidateCount} eligible ${candidateCount === 1 ? "film" : "films"}`,
+        title: "Watch a Film",
+        description: "Choose the group, choose the rules, then let the website settle the argument.",
+        actions: `<button class="primary-button" type="button" data-open-party ${candidateCount ? "" : "disabled"}>Start a Session</button>`,
+      })}
+      <div class="pick-callout layout-container layout-container-neutral"><span class="material-symbols-outlined" aria-hidden="true">cloud_done</span><div><strong>Independent of Discord</strong><p>These games use the shared website list and continue working while the bot is offline.</p></div></div>
+      <div class="mode-list">${decisionModes.map((mode) => `<article class="mode-row layout-container layout-container-shared ${mode.available ? "" : "is-unavailable"}"><span class="mode-icon">${mode.code}</span><div><span class="mode-tone">${mode.tone}</span><h3>${mode.title}</h3><p>${mode.copy}</p></div><button class="secondary-button" type="button" data-select-mode="${mode.title}" ${candidateCount && mode.available ? "" : "disabled"}>${mode.available ? "Choose" : "Coming soon"}</button></article>`).join("")}</div>
     </section>`;
 }
 
@@ -2115,9 +2152,19 @@ function renderSessions() {
   const activeEditor = sessionEditorMode(activeSession);
   return `
     <section class="page-view" aria-labelledby="sessions-title">
-      <header class="page-header"><div><span class="eyebrow">Movie-night records</span><h1 id="sessions-title" class="page-title">Sessions</h1><p class="page-subtitle">Confirm a film, record who watched, then finish its Journal handoff. Once an entry is saved, the session moves to The Journal.</p></div>${activeSession?.mode === "Queue Roulette" ? `<button class="primary-button" type="button" data-continue-roulette>Open current session <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>` : activeSession ? "" : `<button class="primary-button" type="button" data-open-party>Pick a Movie <span class="material-symbols-outlined" aria-hidden="true">add</span></button>`}</header>
+      ${renderPageHeader({
+        id: "sessions-title",
+        eyebrow: "Cine-Cord · Movie-night records",
+        title: "Sessions",
+        description: "Record the film and viewers, then hand the finished entry to The Journal.",
+        actions: activeSession?.mode === "Queue Roulette"
+          ? `<button class="primary-button" type="button" data-continue-roulette>Open current session</button>`
+          : activeSession
+            ? ""
+            : `<button class="primary-button" type="button" data-open-party><span class="material-symbols-outlined" aria-hidden="true">add</span>Pick a Movie</button>`,
+      })}
       ${activeSession ? `
-        <article class="active-session session-feature ${rouletteWinner ? "has-film" : ""}">
+        <article class="active-session session-feature layout-container layout-container-shared ${rouletteWinner ? "has-film" : ""}">
           ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
           <div class="active-session-head">
             <div>
@@ -2127,13 +2174,13 @@ function renderSessions() {
               <p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film was" : "films were"} available when this session started.</p>
             </div>
             <div class="session-actions">
-              ${activeSession.mode === "Queue Roulette" ? `<button class="primary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
+              ${activeSession.mode === "Queue Roulette" ? `<button class="secondary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
               ${activeCanManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-review-session-watched="${escapeHTML(activeSession.id)}"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}
               ${activeCanManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}
             </div>
           </div>
         </article>
-        ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p><button class="secondary-button" type="button" data-open-party>Pick a Movie</button></div>`}
+        ${activeSession.status === "CONFIRMED" ? renderSessionSummary(activeSession, { editorMode: activeEditor }) : ""}` : `<div class="empty-state session-empty"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No current session.</h2><p>Queue Roulette is ready now. Consensus Sprint and Reel Bracket are coming later.</p></div>`}
       ${journalIsWatched ? `<section class="session-journal-open" aria-label="Journal post for ${escapeHTML(openJournalFor.selectedFilm?.title || "this session")}">${renderDiscordTemplate(openJournalFor, selectedFilmForSession(openJournalFor))}</section>` : ""}
       ${watched.length ? `<section class="session-history" aria-labelledby="watched-history-title"><div class="section-heading"><div><span class="eyebrow">Journal outstanding</span><h2 id="watched-history-title">Watched sessions awaiting an entry</h2></div><span class="request-count">${watched.length}</span></div><div class="session-history-list">${watched.map((session) => {
         const film = selectedFilmForSession(session);
@@ -2142,7 +2189,7 @@ function renderSessions() {
         const canEditJournal = canManageJournalEntry(session.journalEntry, session);
         const journalLabel = session.journalEntry ? (canEditJournal ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
         const canOpenJournal = canEditJournal || canManage || session.journalEntry;
-        return `<div class="session-history-item"><article class="session-history-row">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+        return `<div class="session-history-item"><article class="session-history-row layout-container layout-container-neutral">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
       }).join("")}</div></section>` : ""}
     </section>`;
 }
@@ -2230,7 +2277,7 @@ function renderJournalCard(entry) {
     ? (isOutOfDate ? `<span class="journal-discord-state is-stale"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
     : "";
   return `
-    <article class="journal-entry-card ${isArchive ? "is-archive" : "is-current"} ${isEditing ? "is-editing" : ""}">
+    <article class="journal-entry-card layout-container ${isArchive ? "layout-container-neutral is-archive" : "layout-container-shared is-current"} ${isEditing ? "is-editing" : ""}">
       <div class="journal-entry-head">
         <div><span class="journal-entry-number">Entry #${escapeHTML(entry.entryLabel)}</span><span class="journal-source-label">${escapeHTML(sourceCopy)}</span></div>
         <span class="status-pill ${entry.status === "DNF" ? "journal-dnf" : "watched"}">${escapeHTML(journalStatusLabel(entry.status))}</span>
@@ -2245,10 +2292,10 @@ function renderJournalCard(entry) {
         <div>${discordState}</div>
         <div>
           ${!isArchive ? `<button class="secondary-button compact" type="button" data-copy-journal-entry="${escapeHTML(entry.catalogId)}"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Copy for Discord</button>` : ""}
-          ${entry.canEdit ? `<button class="secondary-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
-          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="primary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
-          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="primary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
-          ${entry.discordUrl ? `<a class="secondary-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer">${isArchive ? "Open original" : "View in Discord"}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span></a>` : ""}
+          ${entry.canEdit ? `<button class="quiet-button compact" type="button" data-edit-journal-entry="${escapeHTML(entry.journalEntryId)}"><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit</button>` : ""}
+          ${entry.canEdit && !hasDiscordMessage ? (currentProfile?.discordServerDisplayName ? `<button class="secondary-button compact" type="button" data-post-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">send</span>${isSyncing ? "Posting…" : "Post to Discord"}</button>` : `<button class="secondary-button compact" type="button" data-refresh-discord-profile><span class="material-symbols-outlined" aria-hidden="true">sync</span>Connect Discord profile</button>`) : ""}
+          ${entry.canEdit && hasDiscordMessage && isOutOfDate ? `<button class="secondary-button compact" type="button" data-update-catalog-journal="${escapeHTML(entry.journalEntryId)}" ${isSyncing ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${isSyncing ? "Updating…" : "Update Discord post"}</button>` : ""}
+          ${entry.discordUrl ? `<a class="quiet-button compact" href="${escapeHTML(entry.discordUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>${isArchive ? "Open original" : "View in Discord"}</a>` : ""}
         </div>
       </footer>
       ${isEditing ? renderJournalEditor(entry) : ""}
@@ -2265,7 +2312,13 @@ function renderJournal() {
   const archiveCount = journalCatalog.length - currentCount;
   return `
     <section class="page-view journal-view" aria-labelledby="journal-title">
-      <header class="page-header journal-header"><div><span class="eyebrow">${journalCatalog.length.toLocaleString()} movie-night records</span><h1 id="journal-title" class="page-title">The Journal</h1><p class="page-subtitle">One searchable history across all three Discord channels and every new Cine-Cord entry. The Discord originals stay exactly where they are.</p></div><div class="journal-totals"><span><strong>${archiveCount.toLocaleString()}</strong> archived</span><span><strong>${currentCount.toLocaleString()}</strong> editable</span></div></header>
+      ${renderPageHeader({
+        id: "journal-title",
+        eyebrow: `${journalCatalog.length.toLocaleString()} movie-night records · ${archiveCount.toLocaleString()} archived · ${currentCount.toLocaleString()} editable`,
+        title: "The Journal",
+        description: "Search every preserved Discord entry and new Cine-Cord movie night in one history.",
+        className: "journal-header",
+      })}
       <div class="journal-toolbar">
         <label class="search-field journal-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="journal-search" type="search" value="${escapeHTML(journalQuery)}" placeholder="Search titles or entry numbers" aria-label="Search the Journal" /></label>
         <label class="compact-select"><span class="sr-only">Source</span><select id="journal-source-filter" aria-label="Filter Journal by source"><option value="all">All sources</option><option value="CINE_CORD" ${journalSourceFilter === "CINE_CORD" ? "selected" : ""}>Cine-Cord entries</option>${sources.map((source) => `<option value="${escapeHTML(source)}" ${journalSourceFilter === source ? "selected" : ""}>${escapeHTML(source)}</option>`).join("")}</select></label>
@@ -2287,9 +2340,14 @@ function renderStats() {
   const favourite = [...ready].sort((a, b) => b.votes - a.votes)[0];
   return `
     <section class="page-view" aria-labelledby="stats-title">
-      <header class="page-header"><div><span class="eyebrow">List behaviour, not Journal history</span><h1 id="stats-title" class="page-title">Group Stats</h1><p class="page-subtitle">A small snapshot of shared suggestions and votes. Selection-game awards arrive later.</p></div></header>
-      <div class="list-stat-grid"><article><span class="material-symbols-outlined" aria-hidden="true">movie</span><strong>${ready.length}</strong><p>Films ready to watch</p></article><article><span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span><strong>${totalVotes}</strong><p>Total active votes</p></article><article><span class="material-symbols-outlined" aria-hidden="true">done_all</span><strong>${watched.length}</strong><p>Marked as watched</p></article></div>
-      <div class="stat-feature-list"><article><span class="eyebrow">Current favourite</span><h2>${favourite ? escapeHTML(favourite.title) : "No votes yet"}</h2><p>${favourite ? `${favourite.votes} ${favourite.votes === 1 ? "vote" : "votes"}` : "Vote on The List to create a frontrunner."}</p></article><article><span class="eyebrow">Longest waiting</span><h2>${oldest ? escapeHTML(oldest.title) : "Nothing waiting"}</h2><p>${oldest ? escapeHTML(formatWaitingTime(oldest.createdAt)) : "Add a suggestion to begin the queue."}</p></article></div>
+      ${renderPageHeader({
+        id: "stats-title",
+        eyebrow: "Cine-Cord · Shared list behaviour",
+        title: "Group Stats",
+        description: "A snapshot of shared suggestions and votes. Selection-game awards arrive later.",
+      })}
+      <div class="list-stat-grid"><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">movie</span><strong>${ready.length}</strong><p>Films ready to watch</p></article><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span><strong>${totalVotes}</strong><p>Total active votes</p></article><article class="layout-container layout-container-shared"><span class="material-symbols-outlined" aria-hidden="true">done_all</span><strong>${watched.length}</strong><p>Marked as watched</p></article></div>
+      <div class="stat-feature-list"><article class="layout-container layout-container-shared"><span class="eyebrow">Current favourite</span><h2>${favourite ? escapeHTML(favourite.title) : "No votes yet"}</h2><p>${favourite ? `${favourite.votes} ${favourite.votes === 1 ? "vote" : "votes"}` : "Vote on The List to create a frontrunner."}</p></article><article class="layout-container layout-container-shared"><span class="eyebrow">Longest waiting</span><h2>${oldest ? escapeHTML(oldest.title) : "Nothing waiting"}</h2><p>${oldest ? escapeHTML(formatWaitingTime(oldest.createdAt)) : "Add a suggestion to begin the queue."}</p></article></div>
     </section>`;
 }
 
@@ -2299,10 +2357,15 @@ function renderMembers() {
   const sortedMembers = [...members].sort((a, b) => a.role !== b.role ? (a.role === "admin" ? -1 : 1) : a.name.localeCompare(b.name));
   return `
     <section class="page-view" aria-labelledby="members-title">
-      <header class="page-header"><div><span class="eyebrow">Website access · Admin only</span><h1 id="members-title" class="page-title">Members</h1><p class="page-subtitle">Approve friends, keep list names consistent and control access to Cine-Cord.</p></div><span class="member-count">${members.length} approved</span></header>
-      <article class="invite-panel"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
-      <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="primary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="text-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
-      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="text-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
+      ${renderPageHeader({
+        id: "members-title",
+        eyebrow: `Admin only · ${members.length} approved ${members.length === 1 ? "member" : "members"}`,
+        title: "Members",
+        description: "Approve friends, keep list names consistent and control access to Cine-Cord.",
+      })}
+      <article class="invite-panel layout-container layout-container-neutral"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
+      <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row layout-container layout-container-neutral"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="secondary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="quiet-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
+      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
     </section>`;
 }
 

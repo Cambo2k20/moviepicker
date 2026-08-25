@@ -26,6 +26,87 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
   }
 });
 
+test("the unified application canvas and page system stay consistent through ultrawide", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The 1920px canvas contract is covered once.");
+
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  const ultrawide = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell");
+    const shellBox = shell.getBoundingClientRect();
+    return {
+      shellLeft: Math.round(shellBox.left),
+      shellRight: Math.round(shellBox.right),
+      shellWidth: Math.round(shellBox.width),
+      leftGutter: Math.round(shellBox.left),
+      rightGutter: Math.round(window.innerWidth - shellBox.right),
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      shellBackground: getComputedStyle(shell).backgroundColor,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(ultrawide.shellWidth).toBe(1920);
+  expect(ultrawide.shellLeft).toBe(320);
+  expect(ultrawide.shellRight).toBe(2240);
+  expect(ultrawide.leftGutter).toBe(ultrawide.rightGutter);
+  expect(ultrawide.bodyBackground).toBe(ultrawide.shellBackground);
+  expect(ultrawide.overflow).toBeLessThanOrEqual(1);
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const pages = [
+    ["list", "The List"],
+    ["pick", "Watch a Film"],
+    ["sessions", "Sessions"],
+    ["journal", "The Journal"],
+    ["stats", "Group Stats"],
+    ["my-films", "My Films"],
+    ["members", "Members"],
+  ];
+
+  for (const [route, heading] of pages) {
+    await page.goto(`/moviepicker/?design-preview#${route}`);
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    const header = await page.locator(".layout-page-header").evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const rootBox = document.querySelector("#view-root").getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const titleStyle = getComputedStyle(element.querySelector("h1"));
+      return {
+        background: style.backgroundColor,
+        borderTopWidth: style.borderTopWidth,
+        height: Math.round(box.height),
+        leftGutter: Math.round(box.left - rootBox.left),
+        titleSize: titleStyle.fontSize,
+      };
+    });
+    expect(header.background).toBe("rgba(0, 0, 0, 0)");
+    expect(header.borderTopWidth).toBe("0px");
+    expect(header.leftGutter).toBe(44);
+    expect(header.titleSize).toBe("56px");
+    expect(header.height).toBeGreaterThanOrEqual(97);
+    expect(header.height).toBeLessThanOrEqual(108);
+  }
+
+  await page.goto("/moviepicker/?design-preview#list");
+  const controls = await page.evaluate(() => {
+    const select = document.querySelector(".list-toolbar select");
+    const selectStyle = getComputedStyle(select);
+    return {
+      heights: [...document.querySelectorAll(".list-toolbar input, .list-toolbar select, .filter-tabs")]
+        .map((element) => Math.round(element.getBoundingClientRect().height)),
+      appearance: selectStyle.appearance,
+      backgroundImage: selectStyle.backgroundImage,
+    };
+  });
+  expect(controls.heights.every((height) => height === 44)).toBe(true);
+  expect(controls.appearance).toBe("none");
+  expect(controls.backgroundImage).not.toBe("none");
+
+  await page.goto("/moviepicker/?design-preview#pick");
+  await expect(page.locator(".page-view .primary-button")).toHaveCount(1);
+  await expect(page.locator(".page-view .primary-button")).toHaveText("Start a Session");
+  await expect(page.locator(".mode-row.layout-container.layout-container-shared")).toHaveCount(3);
+});
+
 test("area navigation keeps future sections truthful and available routes working", async ({ page }) => {
   const cineCordArea = page.locator('[data-nav-area="cine-cord"]');
   const myCinema = page.locator('[data-nav-area="my-cinema"] .nav-area-toggle');
@@ -102,7 +183,7 @@ test("list actions and desktop film artwork remain clear", async ({ page }, test
 
   await page.setViewportSize({ width: 1590, height: 1272 });
   await expect(page.getByRole("button", { name: "Add film to library" })).toBeVisible();
-  await expect(page.locator(".list-hero-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
+  await expect(page.locator(".page-header-actions").getByRole("button", { name: "Watch a Film" })).toBeVisible();
 
   await page.locator("[data-select-film]").first().click();
   await expect(page.locator(".film-detail-view")).toBeVisible();
@@ -278,8 +359,8 @@ test("the signed-in shell shows the Discord server profile without overflowing",
 test("the master Journal keeps archives read-only and current entries actionable", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Journal" }).click();
   await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
-  await expect(page.locator(".journal-totals")).toContainText("2 archived");
-  await expect(page.locator(".journal-totals")).toContainText("1 editable");
+  await expect(page.locator(".journal-header .eyebrow")).toContainText("2 archived");
+  await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
   await expect(page.locator(".journal-entry-card")).toHaveCount(3);
   await expect(page.locator(".journal-entry-card.is-archive [data-edit-journal-entry]")).toHaveCount(0);
   await expect(page.locator(".journal-entry-card.is-archive [data-delete-journal-entry]")).toHaveCount(0);
@@ -321,7 +402,7 @@ test("the master Journal keeps archives read-only and current entries actionable
     await page.getByRole("button", { name: "Delete entry" }).click();
     await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
     await expect(page.locator("#toast")).toContainText("and its Discord post were deleted");
-    await expect(page.locator(".journal-totals")).toContainText("0 editable");
+    await expect(page.locator(".journal-header .eyebrow")).toContainText("0 editable");
     await expect(page.locator(".journal-entry-card")).toHaveCount(0);
   }
 
@@ -344,7 +425,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   if (testInfo.project.name === "desktop") {
     await page.setViewportSize({ width: 1430, height: 804 });
     const titleFontSize = await page.locator("#roulette-title").evaluate((title) => parseFloat(getComputedStyle(title).fontSize));
-    expect(titleFontSize).toBe(65);
+    expect(titleFontSize).toBe(56);
   }
 
   const chanceRows = page.locator(".roulette-chance-strip .roulette-chance-row");
