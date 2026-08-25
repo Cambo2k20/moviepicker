@@ -15,6 +15,8 @@
   --success: #71c9a1;
   --danger: #e47c91;
   --sidebar: 268px;
+  --app-vh: 1vh;
+  --app-dvh: 1dvh;
   color-scheme: dark;
   font-family: "Space Grotesk", system-ui, sans-serif;
   font-synthesis: none;
@@ -33,7 +35,7 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: calc(var(--app-vh) * 100);
   overflow-x: hidden;
   background:
     radial-gradient(circle at 70% -20%, rgba(109, 90, 230, 0.07), transparent 30%),
@@ -74,13 +76,13 @@ select:focus-visible {
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: calc(var(--app-vh) * 100);
 }
 
 .sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(var(--app-vh) * 100);
   display: flex;
   flex-direction: column;
   padding: 34px 20px 22px 26px;
@@ -400,12 +402,12 @@ select:focus-visible {
 
 .main-view {
   min-width: 0;
-  min-height: 100vh;
+  min-height: calc(var(--app-vh) * 100);
   padding: 34px clamp(30px, 3vw, 44px) 28px;
 }
 
 .access-view {
-  min-height: calc(100vh - 100px);
+  min-height: calc((var(--app-vh) * 100) - 100px);
   display: grid;
   place-items: center;
 }
@@ -1410,7 +1412,7 @@ textarea::placeholder {
 .modal {
   position: relative;
   width: min(560px, 100%);
-  max-height: calc(100vh - 40px);
+  max-height: calc((var(--app-vh) * 100) - 40px);
   overflow-y: auto;
   padding: 38px;
   border: 1px solid var(--border);
@@ -2431,7 +2433,7 @@ legend,
   }
 
   .access-view {
-    min-height: calc(100vh - 150px);
+    min-height: calc((var(--app-vh) * 100) - 150px);
   }
 
   .home-hero {
@@ -3133,7 +3135,7 @@ legend,
 .film-detail-drawer {
   position: sticky;
   top: 24px;
-  max-height: calc(100vh - 48px);
+  max-height: calc((var(--app-vh) * 100) - 48px);
   overflow-y: auto;
   padding: 21px;
   border: 1px solid var(--border);
@@ -3361,7 +3363,7 @@ legend,
     bottom: 0;
     left: 0;
     top: auto;
-    max-height: 86dvh;
+    max-height: calc(var(--app-dvh) * 86);
     padding: 18px 20px calc(22px + env(safe-area-inset-bottom));
     border-right: 0;
     border-bottom: 0;
@@ -3391,7 +3393,7 @@ legend,
   }
 
   .film-finder-modal {
-    max-height: calc(100dvh - 24px);
+    max-height: calc((var(--app-dvh) * 100) - 24px);
     padding: 30px 18px calc(24px + env(safe-area-inset-bottom));
   }
 
@@ -3580,7 +3582,7 @@ legend,
   }
 
   .film-detail-drawer {
-    max-height: 88dvh;
+    max-height: calc(var(--app-dvh) * 88);
   }
 
   .detail-poster {
@@ -3654,7 +3656,7 @@ legend,
 
 @media (min-width: 981px) {
   .roulette-wheel-stage:not(.is-result-summary) {
-    width: min(570px, 100%, 52dvh);
+    width: min(570px, 100%, calc(var(--app-dvh) * 52));
   }
 }
 
@@ -3972,7 +3974,7 @@ legend,
 .roulette-chance-strip .roulette-chance-row {
   position: relative;
   display: flex;
-  flex: 0 0 clamp(80px, 10dvh, 100px);
+  flex: 0 0 clamp(80px, calc(var(--app-dvh) * 10), 100px);
   min-height: 0;
   align-items: stretch;
   flex-direction: column;
@@ -3982,7 +3984,7 @@ legend,
 }
 
 .roulette-chance-strip .roulette-chance-row.has-removal {
-  flex-basis: clamp(80px, 10dvh, 100px);
+  flex-basis: clamp(80px, calc(var(--app-dvh) * 10), 100px);
 }
 
 .roulette-chance-strip .roulette-chance-row.is-winner {
@@ -8105,5 +8107,17 @@ textarea,
   .mode-row.layout-container {
     grid-template-columns: 44px minmax(0, 1fr);
     gap: 14px;
+  }
+}
+
+/* High-resolution displays use the same comfortable density as browser zoom
+   without asking the member to change their browser settings. Applying the
+   scale at the root keeps the sidebar, page views and fixed overlays in one
+   coordinate system while the 1920px-and-below layout remains unchanged. */
+@media (min-width: 2400px) {
+  :root {
+    --app-vh: calc(1vh / 1.5);
+    --app-dvh: calc(1dvh / 1.5);
+    zoom: 1.5;
   }
 }

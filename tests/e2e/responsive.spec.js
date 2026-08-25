@@ -26,32 +26,87 @@ test("large desktop library keeps poster artwork prominent as space grows", asyn
   }
 });
 
-test("the unified application canvas and page system stay consistent through ultrawide", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop", "The 1920px canvas contract is covered once.");
+test("the unified application canvas scales to a comfortable high-resolution density", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The high-resolution canvas contract is covered once.");
 
   await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const ultrawide = await page.evaluate(() => {
     const shell = document.querySelector(".app-shell");
+    const sidebar = document.querySelector(".sidebar");
     const shellBox = shell.getBoundingClientRect();
+    const sidebarBox = sidebar.getBoundingClientRect();
     return {
+      rootZoom: getComputedStyle(document.documentElement).zoom,
       shellLeft: Math.round(shellBox.left),
       shellRight: Math.round(shellBox.right),
       shellWidth: Math.round(shellBox.width),
       leftGutter: Math.round(shellBox.left),
       rightGutter: Math.round(window.innerWidth - shellBox.right),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      sidebarWidth: Math.round(sidebarBox.width),
+      sidebarHeight: Math.round(sidebarBox.height),
       bodyBackground: getComputedStyle(document.body).backgroundColor,
       shellBackground: getComputedStyle(shell).backgroundColor,
       overflow: document.documentElement.scrollWidth - window.innerWidth,
     };
   });
-  expect(ultrawide.shellWidth).toBe(1920);
-  expect(ultrawide.shellLeft).toBe(320);
-  expect(ultrawide.shellRight).toBe(2240);
-  expect(ultrawide.leftGutter).toBe(ultrawide.rightGutter);
+  expect(ultrawide.rootZoom).toBe("1.5");
+  expect(ultrawide.shellWidth).toBeGreaterThanOrEqual(ultrawide.viewportWidth - 16);
+  expect(ultrawide.shellLeft).toBe(0);
+  expect(ultrawide.shellRight).toBeGreaterThanOrEqual(ultrawide.viewportWidth - 16);
+  expect(ultrawide.leftGutter).toBe(0);
+  expect(ultrawide.rightGutter).toBeLessThanOrEqual(16);
+  expect(ultrawide.sidebarWidth).toBe(402);
+  expect(ultrawide.sidebarHeight).toBe(ultrawide.viewportHeight);
   expect(ultrawide.bodyBackground).toBe(ultrawide.shellBackground);
   expect(ultrawide.overflow).toBeLessThanOrEqual(1);
 
+  await page.getByRole("button", { name: "Add film to library" }).click();
+  const dialogGeometry = await page.locator("#film-modal").evaluate((element) => {
+    const layer = element.getBoundingClientRect();
+    const dialog = element.querySelector('[role="dialog"]').getBoundingClientRect();
+    return {
+      layerTop: Math.round(layer.top),
+      layerRight: Math.round(layer.right),
+      layerBottom: Math.round(layer.bottom),
+      layerLeft: Math.round(layer.left),
+      dialogFits: dialog.top >= 0 && dialog.right <= window.innerWidth && dialog.bottom <= window.innerHeight && dialog.left >= 0,
+    };
+  });
+  expect(dialogGeometry).toEqual({
+    layerTop: 0,
+    layerRight: 2560,
+    layerBottom: 1440,
+    layerLeft: 0,
+    dialogFits: true,
+  });
+  await page.getByRole("button", { name: "Close Add Film form" }).click();
+
   await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const standardDesktop = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell").getBoundingClientRect();
+    const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+    return {
+      rootZoom: getComputedStyle(document.documentElement).zoom,
+      shellWidth: Math.round(shell.width),
+      shellLeft: Math.round(shell.left),
+      sidebarWidth: Math.round(sidebar.width),
+      sidebarHeight: Math.round(sidebar.height),
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(standardDesktop).toEqual({
+    rootZoom: "1",
+    shellWidth: 1920,
+    shellLeft: 0,
+    sidebarWidth: 268,
+    sidebarHeight: 1080,
+    overflow: 0,
+  });
+
   const pages = [
     ["list", "The List"],
     ["pick", "Watch a Film"],
