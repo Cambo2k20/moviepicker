@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 
+import { allCommitsPatchEquivalent } from "./git-cleanup-core.mjs";
+
 // Branch and worktree hygiene. Reports by default; deletes only when asked.
 //   node scripts/git-cleanup.mjs             report what is spent, change nothing
 //   node scripts/git-cleanup.mjs --apply     delete spent local branches, prune worktrees
@@ -18,6 +20,8 @@ const lines = (output) => output.split("\n").map((line) => line.trim()).filter(B
 // whether that patch is already in main.
 function isSpent(branch) {
   if (lines(git("branch", "--merged", trunk, "--format=%(refname:short)")).includes(branch)) return "merged";
+  const hasMergeCommits = lines(git("rev-list", "--merges", `${trunk}..${branch}`)).length > 0;
+  if (allCommitsPatchEquivalent(git("cherry", trunk, branch), { hasMergeCommits })) return "patch-equivalent";
   const base = git("merge-base", trunk, branch);
   const probe = git("commit-tree", git("rev-parse", `${branch}^{tree}`), "-p", base, "-m", "hygiene probe");
   return git("cherry", trunk, probe).startsWith("-") ? "squash-merged" : null;

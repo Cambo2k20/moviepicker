@@ -59,8 +59,11 @@ source of wrong answers.
 ## What counts as "spent"
 
 `scripts/git-cleanup.mjs` treats a branch as spent when `main` already contains
-its work. It checks plain ancestry first, then — because this repository merges
-by squash, which breaks ancestry — replays the branch as a single commit on its
-merge base and asks `git cherry` whether that patch already landed. A branch
-holding genuinely unmerged commits is reported as ACTIVE and never touched, and
-a branch checked out in a worktree is never deleted out from under it.
+its work. It checks plain ancestry first, then uses `git cherry` to recognise
+branches whose individual non-merge commits are already patch-equivalent in
+`main`. Branch ranges containing merge commits fail safe and continue to the
+whole-tree squash probe, because a merge can contain unique conflict resolution.
+The final fallback replays the branch as a single commit on its merge base and
+checks whether that combined patch already landed. A branch holding genuinely
+unmerged commits is reported as ACTIVE and never touched, and a branch checked
+out in a worktree is never deleted out from under it.
