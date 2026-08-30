@@ -6524,8 +6524,8 @@ legend,
 }
 
 .personal-card-reaction img {
-  width: 29px;
-  height: 29px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
 }
 
@@ -6948,26 +6948,98 @@ legend,
 
 .reaction-grid {
   display: grid;
+  width: min(620px, 100%);
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 7px;
-  margin-top: 6px;
+  gap: 8px;
+  margin: 12px auto 0;
 }
 
 .reaction-editor-shell {
-  display: contents;
+  display: block;
 }
 
 .reaction-mobile-editor-heading {
   display: none;
 }
 
+.reaction-stage {
+  position: relative;
+  display: grid;
+  min-height: 384px;
+  justify-items: center;
+  align-content: center;
+  row-gap: 8px;
+  margin-top: 6px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 62%, rgba(109, 90, 230, 0.22), rgba(109, 90, 230, 0.06) 27%, transparent 58%);
+  text-align: center;
+}
+
+.reaction-stage-visual {
+  position: relative;
+  display: grid;
+  width: min(360px, 72%);
+  height: 300px;
+  place-items: end center;
+}
+
+.reaction-stage-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: center bottom;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.reaction-stage.is-resting .reaction-stage-image {
+  opacity: 0.45;
+  transform: scale(0.96);
+}
+
+.reaction-stage-copy {
+  display: grid;
+  max-width: 620px;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 18px 2px;
+}
+
+.reaction-stage-label {
+  margin: 0;
+  color: var(--text);
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.reaction-stage-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reaction-stage.is-resting .reaction-stage-label,
+.reaction-stage.is-resting .reaction-stage-caption {
+  color: var(--dim);
+}
+
 .reaction-choice {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 166px;
-  grid-template-rows: 18px minmax(0, 1fr) 32px;
-  padding: 7px 0 0;
+  min-height: 112px;
+  grid-template-rows: 16px 62px minmax(28px, auto);
+  padding: 6px 0 0;
   overflow: hidden;
   border: 1px solid var(--border-soft);
   background: rgba(25, 27, 35, 0.72);
@@ -7003,27 +7075,26 @@ legend,
   font-size: 9px;
 }
 
-.reaction-art {
+.reaction-face {
   position: relative;
   display: grid;
   min-height: 0;
-  place-items: end center;
+  place-items: center;
 }
 
-.reaction-art img {
+.reaction-face img {
   display: block;
-  width: 100%;
-  height: 100%;
-  max-height: 106px;
+  width: 56px;
+  height: 56px;
   object-fit: contain;
-  opacity: 0.74;
-  transform: scale(0.92);
+  opacity: 0.84;
+  transform: scale(0.94);
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.reaction-choice:hover .reaction-art img,
-.reaction-choice:focus-visible .reaction-art img,
-.reaction-choice.is-saved .reaction-art img {
+.reaction-choice:hover .reaction-face img,
+.reaction-choice:focus-visible .reaction-face img,
+.reaction-choice.is-saved .reaction-face img {
   opacity: 1;
   transform: scale(1);
 }
@@ -7045,7 +7116,7 @@ legend,
 
 .reaction-check {
   position: absolute;
-  top: -14px;
+  top: -16px;
   right: 6px;
   display: grid;
   width: 18px;
@@ -7099,12 +7170,13 @@ legend,
     gap: 22px;
   }
 
-  .reaction-choice {
-    min-height: 150px;
+  .reaction-stage {
+    min-height: 354px;
   }
 
-  .reaction-art img {
-    max-height: 91px;
+  .reaction-stage-visual {
+    width: min(330px, 72%);
+    height: 270px;
   }
 }
 
@@ -7209,12 +7281,13 @@ legend,
     grid-template-columns: minmax(0, 1fr) 210px;
   }
 
-  .reaction-choice {
-    min-height: 155px;
+  .reaction-stage {
+    min-height: 334px;
   }
 
-  .reaction-art img {
-    max-height: 96px;
+  .reaction-stage-visual {
+    width: min(310px, 68%);
+    height: 250px;
   }
 
   .my-films-toolbar {
@@ -7463,15 +7536,38 @@ legend,
     padding-top: 12px;
   }
 
+  .reaction-stage {
+    min-height: 270px;
+    margin-top: 0;
+  }
+
+  .reaction-stage-visual {
+    width: min(230px, 74%);
+    height: 190px;
+  }
+
+  .reaction-stage-copy {
+    padding: 8px 10px 2px;
+  }
+
+  .reaction-stage-label {
+    font-size: 26px;
+  }
+
+  .reaction-stage-caption {
+    font-size: 10px;
+  }
+
   .reaction-grid {
+    width: 100%;
     grid-template-columns: 1fr;
     gap: 7px;
   }
 
   .reaction-choice {
-    min-height: 58px;
+    min-height: 60px;
     grid-template-columns: 28px 54px minmax(0, 1fr);
-    grid-template-rows: 58px;
+    grid-template-rows: 60px;
     align-items: center;
     padding: 0;
   }
@@ -7480,15 +7576,14 @@ legend,
     padding: 0 0 0 10px;
   }
 
-  .reaction-art {
-    height: 56px;
+  .reaction-face {
+    height: 58px;
     place-items: center;
   }
 
-  .reaction-art img {
-    width: 52px;
-    height: 52px;
-    max-height: none;
+  .reaction-face img {
+    width: 50px;
+    height: 50px;
     transform: none;
   }
 
@@ -7504,7 +7599,7 @@ legend,
   }
 
   .reaction-check {
-    top: 6px;
+    top: 5px;
     right: 6px;
   }
 
@@ -7598,7 +7693,9 @@ legend,
     padding: 12px;
   }
 
+  .reaction-control.is-collapsed-phone .reaction-editor-shell,
   .reaction-control.is-collapsed-phone .reaction-grid,
+  .reaction-control.is-collapsed-phone .reaction-stage,
   .reaction-control.is-collapsed-phone .reaction-consequence,
   .reaction-control.is-collapsed-phone .reaction-clear-desktop,
   .reaction-control.is-collapsed-phone .reaction-heading {
@@ -7617,7 +7714,8 @@ legend,
 
 @media (prefers-reduced-motion: reduce) {
   .reaction-choice,
-  .reaction-art img {
+  .reaction-face img,
+  .reaction-stage-image {
     transition: none;
   }
 }

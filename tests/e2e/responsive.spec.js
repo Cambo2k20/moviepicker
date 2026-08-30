@@ -320,6 +320,12 @@ test("My Films stays private and the unified detail follows its entry context", 
 
   await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
   await expect(page.locator(".personal-poster-card")).toHaveCount(4);
+  const matrixCard = page.locator(".personal-poster-card").filter({ has: page.getByRole("button", { name: "View details for The Matrix" }) });
+  const compactReaction = matrixCard.locator(".personal-card-reaction");
+  await expect(compactReaction).toContainText("Really liked it");
+  await expect(compactReaction.locator("img")).toHaveAttribute("src", /reaction-face-4/);
+  await expect(matrixCard.locator('.personal-card-footer img[src*="reaction-stage-"]')).toHaveCount(0);
+  await expect(matrixCard.locator("[data-reaction-stage]")).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Search My Films" }).fill("matrix");
   await page.getByRole("button", { name: "View details for The Matrix" }).click();
 
@@ -341,20 +347,63 @@ test("private reactions save one level and preserve an explicit Did Not Finish s
   const didNotFinishState = page.locator('[data-personal-state="DID_NOT_FINISH"]');
   await didNotFinishState.click();
 
-  const savedReaction = page.getByRole("radio", { name: "Level 4 of 5, Really liked it" });
+  const stage = page.locator("[data-reaction-stage]");
+  const stageImage = page.locator("[data-reaction-stage-image]");
+  const stageLabel = page.locator("[data-reaction-stage-label]");
+  const stageCaption = page.locator("[data-reaction-stage-caption]");
+  const savedReaction = page.getByRole("button", { name: "Level 4 of 5, Really liked it" });
+  const firstReaction = page.getByRole("button", { name: "Level 1 of 5, Didn’t like it" });
+
+  await expect(savedReaction).toHaveAttribute("aria-pressed", "true");
+  await expect(savedReaction.locator("img")).toHaveAttribute("src", /reaction-face-4/);
+  await expect(stage).toHaveAttribute("data-reaction-value", "4");
+  await expect(stage).not.toHaveClass(/is-resting/);
+  await expect(stageImage).toHaveAttribute("src", /reaction-stage-4/);
+  await expect(stageLabel).toHaveText("Really liked it");
+  await expect(stageCaption).not.toBeEmpty();
+  await expect.poll(() => stageImage.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+
+  await firstReaction.hover();
+  await expect(stage).toHaveAttribute("data-reaction-value", "1");
+  await expect(stageImage).toHaveAttribute("src", /reaction-stage-1/);
+  await expect(stageLabel).toHaveText("Didn’t like it");
+  await expect(savedReaction).toHaveAttribute("aria-pressed", "true");
+  await expect(firstReaction).toHaveAttribute("aria-pressed", "false");
+
+  await stage.hover();
+  await expect(stage).toHaveAttribute("data-reaction-value", "4");
+  await expect(stageLabel).toHaveText("Really liked it");
+
   await savedReaction.focus();
   await savedReaction.press("Home");
-  await expect(page.getByRole("radio", { name: "Level 1 of 5, Didn’t like it" })).toHaveAttribute("aria-checked", "true");
+  await expect(firstReaction).toBeFocused();
+  await expect(stage).toHaveAttribute("data-reaction-value", "1");
+  await expect(firstReaction).toHaveAttribute("aria-pressed", "false");
+  await expect(savedReaction).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Clear reaction" }).focus();
+  await expect(stage).toHaveAttribute("data-reaction-value", "4");
+  await expect(stageLabel).toHaveText("Really liked it");
+
+  await firstReaction.focus();
+  await firstReaction.press("Enter");
+  await expect(firstReaction).toHaveAttribute("aria-pressed", "true");
+  await expect(stage).toHaveAttribute("data-reaction-value", "1");
+  await expect(stageLabel).toHaveText("Didn’t like it");
   await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".reaction-control [role='status']")).toContainText("Saved, Didn’t like it");
 
   await page.getByRole("button", { name: "Clear reaction" }).click();
   await expect(page.getByText("No reaction yet", { exact: true })).toBeVisible();
+  await expect(stage).toHaveAttribute("data-reaction-value", "3");
+  await expect(stage).toHaveClass(/is-resting/);
+  await expect(stageImage).toHaveAttribute("src", /reaction-stage-3/);
+  await expect(stageLabel).toHaveText("Pick a face");
   await expect(didNotFinishState).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("switch", { name: /Favourite/ })).toHaveAttribute("aria-checked", "true");
 });
 
-test("phone collapses a saved reaction and expands five full-width touch rows", async ({ page }, testInfo) => {
+test("phone keeps a newly saved stage visible and can collapse to its compact summary", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "phone", "The saved phone reaction state is phone-specific.");
 
   await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
@@ -363,11 +412,21 @@ test("phone collapses a saved reaction and expands five full-width touch rows", 
   await expect(page.locator(".reaction-grid")).toBeHidden();
 
   await page.getByRole("button", { name: "Change reaction" }).click();
-  const reactions = page.locator("[data-reaction-value]");
+  const reactions = page.locator("[data-reaction-choice]");
   await expect(reactions).toHaveCount(5);
   await expect(reactions.first()).toBeVisible();
   const rowHeights = await reactions.evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().height)));
   expect(rowHeights.every((height) => height >= 56)).toBe(true);
+
+  const secondReaction = page.getByRole("button", { name: "Level 2 of 5, Not for me" });
+  await secondReaction.click();
+  await expect(page.locator('[data-reaction-choice][data-reaction-value="2"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-reaction-stage]")).toHaveAttribute("data-reaction-value", "2");
+  await expect(page.locator(".reaction-grid")).toBeVisible();
+  await page.getByRole("button", { name: "Close reaction choices" }).click();
+  await expect(page.locator(".reaction-grid")).toBeHidden();
+  await expect(page.locator(".reaction-mobile-summary")).toContainText("Not for me");
+  await expect(page.locator(".reaction-mobile-summary img")).toHaveAttribute("src", /reaction-face-2/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });
 
@@ -379,6 +438,11 @@ test("tablet keeps all five reaction choices on one row", async ({ page }, testI
   const grid = page.locator(".reaction-grid");
   await expect(grid).toBeVisible();
   expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(5);
+  await expect(grid.locator('img[src*="reaction-face-"]')).toHaveCount(5);
+  await expect(page.locator("[data-reaction-stage]")).toHaveAttribute("data-reaction-value", "4");
+  await page.getByRole("button", { name: "Level 5 of 5, Loved it" }).hover();
+  await expect(page.locator("[data-reaction-stage]")).toHaveAttribute("data-reaction-value", "5");
+  await expect(page.locator("[data-reaction-stage-image]")).toHaveAttribute("src", /reaction-stage-5/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });
 

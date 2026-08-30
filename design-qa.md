@@ -369,3 +369,85 @@ The saved/expanded phone comparison is also the focused control comparison: at `
 - [x] Run the complete isolated Playwright suite across all four responsive projects.
 
 final result: passed
+
+---
+
+# Phase 2A reaction scale design QA
+
+## Comparison target
+
+- Source visual truth: `C:\Users\Cambo\Documents\0.0 DiscordianWebApp\Images\Rating System\Rating Scale-selection.png`
+- Supporting source board: `C:\Users\Cambo\Documents\0.0 DiscordianWebApp\Images\Rating System\Rating Scale-selectionall.png`
+- Browser-rendered implementation: `http://127.0.0.1:4183/moviepicker/?design-preview&phase2a-qa=acceptance#my-films`
+- Implementation screenshot: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-desktop-final-1440x900.png`
+- Desktop viewport: 1440 x 900 CSS px at device pixel ratio 1.
+- Source pixels: 1160 x 1034.
+- Implementation pixels: 1425 x 1188, including the complete vertically scrollable page and excluding the 15 px browser scrollbar.
+- State: Pulp Fiction, private My Cinema detail, saved Level 4, `Really liked it`.
+- Product acceptance: Cameron accepted the final paired production artwork on 30 August 2026. Merge and publication remain separate approval gates.
+
+## Normalization and evidence
+
+- Full-view comparison: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-design-comparison-final.png`
+  - Both captures were scaled proportionally to 900 px high, centered on 1440 x 900 dark canvases, then placed side by side in one 2880 x 900 image.
+- Focused reaction-panel comparison: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-design-comparison-focused-final.png`
+  - The source panel was cropped to 1160 x 840.
+  - The implementation's actual 823 x 805 private-panel slot was cropped from the desktop capture, scaled proportionally to 840 px high, and centered on a 1160 x 840 dark canvas.
+  - This focused comparison was required because the controls and small labels were too small for a reliable full-page judgment.
+- Tablet evidence: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-tablet-viewport-final.png` at 768 x 1024 CSS px.
+- Phone evidence: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-phone-final-390x844.png` at 390 x 844 CSS px.
+
+## Findings
+
+No actionable P0, P1 or P2 findings remain.
+
+- Fonts and typography: Barlow Condensed preserves the source's tall display labels, while the existing Space Grotesk and monospaced metadata styles keep the implementation consistent with Cine-Cord. The level labels and captions remain readable at desktop, tablet and phone sizes.
+- Spacing and layout rhythm: one detailed patron owns the stage, five compact faces form one row at desktop and tablet, and the controls become five 60 px touch rows on phone. The implementation is intentionally narrower than the standalone source board because it occupies the real film-detail content column beside the poster.
+- Colors and visual tokens: charcoal, grey, white and electric violet match both the supplied board and the existing product. Yellow appears only in the private face assets. Borders remain square and use the current layout-system tokens.
+- Image quality and asset fidelity: all five 768 x 768 patron WebPs and five 192 x 192 face WebPs use transparent alpha, preserve the supplied subjects, and show no visible halo, stretch or crop. No CSS, SVG, glyph or placeholder substitute is used for the reaction artwork.
+- Copy and content: all five reaction labels are present in text. The Level 4 title and caption match the source. The existing Favourite control, saved-status text and consequence copy are intentional product context retained around the source pattern.
+- Interaction and accessibility: hover and focus preview without saving; leaving restores the saved or neutral stage; Enter, Space, click and touch save; the choice group uses native buttons with `aria-pressed`; arrow keys move the preview focus without falsely claiming a saved radio change; reduced-motion rules remove transitions.
+- Responsive behavior: no horizontal overflow was measured at 1440 x 900, 768 x 1024 or 390 x 844. The phone flow keeps the newly saved detailed stage visible and still offers an explicit close action to return to the compact summary.
+
+## Comparison history
+
+### Pass 1 - blocked
+
+- [P2] The square patron image resolved to 360 px high inside a 300 px visual slot and overlapped the reaction title. Evidence: `C:\Users\Cambo\.codex\visualizations\2026\08\25\01a037cd-a47d-7351-9ff9-3697922bc1c5\reaction-scale-desktop-1440x900.png`.
+  - Fix: absolutely contained the image within the relative stage-visual box and retained an 8 px stage row gap.
+- [P2] A phone save immediately collapsed the editor, hiding the matching detailed stage promised by the touch contract.
+  - Fix: phone saves now keep the editor expanded and refocus the visible selected choice; the explicit close control performs the collapse.
+- [P2] Opening an unrated reaction picker focused Level 1 and replaced the intended neutral Level 3 resting stage.
+  - Fix: the opening flow focuses the labelled question instead, preserving `Pick a face` at Level 3 and 45% artwork opacity.
+- [P2] Preview-only arrow navigation used radio semantics even though focus movement intentionally did not save.
+  - Fix: the five choices are now a labelled native-button group with `aria-pressed` reserved for the saved value.
+
+### Pass 2 - passed
+
+- Post-fix visual evidence: the full and focused side-by-side comparisons listed above.
+- The patron, title and caption no longer overlap at any tested breakpoint.
+- The final focused comparison preserves the source hierarchy: one detailed stage, one text label and caption, then five compact faces with the saved Level 4 state visibly marked.
+- Browser console check returned zero warnings or errors.
+- Primary interaction checks covered desktop hover, leave, keyboard preview and save; tablet one-row preview; phone compact summary, expansion, touch save, retained stage and explicit collapse; and the no-reaction neutral Level 3 state.
+- Automated evidence: 57 unit tests passed; production build and emitted-asset verification passed; Playwright completed with 45 passed, 35 intentional skips and 0 failures.
+
+## Open questions
+
+None.
+
+## Implementation checklist
+
+- [x] Match the supplied Level 4 state in one combined comparison input.
+- [x] Contain all five patron poses inside the stage slot.
+- [x] Preserve the saved-versus-preview interaction contract.
+- [x] Verify neutral, saved, hover, focus, touch and collapsed states.
+- [x] Verify 1440 x 900, 768 x 1024 and 390 x 844.
+- [x] Check the browser console and automated suites.
+
+## Follow-up polish
+
+No P3 polish is required for Phase 2A acceptance.
+
+## Final result
+
+passed
