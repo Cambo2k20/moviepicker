@@ -22,10 +22,10 @@ authenticate successfully.
 ## Current implemented boundary
 
 This section describes the authoritative `main` checkout. The latest
-shipped-state audit on 25 August 2026 verified commit `ade6374` in the checkout,
-on `origin/main` and in the successful GitHub Pages deployment. That commit is
-audit evidence, not a permanent boundary: recheck the current branch, deployed
-frontend and hosted migration ledger before relying on it later.
+shipped-state verification on 13 September 2026 verified merge commit `4af2b0a`
+in the checkout, on `origin/main` and in the successful GitHub Pages deployment.
+That commit is audit evidence, not a permanent boundary: recheck the current
+branch, deployed frontend and hosted migration ledger before relying on it later.
 
 A build or commit does not by itself prove that matching migrations, Edge
 Functions or frontend assets have been deployed to production. The Pages
@@ -75,11 +75,14 @@ My Films currently supports:
 - Search, state and Favourite filters, and sorting
 - A unified film-detail view that visibly separates owner-only My Cinema data
   from shared Cine-Cord data
+- Compact numbered rating controls on film details, with reaction faces retained
+  as compact personal indicators on My Films cards
 - Automatic persistence of private changes to the signed-in owner's record
 
-Candidate reaction artwork is implemented, but final production acceptance is
-not recorded. Private notes, reviews, viewing-event history and personal lists
-are not implemented. Discover remains unavailable.
+The Phase 2A My Films and compact film-detail experience passed responsive,
+interaction and production release validation and is deployed. Private notes,
+reviews, viewing-event history and personal lists are not implemented. Discover
+remains unavailable.
 
 ### Queue Roulette
 
@@ -132,6 +135,8 @@ It combines:
 - Guarded deletion for current entries
 - Viewer records
 - Session-linked entry handling
+- The posted date beside each recorder name, preserving the calendar date from
+  the source timestamp
 
 Historical imported entries remain read-only.
 

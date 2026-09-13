@@ -9,11 +9,11 @@ Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
 identity, owner-only personal-film records, states, reactions and Favourites
 are shipped, while the remaining private-data foundation is not. Phase 2A is
-also in progress: its core My Films experience is deployed. On 13 September
-2026, Cameron approved a compact film-detail revision with numbered ratings,
-superseding the detailed reaction artwork on that page. Implementation and
-release validation are on the task branch; mainline integration and publication
-remain pending.
+complete: its My Films experience and the compact film-detail revision with
+numbered ratings were integrated into `main`, passed the production release
+gates and were published on 13 September 2026. The numbered detail controls
+supersede the detailed reaction artwork on that page; compact reaction faces
+remain on My Films cards.
 Phases 2B–5 have not started.
 
 ## Purpose and authority
@@ -592,14 +592,13 @@ or function definitions.
 
 #### Phase 2 — My Cinema Core
 
-Status: In progress through Phase 2A
+Status: In progress; Phase 2A complete and Phase 2B not started
 
 This is the first user-facing release, delivered through smaller batches:
 
 ##### Phase 2A — Personal film and reaction core
 
-Status: In progress; core experience deployed, compact detail revision approved
-with mainline integration and publication pending
+Status: Complete and deployed on 13 September 2026
 
 - Area-switching shell and My Films
 - Protected personal film search
@@ -608,15 +607,15 @@ with mainline integration and publication pending
 - Unified private and shared film details
 
 The paired artwork accepted on 30 August passed its original responsive QA.
-The 13 September amendment to Decisions 003A and 006 supersedes the detail-page
-presentation with numbered ratings and compact film information. The new
-revision requires its own responsive and interaction validation. Phase 2A
-remains in progress until the revised experience is integrated into main and
-published through the separate release gates.
+The 13 September amendment to Decisions 003A and 006 superseded the detail-page
+presentation with numbered ratings and compact film information while retaining
+the compact face artwork on My Films cards. The revision passed responsive,
+interaction, database-parity and production deployment gates and is live from
+merge commit `4af2b0a`.
 
 ##### Phase 2B — History and personal detail
 
-Status: Not started
+Status: Not started; next approved product phase
 
 - Viewing events
 - Current stable-identity Cine-Cord history linking
