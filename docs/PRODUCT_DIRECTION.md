@@ -7,14 +7,15 @@ Approved: 24 August 2026
 Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 
 Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
-identity, owner-only personal-film records, states, reactions and Favourites
-are shipped, while the remaining private-data foundation is not. Phase 2A is
-complete: its My Films experience and the compact film-detail revision with
-numbered ratings were integrated into `main`, passed the production release
-gates and were published on 13 September 2026. The numbered detail controls
-supersede the detailed reaction artwork on that page; compact reaction faces
-remain on My Films cards.
-Phases 2B–5 have not started.
+identity, owner-only personal-film records and the owner-private viewing-event
+foundation are shipped, while the remaining private-data foundation is not.
+Phase 2A is complete: its My Films experience and the compact film-detail
+revision with numbered ratings were integrated into `main`, passed the
+production release gates and were published on 13 September 2026. The numbered
+detail controls supersede the detailed reaction artwork on that page; compact
+reaction faces remain on My Films cards. Phase 2B is in progress: its secure
+viewing-event storage is deployed, but history UI, current-Journal linking,
+private notes and reviews remain unbuilt. Phases 2C–5 have not started.
 
 ## Purpose and authority
 
@@ -575,13 +576,15 @@ Shipped foundation:
 
 - Canonical movie identity and safe metadata
 - Owner-only personal-film records with states, reactions and Favourites
+- Owner-only viewing-event records for repeatable Finished and Did Not Finish
+  history
 - Additive migrations, explicit grants and owner-only RLS
 - Production migration-parity verification before frontend deployment
 
 Still required in this phase:
 
-- Add viewing events, private notes, reviews, lists, Discover feedback and
-  explicit profile-publication entities.
+- Add private notes, reviews, lists, Discover feedback and explicit
+  profile-publication entities.
 - Define the restricted removed-member, export, deletion and historical-
   identity foundations required by Decision 009.
 - Test several authenticated identities.
@@ -592,7 +595,7 @@ or function definitions.
 
 #### Phase 2 — My Cinema Core
 
-Status: In progress; Phase 2A complete and Phase 2B not started
+Status: In progress; Phase 2A complete and Phase 2B in progress
 
 This is the first user-facing release, delivered through smaller batches:
 
@@ -615,12 +618,19 @@ merge commit `4af2b0a`.
 
 ##### Phase 2B — History and personal detail
 
-Status: Not started; next approved product phase
+Status: In progress; viewing-event foundation deployed on 13 September 2026
 
-- Viewing events
+- Viewing-event history UI and manual event controls
 - Current stable-identity Cine-Cord history linking
 - Private note and optional review
 - Per-film personal-data removal and source-linked hiding
+
+The owner-private viewing-event migration passed authenticated database tests,
+production migration parity, unit tests, build and Playwright before deployment
+from merge commit `521ea03`. It stores repeatable Finished or Did Not Finish
+events without changing the current personal-film row. It deliberately adds no
+history UI or automatic Journal linking; those remain separately reviewed
+Phase 2B patches.
 
 ##### Phase 2C — Overview and lists
 
