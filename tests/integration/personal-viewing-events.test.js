@@ -178,11 +178,6 @@ test("source-linked history can only be hidden and follows source deletion", asy
   runSql(`
     insert into public.entry_viewers (entry_id, profile_id)
     values ('${journalEntry.id}', '${owner.id}');
-    insert into public.personal_viewing_events (
-      owner_id, movie_id, outcome, watched_on, source_journal_entry_id
-    ) values (
-      '${owner.id}', '${matrix.id}', 'FINISHED', '2026-09-02', '${journalEntry.id}'
-    );
   `);
   const sourceEvent = sqlRow(`
     select id from public.personal_viewing_events
