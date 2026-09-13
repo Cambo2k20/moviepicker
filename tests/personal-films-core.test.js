@@ -5,9 +5,12 @@ import {
   applyPersonalFilmPatch,
   filmsShareIdentity,
   getVisiblePersonalFilms,
+  getViewingEventsForMovie,
   normalisePersonalFilm,
+  normalisePersonalViewingEvent,
   personalStateLabel,
   reactionForValue,
+  viewingOutcomeLabel,
 } from "../personal-films-core.js";
 
 const movie = {
@@ -87,4 +90,41 @@ test("private filters and reactions keep the approved wording", () => {
   assert.deepEqual(getVisiblePersonalFilms(films, { query: "horror" }).map(({ id }) => id), ["2"]);
   assert.equal(personalStateLabel("DID_NOT_FINISH"), "Did Not Finish");
   assert.equal(reactionForValue(4).label, "Really liked it");
+});
+
+test("personal viewing events normalise and sort repeated history without mixing films", () => {
+  const events = [
+    normalisePersonalViewingEvent({
+      id: "older",
+      owner_id: "owner",
+      movie_id: "movie-a",
+      outcome: "DID_NOT_FINISH",
+      watched_on: "2026-03-02",
+      source_journal_entry_id: null,
+      is_hidden: false,
+      created_at: "2026-03-03T12:00:00Z",
+    }),
+    normalisePersonalViewingEvent({
+      id: "newer",
+      ownerId: "owner",
+      movieId: "movie-a",
+      outcome: "FINISHED",
+      watchedOn: "2026-08-14",
+      sourceJournalEntryId: "journal-entry",
+      isHidden: true,
+      createdAt: "2026-08-15T12:00:00Z",
+    }),
+    normalisePersonalViewingEvent({
+      id: "other-film",
+      owner_id: "owner",
+      movie_id: "movie-b",
+      outcome: "FINISHED",
+      watched_on: "2026-09-01",
+    }),
+  ];
+
+  assert.deepEqual(getViewingEventsForMovie(events, "movie-a").map(({ id }) => id), ["newer", "older"]);
+  assert.equal(events[1].sourceJournalEntryId, "journal-entry");
+  assert.equal(events[1].isHidden, true);
+  assert.equal(viewingOutcomeLabel("DID_NOT_FINISH"), "Did Not Finish");
 });

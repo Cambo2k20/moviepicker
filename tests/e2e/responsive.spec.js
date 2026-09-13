@@ -12,7 +12,7 @@ test("a My Cinema failure stays isolated from the shared workspace", async ({ pa
 
   await page.goto("/moviepicker/?design-preview&preview-failure=personal-films#journal");
   await expect(page.getByRole("heading", { name: "The Journal", exact: true })).toBeVisible();
-  await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  await expect(page.locator(".journal-entry-card")).toHaveCount(4);
 
   await page.goto("/moviepicker/?design-preview&preview-failure=personal-films#my-films");
   await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
@@ -427,6 +427,100 @@ test("compact ratings and film facts fit at every breakpoint", async ({ page }, 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });
 
+test("private viewing history stays compact and separates repeated events from film state", async ({ page }) => {
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+
+  const history = page.locator(".viewing-history");
+  await expect(history.getByRole("heading", { name: "Viewing history" })).toBeVisible();
+  await expect(history.locator(".viewing-event-row")).toHaveCount(3);
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-source"]')).toContainText("Finished");
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-source"]')).toContainText("2 Aug 2026");
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-source"]')).toContainText("From Journal entry #1323");
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-manual-finished"]')).toContainText("12 May 2024");
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-manual-dnf"]')).toContainText("Did Not Finish");
+  await expect(history.locator('[data-viewing-event-row="preview-viewing-pulp-manual-dnf"]')).toContainText("4 Nov 2023");
+  await expect(page.locator('[data-personal-state="WATCHED"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-reaction-choice][data-reaction-value="4"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("switch", { name: /Favourite/ })).toHaveAttribute("aria-checked", "true");
+
+  const geometry = await history.evaluate((element) => ({
+    overflow: element.scrollWidth - element.clientWidth,
+    documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    rowHeights: [...element.querySelectorAll(".viewing-event-row")].map((row) => Math.round(row.getBoundingClientRect().height)),
+  }));
+  expect(geometry.overflow).toBeLessThanOrEqual(1);
+  expect(geometry.documentOverflow).toBeLessThanOrEqual(1);
+  expect(geometry.rowHeights.every((height) => height >= 58 && height <= 150)).toBe(true);
+
+  await page.getByRole("button", { name: "Back to My Films" }).click();
+  await page.getByRole("button", { name: "View details for Alien" }).click();
+  await expect(page.locator(".viewing-history")).toContainText("No visible history yet.");
+  await expect(page.locator(".viewing-history")).toContainText("Add a Finished or Did Not Finish viewing");
+});
+
+test("manual viewing events can be added, corrected and deleted without changing the film record", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The complete viewing-event mutation contract is covered once.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+  await page.getByRole("button", { name: "Add viewing" }).click();
+  const newForm = page.locator("[data-viewing-event-form]");
+  await newForm.getByRole("combobox", { name: "Outcome" }).selectOption("DID_NOT_FINISH");
+  await newForm.getByLabel("Date Optional").fill("2022-01-09");
+  await newForm.getByRole("button", { name: "Add viewing" }).click();
+
+  let addedRow = page.locator(".viewing-event-row.is-manual", { hasText: "9 Jan 2022" });
+  await expect(addedRow).toContainText("Did Not Finish");
+  await expect(page.locator('[data-personal-state="WATCHED"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-reaction-choice][data-reaction-value="4"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("switch", { name: /Favourite/ })).toHaveAttribute("aria-checked", "true");
+
+  await addedRow.getByRole("button", { name: "Edit" }).click();
+  const editForm = page.locator("[data-viewing-event-form]");
+  await editForm.getByRole("combobox", { name: "Outcome" }).selectOption("FINISHED");
+  await editForm.getByLabel("Date Optional").fill("2022-01-10");
+  await editForm.getByRole("button", { name: "Save changes" }).click();
+  addedRow = page.locator(".viewing-event-row.is-manual", { hasText: "10 Jan 2022" });
+  await expect(addedRow).toContainText("Finished");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await addedRow.getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator(".viewing-event-row.is-manual", { hasText: "10 Jan 2022" })).toHaveCount(0);
+  await expect(page.locator("#toast")).toContainText("Cine-Cord and the Journal were not changed");
+
+  const sourceRow = page.locator('[data-viewing-event-row="preview-viewing-pulp-source"]');
+  await sourceRow.getByRole("button", { name: "Hide from My Cinema" }).click();
+  await expect(page.locator(".viewing-history-header")).toContainText("2 visible events · 1 hidden");
+  const hiddenEvents = page.locator(".viewing-hidden-events");
+  await hiddenEvents.locator("summary").click();
+  await expect(hiddenEvents).toContainText("From Journal entry #1323");
+  await hiddenEvents.getByRole("button", { name: "Reveal in My Cinema" }).click();
+  await expect(page.locator(".viewing-hidden-events")).toHaveCount(0);
+
+  await page.locator('[data-viewing-event-row="preview-viewing-pulp-source"]').getByRole("button", { name: "Correct in Journal" }).click();
+  await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search the Journal" })).toHaveValue("1323");
+  await expect(page.getByRole("combobox", { name: "Filter Journal by source" })).toHaveValue("CINE_CORD");
+  const sourceCard = page.locator('[data-journal-entry-id="preview-journal-1323"]');
+  await expect(sourceCard).toHaveClass(/is-focused-source/);
+  await expect(sourceCard.locator("[data-journal-entry-form]")).toBeVisible();
+});
+
+test("a viewing-history failure does not disable the rest of My Cinema", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The isolated private-feature failure is covered once.");
+
+  await page.goto("/moviepicker/?design-preview&preview-failure=viewing-history#my-films");
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+  const historyError = page.locator(".viewing-history").getByRole("alert");
+  await expect(historyError).toContainText("Viewing history couldn’t load.");
+  await expect(historyError).toContainText("film state, rating and Favourite are still available");
+  await expect(page.locator('[data-personal-state="WATCHED"]')).toBeEnabled();
+  await expect(page.locator("[data-reaction-choice]")).toHaveCount(5);
+  await expect(page.getByRole("switch", { name: /Favourite/ })).toBeEnabled();
+  await expect(page.locator(".viewing-event-row")).toHaveCount(0);
+});
+
 test("shared detail adds a private film only after choosing a state", async ({ page }) => {
   await page.getByRole("button", {name: "View details for Home Alone", exact:true}).click();
   await expect(page.locator(".film-primary-context .shared-panel")).toBeVisible();
@@ -520,12 +614,13 @@ test("the master Journal keeps archives read-only and current entries actionable
   await page.getByRole("button", { name: "Journal" }).click();
   await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
   await expect(page.locator(".journal-header .eyebrow")).toContainText("2 archived");
-  await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
-  await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  await expect(page.locator(".journal-header .eyebrow")).toContainText("2 editable");
+  await expect(page.locator(".journal-entry-card")).toHaveCount(4);
   const postedDates = page.locator(".journal-entry-posted-date");
-  await expect(postedDates).toHaveText(["16 Aug 2026", "3 Aug 2025", "7 Jun 2020"]);
+  await expect(postedDates).toHaveText(["16 Aug 2026", "3 Aug 2026", "3 Aug 2025", "7 Jun 2020"]);
   expect(await postedDates.evaluateAll((dates) => dates.map((date) => date.getAttribute("datetime")))).toEqual([
     "2026-08-16T23:25:21.405+01:00",
+    "2026-08-03T00:18:00.000+01:00",
     "2025-08-03T00:20:41.860+01:00",
     "2020-06-07T03:56:48.786+01:00",
   ]);
@@ -575,8 +670,8 @@ test("the master Journal keeps archives read-only and current entries actionable
       }),
     }));
     expect(tabletCardGeometry.documentOverflow).toBeLessThanOrEqual(1);
-    expect(tabletCardGeometry.cards.map(({ footerDirection }) => footerDirection)).toEqual(["column", "column", "column"]);
-    expect(tabletCardGeometry.cards.map(({ actionColumns }) => actionColumns)).toEqual([2, 1, 1]);
+    expect(tabletCardGeometry.cards.map(({ footerDirection }) => footerDirection)).toEqual(["column", "column", "column", "column"]);
+    expect(tabletCardGeometry.cards.map(({ actionColumns }) => actionColumns)).toEqual([2, 2, 1, 1]);
     expect(tabletCardGeometry.cards.every(({ footerOverflow, contentOverflow }) => footerOverflow <= 1 && contentOverflow <= 1)).toBe(true);
     expect(tabletCardGeometry.cards.every(({ minimumButtonHeight }) => minimumButtonHeight >= 44)).toBe(true);
   }
@@ -630,7 +725,7 @@ test("the master Journal keeps archives read-only and current entries actionable
       footerDirection: "row",
       footerOverflow: 0,
       titleYearGap: 10,
-      actionCounts: [4, 1, 1],
+      actionCounts: [4, 3, 1, 1],
       actionOrder: ["Update Discord post", "View in Discord", "Copy for Discord", "Edit"],
       actionLevels: ["primary", "secondary", "quiet", "quiet"],
       title: "Filth",
@@ -639,6 +734,7 @@ test("the master Journal keeps archives read-only and current entries actionable
       comment: "Same rules still apply — corrected on Cine-Cord after posting.",
     });
     expect(cards.map(({ width, titleSize, contentOverflow }) => ({ width, titleSize, contentOverflow }))).toEqual([
+      { width: 1000, titleSize: 28, contentOverflow: 1 },
       { width: 1000, titleSize: 28, contentOverflow: 1 },
       { width: 1000, titleSize: 25, contentOverflow: 1 },
       { width: 1000, titleSize: 28, contentOverflow: 1 },
@@ -656,6 +752,8 @@ test("the master Journal keeps archives read-only and current entries actionable
   await expect(page.locator(".journal-entry-card")).toContainText("Entry #12.1");
   await page.getByRole("button", { name: "Clear filters" }).click();
   await page.locator("#journal-source-filter").selectOption({ label: "Cine-Cord entries" });
+  await expect(page.locator(".journal-entry-card")).toHaveCount(2);
+  await page.locator("#journal-search").fill("Filth");
   await expect(page.locator(".journal-entry-card")).toHaveCount(1);
   await expect(page.locator(".journal-entry-card")).toContainText("Discord copy out of date");
 
@@ -685,7 +783,7 @@ test("the master Journal keeps archives read-only and current entries actionable
     await page.getByRole("button", { name: "Delete entry" }).click();
     await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
     await expect(page.locator("#toast")).toContainText("and its Discord post were deleted");
-    await expect(page.locator(".journal-header .eyebrow")).toContainText("0 editable");
+    await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
     await expect(page.locator(".journal-entry-card")).toHaveCount(0);
   }
 

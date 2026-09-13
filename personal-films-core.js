@@ -12,6 +12,11 @@ export const REACTION_LEVELS = [
   { value: 5, label: "Loved it" },
 ];
 
+export const VIEWING_OUTCOMES = [
+  { value: "FINISHED", label: "Finished" },
+  { value: "DID_NOT_FINISH", label: "Did Not Finish" },
+];
+
 function movieRecord(row) {
   if (!row?.movies) return row?.movie || {};
   return Array.isArray(row.movies) ? row.movies[0] || {} : row.movies;
@@ -45,6 +50,20 @@ export function normalisePersonalFilm(row) {
   };
 }
 
+export function normalisePersonalViewingEvent(row) {
+  return {
+    id: row.id,
+    ownerId: row.owner_id || row.ownerId || null,
+    movieId: row.movie_id || row.movieId || null,
+    outcome: row.outcome,
+    watchedOn: row.watched_on ?? row.watchedOn ?? null,
+    sourceJournalEntryId: row.source_journal_entry_id || row.sourceJournalEntryId || null,
+    isHidden: Boolean(row.is_hidden ?? row.isHidden),
+    createdAt: row.created_at || row.createdAt || null,
+    updatedAt: row.updated_at || row.updatedAt || null,
+  };
+}
+
 export function filmsShareIdentity(left, right) {
   if (!left || !right) return false;
   if (left.movieId && right.movieId) return left.movieId === right.movieId;
@@ -69,6 +88,21 @@ export function reactionForValue(value) {
 
 export function personalStateLabel(state) {
   return PERSONAL_FILM_STATES.find((candidate) => candidate.value === state)?.label || "In My Cinema";
+}
+
+export function viewingOutcomeLabel(outcome) {
+  return VIEWING_OUTCOMES.find((candidate) => candidate.value === outcome)?.label || "Viewing";
+}
+
+export function getViewingEventsForMovie(events, movieId) {
+  if (!movieId) return [];
+  return events
+    .filter((event) => event.movieId === movieId)
+    .sort((left, right) => {
+      const dateOrder = String(right.watchedOn || "").localeCompare(String(left.watchedOn || ""));
+      if (dateOrder) return dateOrder;
+      return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+    });
 }
 
 export function applyPersonalFilmPatch(existing, movie, patch, { id, ownerId, now = new Date().toISOString() } = {}) {

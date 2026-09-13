@@ -19,12 +19,16 @@ import {
 import {
   PERSONAL_FILM_STATES,
   REACTION_LEVELS,
+  VIEWING_OUTCOMES,
   applyPersonalFilmPatch,
   findFilmByIdentity,
   getVisiblePersonalFilms,
+  getViewingEventsForMovie,
   normalisePersonalFilm,
+  normalisePersonalViewingEvent,
   personalStateLabel,
   reactionForValue,
+  viewingOutcomeLabel,
 } from "./personal-films-core.js";
 import { settleOptionalQuery } from "./workspace-core.js";
 
@@ -41,6 +45,8 @@ const designPreviewVariant = designPreviewMode
   : null;
 const designPreviewPersonalFilmsError = designPreviewMode
   && new URLSearchParams(window.location.search).get("preview-failure") === "personal-films";
+const designPreviewViewingHistoryError = designPreviewMode
+  && new URLSearchParams(window.location.search).get("preview-failure") === "viewing-history";
 const discordAuthPreviewMode = ["terminal.local", "localhost", "127.0.0.1"].includes(window.location.hostname)
   && new URLSearchParams(window.location.search).has("discord-auth-preview");
 
@@ -114,6 +120,12 @@ let joinRequests = [];
 let movieList = [];
 let personalFilms = [];
 let personalFilmsLoadError = false;
+let personalViewingEvents = [];
+let personalViewingEventsLoadError = false;
+let viewingEventsRetrying = false;
+let viewingEventEditorId = null;
+let viewingEventPendingId = null;
+let viewingEventLiveMessage = "";
 let activeSession = null;
 let sessionHistory = [];
 let journalCatalog = [];
@@ -136,6 +148,7 @@ let journalStatusFilter = "all";
 let journalYearFilter = "all";
 let journalViewerFilter = "all";
 let journalVisibleLimit = 60;
+let journalFocusedEntryId = null;
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -188,6 +201,7 @@ function persistDesignPreviewWorkspace() {
       discordDraft,
       previewNextEntryNumber,
       personalFilms,
+      personalViewingEvents,
       watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn, votes, votedByMe }) => ({ id, watched, watchCount, lastWatchedOn, votes, votedByMe })),
     }));
   } catch { /* a full or blocked store must not break the preview */ }
@@ -209,6 +223,7 @@ function restoreDesignPreviewWorkspace() {
     }
   }
   if (Array.isArray(saved.personalFilms)) personalFilms = saved.personalFilms.map(normalisePersonalFilm);
+  if (Array.isArray(saved.personalViewingEvents)) personalViewingEvents = saved.personalViewingEvents.map(normalisePersonalViewingEvent);
   activeSession = saved.activeSession || null;
   sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
   journalSessionId = null;
@@ -322,11 +337,73 @@ function loadDesignPreviewWorkspace() {
       updatedAt: "2026-08-12T20:00:00Z",
     }),
   ];
+  personalViewingEvents = [
+    normalisePersonalViewingEvent({
+      id: "preview-viewing-pulp-source",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      outcome: "FINISHED",
+      watchedOn: "2026-08-02",
+      sourceJournalEntryId: "preview-journal-1323",
+      isHidden: false,
+      createdAt: "2026-08-03T00:18:00Z",
+      updatedAt: "2026-08-03T00:18:00Z",
+    }),
+    normalisePersonalViewingEvent({
+      id: "preview-viewing-pulp-manual-finished",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      outcome: "FINISHED",
+      watchedOn: "2024-05-12",
+      sourceJournalEntryId: null,
+      isHidden: false,
+      createdAt: "2026-08-24T19:20:00Z",
+      updatedAt: "2026-08-24T19:20:00Z",
+    }),
+    normalisePersonalViewingEvent({
+      id: "preview-viewing-pulp-manual-dnf",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      outcome: "DID_NOT_FINISH",
+      watchedOn: "2023-11-04",
+      sourceJournalEntryId: null,
+      isHidden: false,
+      createdAt: "2026-08-24T19:18:00Z",
+      updatedAt: "2026-08-24T19:18:00Z",
+    }),
+  ];
   isLoading = false;
   restoreDesignPreviewWorkspace();
   personalFilmsLoadError = designPreviewPersonalFilmsError;
   if (personalFilmsLoadError) personalFilms = [];
+  personalViewingEventsLoadError = designPreviewViewingHistoryError;
+  if (personalViewingEventsLoadError) personalViewingEvents = [];
   journalCatalog = [
+    {
+      catalogId: "current:preview-journal-1323",
+      sourceType: "CINE_CORD",
+      recordId: "preview-journal-1323",
+      journalEntryId: "preview-journal-1323",
+      entryLabel: "1323",
+      entrySortNumber: 1323,
+      title: "Pulp Fiction",
+      year: 1994,
+      watchedAt: "2026-08-02",
+      status: "FINISHED",
+      comment: "A current Cine-Cord entry linked through verified member and movie identities.",
+      viewerNames: ["Cameron", "Dean"],
+      viewerIds: ["preview-cameron", "preview-dean"],
+      createdById: "preview-cameron",
+      authorName: "Cameron",
+      volumeName: "Cine-Cord",
+      discordUrl: null,
+      sourceCreatedAt: "2026-08-03T00:18:00.000+01:00",
+      parserStatus: "PARSED",
+      publicationStatus: null,
+      publication: null,
+      discordOutOfDate: false,
+      canEdit: currentProfile.id === "preview-cameron" || isCurrentAdmin(),
+    },
     {
       catalogId: "current:preview-journal-1324",
       sourceType: "CINE_CORD",
@@ -1368,6 +1445,7 @@ async function lookupMovie(body) {
 }
 
 const PERSONAL_FILM_SELECT = "id,owner_id,movie_id,state,rating,is_favourite,created_at,updated_at,movies(id,tmdb_id,title,release_year,poster_path,runtime_minutes,genres,overview,metadata_updated_at)";
+const PERSONAL_VIEWING_EVENT_SELECT = "id,owner_id,movie_id,outcome,watched_on,source_journal_entry_id,is_hidden,created_at,updated_at";
 
 function personalWritePatch(existing, patch) {
   const payload = {};
@@ -1421,6 +1499,87 @@ async function removePersonalFilm(film) {
   if (error) throw error;
   if (!data) throw new Error("The private film was not removed. Refresh before trying again.");
   personalFilms = personalFilms.filter((candidate) => candidate.id !== existing.id);
+}
+
+function replacePersonalViewingEvent(event) {
+  const existingIndex = personalViewingEvents.findIndex((candidate) => candidate.id === event.id);
+  if (existingIndex >= 0) personalViewingEvents.splice(existingIndex, 1, event);
+  else personalViewingEvents.push(event);
+}
+
+async function saveManualViewingEvent(movie, event, { outcome, watchedOn }) {
+  if (!authUser || !activeGroup || !movie?.movieId) throw new Error("This film needs a canonical movie record before history can be saved.");
+  if (!VIEWING_OUTCOMES.some((candidate) => candidate.value === outcome)) throw new Error("Choose Finished or Did Not Finish.");
+  if (event?.sourceJournalEntryId) throw new Error("Source-linked facts must be corrected through the Journal.");
+
+  const payload = { outcome, watched_on: watchedOn || null };
+  if (designPreviewMode) {
+    const now = new Date().toISOString();
+    const saved = normalisePersonalViewingEvent({
+      ...(event || {}),
+      id: event?.id || `preview-viewing-${Date.now()}`,
+      ownerId: authUser.id,
+      movieId: movie.movieId,
+      sourceJournalEntryId: null,
+      isHidden: false,
+      outcome,
+      watchedOn: watchedOn || null,
+      createdAt: event?.createdAt || now,
+      updatedAt: now,
+    });
+    replacePersonalViewingEvent(saved);
+    persistDesignPreviewWorkspace();
+    return saved;
+  }
+
+  const query = event
+    ? supabase.from("personal_viewing_events").update(payload).eq("id", event.id).eq("owner_id", authUser.id).is("source_journal_entry_id", null)
+    : supabase.from("personal_viewing_events").insert({
+      owner_id: authUser.id,
+      movie_id: movie.movieId,
+      ...payload,
+    });
+  const { data, error } = await query.select(PERSONAL_VIEWING_EVENT_SELECT).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("No viewing event was saved. Refresh before trying again.");
+  const saved = normalisePersonalViewingEvent(data);
+  replacePersonalViewingEvent(saved);
+  return saved;
+}
+
+async function setSourceViewingEventHidden(event, isHidden) {
+  if (!event?.sourceJournalEntryId) throw new Error("Manual viewing events cannot be hidden; delete them instead.");
+  if (designPreviewMode) {
+    const saved = { ...event, isHidden: Boolean(isHidden), updatedAt: new Date().toISOString() };
+    replacePersonalViewingEvent(saved);
+    persistDesignPreviewWorkspace();
+    return saved;
+  }
+  const { data, error } = await supabase
+    .from("personal_viewing_events")
+    .update({ is_hidden: Boolean(isHidden) })
+    .eq("id", event.id)
+    .eq("owner_id", authUser.id)
+    .select(PERSONAL_VIEWING_EVENT_SELECT)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The source-linked event was not changed. Refresh before trying again.");
+  const saved = normalisePersonalViewingEvent(data);
+  replacePersonalViewingEvent(saved);
+  return saved;
+}
+
+async function deleteManualViewingEvent(event) {
+  if (!event || event.sourceJournalEntryId) throw new Error("Source-linked events are hidden or corrected through the Journal, not deleted here.");
+  if (designPreviewMode) {
+    personalViewingEvents = personalViewingEvents.filter((candidate) => candidate.id !== event.id);
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { data, error } = await supabase.rpc("delete_manual_personal_viewing_event", { p_event_id: event.id });
+  if (error) throw error;
+  if (!data) throw new Error("The manual viewing event was not deleted. Refresh before trying again.");
+  personalViewingEvents = personalViewingEvents.filter((candidate) => candidate.id !== event.id);
 }
 
 async function suggestPersonalFilm(movie) {
@@ -1787,6 +1946,71 @@ function renderReactionControl(movie, personal) {
     </section>`;
 }
 
+function journalEntryForViewingEvent(viewingEvent) {
+  if (!viewingEvent?.sourceJournalEntryId) return null;
+  return journalCatalog.find((entry) => entry.journalEntryId === viewingEvent.sourceJournalEntryId) || null;
+}
+
+function renderViewingEventEditor(viewingEvent = null) {
+  const outcome = viewingEvent?.outcome || "FINISHED";
+  const watchedOn = viewingEvent?.watchedOn ?? isoDateOnly(new Date());
+  const pending = viewingEventPendingId === (viewingEvent?.id || "new");
+  return `
+    <form class="viewing-event-editor" data-viewing-event-form data-viewing-event-id="${escapeHTML(viewingEvent?.id || "")}">
+      <label><span>Outcome</span><select name="outcome" ${pending ? "disabled" : ""}>${VIEWING_OUTCOMES.map((candidate) => `<option value="${candidate.value}" ${candidate.value === outcome ? "selected" : ""}>${escapeHTML(candidate.label)}</option>`).join("")}</select></label>
+      <label><span>Date <small>Optional</small></span><input name="watched_on" type="date" value="${escapeHTML(watchedOn)}" ${pending ? "disabled" : ""} /></label>
+      <div class="viewing-event-editor-actions"><button class="primary-button compact" type="submit" ${pending ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">${pending ? "progress_activity" : "save"}</span>${pending ? "Saving…" : viewingEvent ? "Save changes" : "Add viewing"}</button><button class="quiet-button compact" type="button" data-cancel-viewing-event ${pending ? "disabled" : ""}>Cancel</button></div>
+      <small class="viewing-event-editor-note">Private to you. This does not change Cine-Cord, the Journal, your current state or rating.</small>
+    </form>`;
+}
+
+function renderViewingEventRow(viewingEvent) {
+  const sourceEntry = journalEntryForViewingEvent(viewingEvent);
+  const isSourceLinked = Boolean(viewingEvent.sourceJournalEntryId);
+  const isEditing = !isSourceLinked && viewingEventEditorId === viewingEvent.id;
+  const pending = viewingEventPendingId === viewingEvent.id;
+  const dateLabel = viewingEvent.watchedOn ? formatSavedDate(viewingEvent.watchedOn) : "Date not recorded";
+  const sourceLabel = isSourceLinked
+    ? (sourceEntry ? `From Journal entry #${sourceEntry.entryLabel}` : "From a current Journal entry")
+    : "Added manually";
+  if (isEditing) {
+    return `<article class="viewing-event-row is-editing" data-viewing-event-row="${escapeHTML(viewingEvent.id)}" tabindex="-1">${renderViewingEventEditor(viewingEvent)}</article>`;
+  }
+  return `
+    <article class="viewing-event-row ${isSourceLinked ? "is-source-linked" : "is-manual"} ${viewingEvent.isHidden ? "is-hidden-event" : ""}" data-viewing-event-row="${escapeHTML(viewingEvent.id)}" tabindex="-1">
+      <div class="viewing-event-facts"><span class="viewing-outcome ${viewingEvent.outcome === "DID_NOT_FINISH" ? "is-dnf" : "is-finished"}">${escapeHTML(viewingOutcomeLabel(viewingEvent.outcome))}</span>${viewingEvent.watchedOn ? `<time datetime="${escapeHTML(viewingEvent.watchedOn)}">${escapeHTML(dateLabel)}</time>` : `<span>${escapeHTML(dateLabel)}</span>`}</div>
+      <small class="viewing-event-source"><span class="material-symbols-outlined" aria-hidden="true">${isSourceLinked ? "menu_book" : "edit_calendar"}</span>${escapeHTML(sourceLabel)}</small>
+      <div class="viewing-event-actions">
+        ${isSourceLinked ? `<button class="detail-text-action" type="button" data-toggle-viewing-event-hidden="${escapeHTML(viewingEvent.id)}" ${pending ? "disabled" : ""}>${pending ? "Saving…" : viewingEvent.isHidden ? "Reveal in My Cinema" : "Hide from My Cinema"}</button><button class="detail-text-action" type="button" data-open-source-journal="${escapeHTML(viewingEvent.id)}">${sourceEntry?.canEdit ? "Correct in Journal" : "View in Journal"}</button>` : `<button class="detail-text-action" type="button" data-edit-viewing-event="${escapeHTML(viewingEvent.id)}" ${pending ? "disabled" : ""}>Edit</button><button class="detail-text-action danger" type="button" data-delete-viewing-event="${escapeHTML(viewingEvent.id)}" ${pending ? "disabled" : ""}>${pending ? "Deleting…" : "Delete"}</button>`}
+      </div>
+    </article>`;
+}
+
+function renderViewingHistory(context) {
+  const events = getViewingEventsForMovie(personalViewingEvents, context.movie?.movieId);
+  const visibleEvents = events.filter((viewingEvent) => !viewingEvent.isHidden);
+  const hiddenEvents = events.filter((viewingEvent) => viewingEvent.isHidden);
+  const canAddManual = Boolean(context.personal && !personalFilmsLoadError && context.movie?.movieId);
+  if (!context.personal && !events.length && !personalViewingEventsLoadError) return "";
+
+  if (personalViewingEventsLoadError) {
+    return `
+      <section class="viewing-history" aria-labelledby="viewing-history-title">
+        <header class="viewing-history-header"><div><span class="eyebrow">Private history</span><h2 id="viewing-history-title" tabindex="-1">Viewing history</h2></div></header>
+        <div class="feature-error-state is-compact viewing-history-error" role="alert"><span class="material-symbols-outlined" aria-hidden="true">history_off</span><div><strong>Viewing history couldn’t load.</strong><p>Your film state, rating and Favourite are still available.</p></div><button class="secondary-button compact" type="button" data-retry-viewing-history ${viewingEventsRetrying ? "disabled" : ""}>${viewingEventsRetrying ? "Trying again…" : "Try again"}</button></div>
+      </section>`;
+  }
+
+  return `
+    <section class="viewing-history" aria-labelledby="viewing-history-title">
+      <header class="viewing-history-header"><div><span class="eyebrow">Private history</span><h2 id="viewing-history-title" tabindex="-1">Viewing history</h2><small>${visibleEvents.length} visible ${visibleEvents.length === 1 ? "event" : "events"}${hiddenEvents.length ? ` · ${hiddenEvents.length} hidden` : ""}</small></div>${canAddManual && viewingEventEditorId !== "new" ? `<button class="secondary-button compact" type="button" data-add-viewing-event><span class="material-symbols-outlined" aria-hidden="true">add</span>Add viewing</button>` : ""}</header>
+      ${viewingEventEditorId === "new" && canAddManual ? renderViewingEventEditor() : ""}
+      <div class="viewing-event-list">${visibleEvents.length ? visibleEvents.map(renderViewingEventRow).join("") : `<div class="viewing-history-empty"><span class="material-symbols-outlined" aria-hidden="true">history</span><div><strong>No visible history yet.</strong><p>${hiddenEvents.length ? "Your source-linked event is hidden below." : canAddManual ? "Add a Finished or Did Not Finish viewing when you want to remember it." : "Add this film to My Cinema before recording a manual viewing."}</p></div></div>`}</div>
+      ${hiddenEvents.length ? `<details class="viewing-hidden-events"><summary>${hiddenEvents.length} hidden source ${hiddenEvents.length === 1 ? "event" : "events"}</summary><div class="viewing-event-list">${hiddenEvents.map(renderViewingEventRow).join("")}</div></details>` : ""}
+      <span class="sr-only" role="status" aria-live="polite">${escapeHTML(viewingEventLiveMessage)}</span>
+    </section>`;
+}
+
 function renderPageHeader({ id, eyebrow, title, description = "", actions = "", className = "", titleClass = "page-title" }) {
   return `
     <header class="page-header layout-page-header ${className}">
@@ -1810,11 +2034,13 @@ function renderPersonalFilmsUnavailable({ compact = false } = {}) {
 
 function renderPrivateFilmPanel(context) {
   const { movie, personal } = context;
+  const viewingHistory = renderViewingHistory(context);
   if (personalFilmsLoadError) {
     return `
       <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
         <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Temporarily unavailable</span><small>Cine-Cord remains available</small></header>
         ${renderPersonalFilmsUnavailable({ compact: true })}
+        ${viewingHistory}
       </section>`;
   }
   if (!personal) {
@@ -1827,6 +2053,7 @@ function renderPrivateFilmPanel(context) {
           <p>${movie.movieId ? "Not in your library yet. Adding or rating saves it privately." : "Match this film with TMDB before saving private state."}</p>
         </div>
         ${reactionEditorExpanded && movie.movieId ? renderReactionControl(movie, null) : ""}
+        ${viewingHistory}
       </section>`;
   }
 
@@ -1842,6 +2069,7 @@ function renderPrivateFilmPanel(context) {
         <button class="favourite-switch ${personal.isFavourite ? "is-active" : ""}" type="button" role="switch" aria-checked="${personal.isFavourite}" data-toggle-favourite><span class="material-symbols-outlined" aria-hidden="true">favorite</span>Favourite <small>${personal.isFavourite ? "On" : "Off"}</small></button>
       </div>
       ${renderReactionControl(movie, personal)}
+      ${viewingHistory}
     </section>`;
 }
 
@@ -2334,7 +2562,7 @@ function renderJournalCard(entry) {
       ? (isOutOfDate ? `<span class="journal-discord-state is-stale" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>Discord copy out of date</span>` : `<span class="journal-discord-state is-current" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Discord copy current</span>`)
       : `<span class="journal-discord-state is-not-posted" role="status" aria-live="polite"><span class="material-symbols-outlined" aria-hidden="true">draft</span>Not posted to Discord</span>`);
   return `
-    <article class="journal-entry-card layout-container ${isArchive ? "layout-container-neutral is-archive" : "layout-container-shared is-current"} ${isEditing ? "is-editing" : ""}">
+    <article class="journal-entry-card layout-container ${isArchive ? "layout-container-neutral is-archive" : "layout-container-shared is-current"} ${isEditing ? "is-editing" : ""} ${journalFocusedEntryId === entry.journalEntryId ? "is-focused-source" : ""}" data-journal-entry-id="${escapeHTML(entry.journalEntryId || "")}" tabindex="-1">
       <div class="journal-entry-head">
         <div><span class="journal-entry-number">Entry #${escapeHTML(entry.entryLabel)}</span><span class="journal-source-label">${escapeHTML(sourceCopy)}</span></div>
         <span class="status-pill ${entry.status === "DNF" ? "journal-dnf" : "watched"}">${escapeHTML(journalStatusLabel(entry.status))}</span>
@@ -2559,6 +2787,10 @@ function navigate(view) {
   selectedFilmId = null;
   reactionEditorExpanded = false;
   reactionLiveMessage = "";
+  viewingEventEditorId = null;
+  viewingEventPendingId = null;
+  viewingEventLiveMessage = "";
+  if (currentView !== "journal") journalFocusedEntryId = null;
   window.location.hash = currentView;
   render();
   root.focus({ preventScroll: true });
@@ -2965,10 +3197,28 @@ async function fetchPersonalFilms() {
   );
 }
 
+async function fetchPersonalViewingEvents() {
+  return settleOptionalQuery(
+    supabase
+      .from("personal_viewing_events")
+      .select(PERSONAL_VIEWING_EVENT_SELECT)
+      .eq("owner_id", authUser.id)
+      .order("watched_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false }),
+    (rows) => rows.map(normalisePersonalViewingEvent),
+  );
+}
+
 function applyPersonalFilmsResult(result) {
   personalFilms = result.data;
   personalFilmsLoadError = Boolean(result.error);
   if (result.error) console.warn("My Cinema data could not be loaded.", result.error);
+}
+
+function applyPersonalViewingEventsResult(result) {
+  personalViewingEvents = result.data;
+  personalViewingEventsLoadError = Boolean(result.error);
+  if (result.error) console.warn("Private viewing history could not be loaded.", result.error);
 }
 
 async function retryPersonalFilms() {
@@ -2979,6 +3229,23 @@ async function retryPersonalFilms() {
   const result = await fetchPersonalFilms();
   applyPersonalFilmsResult(result);
   return !result.error;
+}
+
+async function retryPersonalViewingEvents() {
+  if (viewingEventsRetrying) return false;
+  viewingEventsRetrying = true;
+  render();
+  try {
+    if (designPreviewMode) {
+      personalViewingEventsLoadError = designPreviewViewingHistoryError;
+      return !personalViewingEventsLoadError;
+    }
+    const result = await fetchPersonalViewingEvents();
+    applyPersonalViewingEventsResult(result);
+    return !result.error;
+  } finally {
+    viewingEventsRetrying = false;
+  }
 }
 
 async function loadWorkspace(providerToken = null) {
@@ -2993,6 +3260,12 @@ async function loadWorkspace(providerToken = null) {
   movieList = [];
   personalFilms = [];
   personalFilmsLoadError = false;
+  personalViewingEvents = [];
+  personalViewingEventsLoadError = false;
+  viewingEventsRetrying = false;
+  viewingEventEditorId = null;
+  viewingEventPendingId = null;
+  viewingEventLiveMessage = "";
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -3003,6 +3276,7 @@ async function loadWorkspace(providerToken = null) {
   journalPublishPendingId = null;
   journalEditingId = null;
   journalSyncPendingId = null;
+  journalFocusedEntryId = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
@@ -3027,6 +3301,7 @@ async function loadWorkspace(providerToken = null) {
     }
   }
   const personalFilmsPromise = fetchPersonalFilms();
+  const personalViewingEventsPromise = fetchPersonalViewingEvents();
   const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
@@ -3046,6 +3321,7 @@ async function loadWorkspace(providerToken = null) {
   const firstError = [profilesResult.error, membershipsResult.error, identitiesResult.error, queueResult.error, votesResult.error, requestsResult.error, currentSessionResult.error, watchedSessionsResult.error, participantsResult.error, watchedResult.error, journalResult.error, entryViewersResult.error, publicationsResult.error].find(Boolean);
   if (firstError) throw firstError;
   applyPersonalFilmsResult(await personalFilmsPromise);
+  applyPersonalViewingEventsResult(await personalViewingEventsPromise);
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
   const discordIdentityMap = new Map((identitiesResult.data || []).map((identity) => [identity.profile_id, identity]));
@@ -3215,6 +3491,12 @@ async function syncSession(session) {
   movieList = [];
   personalFilms = [];
   personalFilmsLoadError = false;
+  personalViewingEvents = [];
+  personalViewingEventsLoadError = false;
+  viewingEventsRetrying = false;
+  viewingEventEditorId = null;
+  viewingEventPendingId = null;
+  viewingEventLiveMessage = "";
   activeSession = null;
   sessionHistory = [];
   journalCatalog = [];
@@ -3225,6 +3507,7 @@ async function syncSession(session) {
   journalPublishPendingId = null;
   journalEditingId = null;
   journalSyncPendingId = null;
+  journalFocusedEntryId = null;
   discordProfileSyncError = "";
   discordProfileSyncNotice = "";
   selectedFilmId = null;
@@ -3297,6 +3580,39 @@ document.addEventListener("focusout", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const viewingEventEditor = event.target.closest("[data-viewing-event-form]");
+  if (viewingEventEditor) {
+    event.preventDefault();
+    if (!viewingEventEditor.reportValidity()) return;
+    const context = selectedFilmContext();
+    if (!context?.movie?.movieId || !context.personal) return;
+    const eventId = viewingEventEditor.dataset.viewingEventId;
+    const existing = eventId ? personalViewingEvents.find((candidate) => candidate.id === eventId) : null;
+    if (eventId && (!existing || existing.sourceJournalEntryId)) return;
+    const form = new FormData(viewingEventEditor);
+    const pendingId = existing?.id || "new";
+    const submit = viewingEventEditor.querySelector("[type=submit]");
+    viewingEventPendingId = pendingId;
+    submit.disabled = true;
+    try {
+      const saved = await saveManualViewingEvent(context.movie, existing, {
+        outcome: String(form.get("outcome") || ""),
+        watchedOn: String(form.get("watched_on") || "") || null,
+      });
+      viewingEventPendingId = null;
+      viewingEventEditorId = null;
+      viewingEventLiveMessage = `${viewingOutcomeLabel(saved.outcome)} viewing saved${saved.watchedOn ? ` for ${formatSavedDate(saved.watchedOn)}` : " without a date"}.`;
+      render();
+      window.requestAnimationFrame(() => document.querySelector(`[data-viewing-event-row="${CSS.escape(saved.id)}"]`)?.focus({ preventScroll: true }));
+      showToast(existing ? "Manual viewing updated. Your current film state and Cine-Cord were not changed." : "Manual viewing added privately. Your current film state and Cine-Cord were not changed.");
+    } catch (error) {
+      viewingEventPendingId = null;
+      submit.disabled = false;
+      showToast(`The viewing event was not saved: ${error.message}`);
+    }
+    return;
+  }
+
   const journalEditor = event.target.closest("[data-journal-entry-form]");
   if (journalEditor) {
     event.preventDefault();
@@ -3718,6 +4034,9 @@ document.addEventListener("click", async (event) => {
     selectedFilmId = selectFilmButton.dataset.selectFilm;
     reactionEditorExpanded = false;
     reactionLiveMessage = "";
+    viewingEventEditorId = null;
+    viewingEventPendingId = null;
+    viewingEventLiveMessage = "";
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
     window.requestAnimationFrame(() => document.querySelector(".film-detail-view")?.focus({ preventScroll: true }));
@@ -3728,6 +4047,9 @@ document.addEventListener("click", async (event) => {
     selectedFilmId = null;
     reactionEditorExpanded = false;
     reactionLiveMessage = "";
+    viewingEventEditorId = null;
+    viewingEventPendingId = null;
+    viewingEventLiveMessage = "";
     render();
     window.requestAnimationFrame(() => {
       window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" });
@@ -3745,10 +4067,131 @@ document.addEventListener("click", async (event) => {
     currentView = destination;
     selectedFilmId = destinationFilm.id;
     reactionEditorExpanded = false;
+    viewingEventEditorId = null;
+    viewingEventPendingId = null;
+    viewingEventLiveMessage = "";
     window.history.replaceState(null, "", `#${destination}`);
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
     window.requestAnimationFrame(() => document.querySelector(".film-detail-view")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  const retryViewingHistoryButton = event.target.closest("[data-retry-viewing-history]");
+  if (retryViewingHistoryButton) {
+    retryViewingHistoryButton.disabled = true;
+    const loaded = await retryPersonalViewingEvents();
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#viewing-history-title")?.focus({ preventScroll: true }));
+    showToast(loaded ? "Viewing history loaded." : "Viewing history is still unavailable. Your other private film details are unchanged.");
+    return;
+  }
+
+  if (event.target.closest("[data-add-viewing-event]")) {
+    viewingEventEditorId = "new";
+    viewingEventLiveMessage = "";
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-viewing-event-form] select")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-viewing-event]")) {
+    const previousEditorId = viewingEventEditorId;
+    viewingEventEditorId = null;
+    render();
+    window.requestAnimationFrame(() => {
+      const target = previousEditorId === "new"
+        ? document.querySelector("[data-add-viewing-event]")
+        : document.querySelector(`[data-viewing-event-row="${CSS.escape(previousEditorId || "")}"]`);
+      target?.focus({ preventScroll: true });
+    });
+    return;
+  }
+
+  const editViewingEventButton = event.target.closest("[data-edit-viewing-event]");
+  if (editViewingEventButton) {
+    const viewingEvent = personalViewingEvents.find((candidate) => candidate.id === editViewingEventButton.dataset.editViewingEvent);
+    if (!viewingEvent || viewingEvent.sourceJournalEntryId) return;
+    viewingEventEditorId = viewingEvent.id;
+    viewingEventLiveMessage = "";
+    render();
+    window.requestAnimationFrame(() => document.querySelector("[data-viewing-event-form] select")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  const deleteViewingEventButton = event.target.closest("[data-delete-viewing-event]");
+  if (deleteViewingEventButton) {
+    const viewingEvent = personalViewingEvents.find((candidate) => candidate.id === deleteViewingEventButton.dataset.deleteViewingEvent);
+    if (!viewingEvent || viewingEvent.sourceJournalEntryId) return;
+    const dateLabel = viewingEvent.watchedOn ? formatSavedDate(viewingEvent.watchedOn) : "an unknown date";
+    if (!window.confirm(`Delete the manual ${viewingOutcomeLabel(viewingEvent.outcome)} viewing from ${dateLabel}? This cannot be undone. Cine-Cord and the Journal will not be changed.`)) return;
+    viewingEventPendingId = viewingEvent.id;
+    render();
+    try {
+      await deleteManualViewingEvent(viewingEvent);
+      viewingEventPendingId = null;
+      viewingEventEditorId = null;
+      viewingEventLiveMessage = "Manual viewing deleted. Cine-Cord and the Journal were not changed.";
+      render();
+      window.requestAnimationFrame(() => document.querySelector("#viewing-history-title")?.focus({ preventScroll: true }));
+      showToast("Manual viewing deleted. Cine-Cord and the Journal were not changed.");
+    } catch (error) {
+      viewingEventPendingId = null;
+      render();
+      showToast(`The manual viewing was not deleted: ${error.message}`);
+    }
+    return;
+  }
+
+  const toggleViewingEventButton = event.target.closest("[data-toggle-viewing-event-hidden]");
+  if (toggleViewingEventButton) {
+    const viewingEvent = personalViewingEvents.find((candidate) => candidate.id === toggleViewingEventButton.dataset.toggleViewingEventHidden);
+    if (!viewingEvent?.sourceJournalEntryId) return;
+    viewingEventPendingId = viewingEvent.id;
+    render();
+    try {
+      const saved = await setSourceViewingEventHidden(viewingEvent, !viewingEvent.isHidden);
+      viewingEventPendingId = null;
+      viewingEventLiveMessage = saved.isHidden
+        ? "Source-linked viewing hidden from normal My Cinema history. The Journal was not changed."
+        : "Source-linked viewing revealed in My Cinema. The Journal was not changed.";
+      render();
+      window.requestAnimationFrame(() => {
+        const target = saved.isHidden ? document.querySelector("#viewing-history-title") : document.querySelector(`[data-viewing-event-row="${CSS.escape(saved.id)}"]`);
+        target?.focus({ preventScroll: true });
+      });
+      showToast(saved.isHidden ? "Hidden from normal My Cinema history. The shared Journal entry was not changed." : "Revealed in My Cinema. The shared Journal entry was not changed.");
+    } catch (error) {
+      viewingEventPendingId = null;
+      render();
+      showToast(`The source-linked viewing was not changed: ${error.message}`);
+    }
+    return;
+  }
+
+  const sourceJournalButton = event.target.closest("[data-open-source-journal]");
+  if (sourceJournalButton) {
+    const viewingEvent = personalViewingEvents.find((candidate) => candidate.id === sourceJournalButton.dataset.openSourceJournal);
+    const sourceEntry = journalEntryForViewingEvent(viewingEvent);
+    if (!sourceEntry?.journalEntryId) {
+      showToast("The current Journal source is not available in this workspace. Refresh before trying again.");
+      return;
+    }
+    journalQuery = sourceEntry.entryLabel;
+    journalSourceFilter = "CINE_CORD";
+    journalStatusFilter = "all";
+    journalYearFilter = "all";
+    journalViewerFilter = "all";
+    journalVisibleLimit = 60;
+    journalFocusedEntryId = sourceEntry.journalEntryId;
+    journalEditingId = sourceEntry.canEdit ? sourceEntry.journalEntryId : null;
+    navigate("journal");
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector(`[data-journal-entry-id="${CSS.escape(sourceEntry.journalEntryId)}"]`);
+      target?.scrollIntoView({ block: "start", behavior: "smooth" });
+      target?.focus({ preventScroll: true });
+    });
+    if (!sourceEntry.canEdit) showToast("This is the shared source. Its recorder or an administrator can correct it.");
     return;
   }
 
@@ -3834,13 +4277,13 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-remove-personal-film]")) {
     const context = selectedFilmContext();
-    if (!context?.personal || !window.confirm(`Remove ${context.movie.title} from My Cinema? This does not change Cine-Cord.`)) return;
+    if (!context?.personal || !window.confirm(`Remove ${context.movie.title} from My Cinema? Your viewing history is kept. This does not change Cine-Cord or the Journal.`)) return;
     try {
       await removePersonalFilm(context.movie);
       if (currentView === "my-films") selectedFilmId = null;
       reactionEditorExpanded = false;
       render();
-      showToast(`${context.movie.title} removed from My Cinema. Cine-Cord was not changed.`);
+      showToast(`${context.movie.title} removed from My Cinema. Viewing history was kept; Cine-Cord and the Journal were not changed.`);
     } catch (error) {
       showToast(`The film was not removed from My Cinema: ${error.message}`);
     }
@@ -4277,6 +4720,9 @@ document.addEventListener("keydown", (event) => {
     selectedFilmId = null;
     reactionEditorExpanded = false;
     reactionLiveMessage = "";
+    viewingEventEditorId = null;
+    viewingEventPendingId = null;
+    viewingEventLiveMessage = "";
     render();
     window.requestAnimationFrame(() => window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" }));
     return;
@@ -4292,6 +4738,10 @@ window.addEventListener("hashchange", () => {
     currentView = nextView;
     selectedFilmId = null;
     reactionEditorExpanded = false;
+    viewingEventEditorId = null;
+    viewingEventPendingId = null;
+    viewingEventLiveMessage = "";
+    if (currentView !== "journal") journalFocusedEntryId = null;
     render();
   }
 });
