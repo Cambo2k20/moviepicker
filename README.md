@@ -114,7 +114,7 @@ For a fresh Supabase environment, apply everything in `supabase/migrations/` in 
 
 The canonical files (`supabase/schema.sql`, `member_management.sql`, `movie_metadata.sql`, `movie_sessions.sql`) remain as readable documentation of how the schema was first assembled. They predate the session-planning work and are **not** sufficient to run the current frontend on their own; see `supabase/README.md` for what they are missing.
 
-The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. The standalone CLI profile still receives HTTP 403 from the platform login-role endpoint, so linked CLI commands require a project owner or a profile with sufficient project privileges. The master-Journal migration, historical import and updated Edge Function in this branch are not applied to production by a build, test or GitHub Pages deployment.
+The earlier hosted migrations are present locally under `supabase/migrations/`, restored from Supabase's authoritative migration records and SHA-256 verified byte-for-byte. Production migration parity is checked before every `main` Pages deployment, and the 13 September 2026 deployment of merge commit `4af2b0a` passed that gate plus the authenticated database integration suite. GitHub Pages does not deploy Supabase Edge Functions; backend function releases remain a separate explicit operation.
 
 Deploy the `movie-lookup` Edge Function and store its external movie-database credential as a server-side Supabase secret. Never place service-role keys or external API secrets in the browser bundle.
 
