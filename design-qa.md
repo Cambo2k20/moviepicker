@@ -531,6 +531,7 @@ passed
 ## Findings
 
 - The first focused run exposed missing literal spaces around the separator in raw text content. The attribution template was corrected and the focused and complete suites then passed.
+- The first hosted CI run exposed a timezone-dependent archive date: a source timestamp dated 3 August at `+01:00` displayed as 2 August on a UTC runner. Journal posted dates now preserve the calendar date encoded by the source timestamp rather than shifting it to the viewer's machine timezone.
 - No database or Supabase behavior changed, so database migration and RLS suites were not required for this patch.
 - No actionable P0, P1 or P2 findings remain.
 

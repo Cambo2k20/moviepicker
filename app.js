@@ -2306,7 +2306,7 @@ function journalTitleFitClass(title) {
 function journalPostedDate(entry) {
   const value = entry.postedAt || entry.sourceCreatedAt;
   if (!value || Number.isNaN(new Date(value).getTime())) return null;
-  return { value, label: formatAddedDate(value) };
+  return { value, label: formatSavedDate(String(value).slice(0, 10)) };
 }
 
 function renderJournalCard(entry) {
