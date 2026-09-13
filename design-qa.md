@@ -451,3 +451,51 @@ No P3 polish is required for Phase 2A acceptance.
 ## Final result
 
 passed
+
+---
+
+# Compact film-detail and numbered-rating QA — 13 September 2026
+
+## Scope and decision
+
+- Phase 2A follow-up to Decisions 003A and 006 in `docs/PRODUCT_DIRECTION.md`.
+- The detailed film page now uses five compact numbered choices; the reaction-face artwork remains on compact film cards.
+- The page prioritises poster, title and metadata, the originating private/shared context, synopsis, secondary context, then destructive or uncommon actions under More options.
+- This is checkout validation only. Merge and live publication remain separate approval gates.
+
+## Browser evidence
+
+- Phone: exact `390 × 844` Playwright project plus an in-app browser inspection at `389 × 844` CSS px (the closest whole-pixel viewport under the host's 79% display scale).
+- Tablet: exact `768 × 1024` CSS px.
+- Desktop: exact `1440 × 900` CSS px.
+- Playwright screenshots: `test-results/responsive-compact-ratings-4acc0-cts-fit-at-every-breakpoint-{phone,tablet,narrow-desktop,desktop}/compact-film-detail.png`.
+- Pulp Fiction was checked with a saved level 5 rating, Watched state and Favourite enabled. The poster remained uncropped and visually primary; title, film facts, all three personal states, Favourite, Clear, five rating choices and the saved label remained readable.
+- Document width equalled viewport width at tablet and desktop. At phone size, the document client width and content scroll width were both 370 px after the browser scrollbar, so there was no horizontal page overflow.
+- Browser console check returned zero warnings or errors.
+
+## Interaction and accessibility checks
+
+- All five numbered choices remain available in one compact row at every tested breakpoint and meet the 44 px target size used by this interface.
+- A saved value exposes `aria-pressed`; the visible label resolves to the matching number and description.
+- Hover and keyboard focus preview a value without silently saving it, while click, Enter and Space save it.
+- Clearing the rating remains explicit. Saving a rating automatically moves Want to Watch to Watched, while an existing Did Not Finish state is preserved.
+- The three private states and Favourite remain directly available without expanding a large editor.
+- A film opened from the shared list is not added to My Cinema until the member chooses an explicit state; the combined “seen and rate” route remains available.
+- Removal is retained under More options rather than competing with everyday controls.
+
+## Automated validation
+
+- Unit tests: 57 passed, 0 failed.
+- Production build and local-reference check: passed; 13 local references verified and 11 images emitted.
+- Focused compact-detail Playwright run: 11 passed, 9 intentionally skipped, 0 failed.
+- Complete Playwright run with one worker: 51 passed, 29 intentionally skipped, 0 failed across phone, tablet, narrow-desktop and desktop projects.
+
+## Findings
+
+- No actionable P0, P1 or P2 findings remain.
+- The older full reaction-stage image assets remain versioned as accepted Phase 2A history, but the compact detail implementation no longer imports or emits them.
+- No database or Supabase behavior changed, so database migration and RLS suites were not required for this patch.
+
+## Final result
+
+passed

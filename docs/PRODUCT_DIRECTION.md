@@ -9,9 +9,11 @@ Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
 identity, owner-only personal-film records, states, reactions and Favourites
 are shipped, while the remaining private-data foundation is not. Phase 2A is
-also in progress: its core My Films experience is deployed, and the final paired
-reaction artwork is accepted with responsive release QA passed on the
-implementation branch; mainline integration and publication remain pending.
+also in progress: its core My Films experience is deployed. On 13 September
+2026, Cameron approved a compact film-detail revision with numbered ratings,
+superseding the detailed reaction artwork on that page. Implementation and
+release validation are on the task branch; mainline integration and publication
+remain pending.
 Phases 2B–5 have not started.
 
 ## Purpose and authority
@@ -215,40 +217,29 @@ Rules:
 
 ### Decision 003A — Rating interaction and artwork
 
-Status: Approved for production; Cameron accepted the final paired artwork on
-30 August 2026 and responsive release QA passed on the implementation branch
+Status: Amended approved direction, 13 September 2026
 
-Five compact face controls are used, with the 1–5 value retained in each
-control's accessible name. On the selected-film view, one detailed patron stage
-shows the reaction currently being considered. Its display order is the active
-hover or keyboard-focus preview, then the saved reaction, then a subdued neutral
-Level 3 resting state labelled "Pick a face" when no reaction is saved.
+> Amended 2026-09-13 — Cameron found the rating system too dominant on film
+> details and approved compact numbered controls and a simpler detail layout.
+> This supersedes the 30 August approval of face controls and the large patron
+> stage on film details. The earlier artwork and QA remain historical evidence.
 
-Hover and keyboard focus update the stage without saving. Leaving the control
-row restores the saved reaction or the neutral resting state. Click, Enter,
-Space or touch saves the chosen reaction and shows its matching stage. The
-selected reaction remains visible, and text is always present so artwork is
-never the sole meaning.
+Film details use five numbered buttons, 1–5, on one row at every supported
+viewport, with at least 44px targets. The saved number has a violet fill and
+pressed state; each accessible name includes the number and exact enjoyment
+label from Decision 003. A short text label sits beside or below the row.
 
-The approved artwork direction uses one consistent faceless cinema patron and
-seat:
+Hover and keyboard focus preview the label without saving. Leaving restores
+the saved label or "Choose a rating" when unrated. Arrow keys, Home and End move
+focus; click, Enter, Space or touch saves. Controls remain visible after saving
+at all sizes. Clear removes only the rating. No detailed patron, face image,
+large question or permanent consequence paragraph appears in the detail editor.
+Automatic changes to Watched receive a brief save notice; DNF stays explicit.
 
-1. Leaving the seat
-2. Seated and disengaged
-3. Neutral and attentive
-4. Applauding while seated
-5. Standing ovation
-
-The production set is paired: five compact transparent face assets for the
-controls and My Films card footers, plus five detailed transparent patron assets
-for the single selected-film stage. Yellow is confined to the private reaction
-faces and does not become a navigation, shared-data or general Cine-Cord accent.
-
-Use a fixed chair, canvas and baseline for the detailed patrons. Keep charcoal,
-white and Cine-Cord violet restrained. Simplify edge glow, upholstery, popcorn
-and action marks if they become noisy at real interface size. Ten separate
-production assets are required; exploratory contact sheets are not production
-assets.
+Compact faces on My Films cards are unchanged by this detail-page revision.
+Yellow remains confined to those private reaction assets and is not a general
+Cine-Cord accent. Existing artwork files remain versioned; the patron images
+are no longer imported by the active application.
 
 ### Decision 004 — Film states
 
@@ -341,6 +332,16 @@ From Cine-Cord it prioritises shared status, votes, suggester, sessions and
 Journal information. When both apply, visibly separate My Cinema — Private
 from Cine-Cord — Shared with the group. Editing one never silently edits the
 other.
+
+> Amended 2026-09-13 — The Phase 2A detail page uses one uncropped poster, one
+> title and one metadata line. Desktop places the poster beside the information
+> and controls; phone and tablet lead with poster/title, then the originating
+> area's controls, synopsis and the other area's context. Remove duplicate facts
+> and the visible TMDB ID. Keep personal state, numbered rating and Favourite
+> compact and clearly private. Films outside My Cinema offer an explicit add
+> with a state choice. Removal belongs under More options. Notes, reviews,
+> viewing events and lists stay in their later phases with no roadmap filler
+> or empty editors on the current page.
 
 Profile management is reached through View My Profile and Edit Profile rather
 than becoming a fourth private-data tab.
@@ -597,8 +598,8 @@ This is the first user-facing release, delivered through smaller batches:
 
 ##### Phase 2A — Personal film and reaction core
 
-Status: In progress; the core experience is deployed, and the final reaction
-set is accepted and validated with mainline integration and publication pending
+Status: In progress; core experience deployed, compact detail revision approved
+with mainline integration and publication pending
 
 - Area-switching shell and My Films
 - Protected personal film search
@@ -606,13 +607,12 @@ set is accepted and validated with mainline integration and publication pending
 - Favourite marker
 - Unified private and shared film details
 
-Cameron accepted the final paired reaction set from Decision 003A — five compact
-face assets and five detailed patron assets — on 30 August 2026. Responsive
-release QA passed across representative phone, tablet and desktop sizes,
-including the preview, restoration, keyboard and touch contracts above.
-Accessible text and controls remain part of the approved experience so artwork
-is never the sole meaning. Phase 2A remains in progress until the accepted set
-is integrated into main and published through the separate release gates.
+The paired artwork accepted on 30 August passed its original responsive QA.
+The 13 September amendment to Decisions 003A and 006 supersedes the detail-page
+presentation with numbered ratings and compact film information. The new
+revision requires its own responsive and interaction validation. Phase 2A
+remains in progress until the revised experience is integrated into main and
+published through the separate release gates.
 
 ##### Phase 2B — History and personal detail
 

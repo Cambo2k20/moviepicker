@@ -51,13 +51,6 @@ const imageAssets = {
   andrew: new URL("./assets/avatar-andrew.png", import.meta.url).href,
   ross: new URL("./assets/avatar-ross.png", import.meta.url).href,
   journalFallback: new URL("./assets/hero-journal-web.png", import.meta.url).href,
-  reactionDetails: {
-    1: new URL("./assets/reaction-stage-1-didnt-like-it-v3.webp", import.meta.url).href,
-    2: new URL("./assets/reaction-stage-2-not-for-me-v3.webp", import.meta.url).href,
-    3: new URL("./assets/reaction-stage-3-it-was-okay-v3.webp", import.meta.url).href,
-    4: new URL("./assets/reaction-stage-4-really-liked-it-v3.webp", import.meta.url).href,
-    5: new URL("./assets/reaction-stage-5-loved-it-v3.webp", import.meta.url).href,
-  },
   reactionFaces: {
     1: new URL("./assets/reaction-face-1-didnt-like-it-v1.webp", import.meta.url).href,
     2: new URL("./assets/reaction-face-2-not-for-me-v1.webp", import.meta.url).href,
@@ -79,14 +72,6 @@ const decisionModes = [
   { code: "02", title: "Queue Roulette", tone: "Weighted chaos", copy: "The longer a film has waited, the wider its slice — up to 4× weight, shown as “4× weight · waiting 5 months”. Each participant has one optional veto.", available: true },
   { code: "03", title: "Reel Bracket", tone: "Coming soon", copy: "Head-to-head voting is designed but is not implemented yet.", available: false }
 ];
-
-const reactionStageCopy = {
-  1: "Already heading for the aisle.",
-  2: "Arms folded. This one was not for them.",
-  3: "Stayed to the end. It was okay.",
-  4: "Leaned forward, clapped at the end, still in the seat.",
-  5: "On their feet for the standing ovation.",
-};
 
 const root = document.querySelector("#view-root");
 const partyModal = document.querySelector("#party-modal");
@@ -165,7 +150,6 @@ let myFilmsFiltersOpen = false;
 let selectedFilmId = null;
 let filmDetailReturnScrollY = 0;
 let reactionEditorExpanded = false;
-let personalStateEditorExpanded = false;
 let reactionLiveMessage = "";
 let rouletteState = null;
 let rouletteSpinTimer = null;
@@ -1762,34 +1746,21 @@ function filmMatchesSession(film, session) {
   return Boolean(selected && findFilmByIdentity([selected], film));
 }
 
-function setReactionStage(control, value, { resting = false, mode = "preview" } = {}) {
-  const stage = control?.querySelector("[data-reaction-stage]");
+function setReactionLabel(control, value) {
+  const label = control?.querySelector("[data-rating-label]");
   const reaction = reactionForValue(value);
-  if (!stage || !reaction) return;
-
-  const image = stage.querySelector("[data-reaction-stage-image]");
-  const label = stage.querySelector("[data-reaction-stage-label]");
-  const caption = stage.querySelector("[data-reaction-stage-caption]");
-  if (image) image.src = imageAssets.reactionDetails[reaction.value];
-  if (label) label.textContent = resting ? "Pick a face" : reaction.label;
-  if (caption) caption.textContent = resting
-    ? "Hover, focus or tap a face to preview your reaction."
-    : reactionStageCopy[reaction.value];
-  stage.dataset.reactionValue = String(reaction.value);
-  stage.dataset.reactionStageMode = resting ? "resting" : mode;
-  stage.classList.toggle("is-resting", resting);
+  if (label) label.textContent = reaction ? `${reaction.value} — ${reaction.label}` : "Choose a rating";
 }
 
-function restoreReactionStage(control) {
-  const savedReaction = reactionForValue(control?.dataset.savedReactionValue);
-  setReactionStage(control, savedReaction?.value || 3, { resting: !savedReaction, mode: savedReaction ? "saved" : "resting" });
+function restoreReactionLabel(control) {
+  setReactionLabel(control, control?.dataset.savedReactionValue);
 }
 
 function previewReactionChoice(choice) {
   const reaction = reactionForValue(choice?.dataset.reactionValue);
   const control = choice?.closest(".reaction-control");
   if (!control || !reaction) return;
-  setReactionStage(control, reaction.value);
+  setReactionLabel(control, reaction.value);
 }
 
 function activeReactionPreview(control) {
@@ -1801,28 +1772,17 @@ function activeReactionPreview(control) {
 
 function renderReactionControl(movie, personal) {
   const savedReaction = reactionForValue(personal?.rating);
-  const stageReaction = savedReaction || reactionForValue(3);
-  const restingStage = !savedReaction;
-  const collapsedOnPhone = Boolean(savedReaction && !reactionEditorExpanded);
-  const savedMessage = savedReaction ? `Saved · ${savedReaction.label}` : "No reaction yet";
   return `
-    <section class="reaction-control ${savedReaction ? "has-saved-reaction" : ""} ${collapsedOnPhone ? "is-collapsed-phone" : ""}" aria-labelledby="reaction-question" data-saved-reaction-value="${savedReaction?.value || ""}">
-      <div class="reaction-heading"><span id="reaction-question" tabindex="-1">How much did you enjoy it?</span><strong>${escapeHTML(savedMessage)}</strong></div>
-      ${savedReaction ? `<div class="reaction-mobile-summary"><img src="${escapeHTML(imageAssets.reactionFaces[savedReaction.value])}" alt="" /><span><small>Saved · Level ${savedReaction.value} of 5</small><strong>${escapeHTML(savedReaction.label)}</strong></span></div><div class="reaction-mobile-actions"><button class="secondary-button" type="button" data-change-reaction>Change reaction</button><button class="detail-text-action" type="button" data-clear-reaction>Clear</button></div>` : ""}
-      <div class="reaction-editor-shell">
-        ${savedReaction ? `<div class="reaction-mobile-editor-heading"><span>Change reaction · Expanded</span><button class="icon-button" type="button" data-collapse-reaction aria-label="Close reaction choices"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>` : ""}
-        <div class="reaction-stage ${restingStage ? "is-resting" : ""}" data-reaction-stage data-reaction-value="${stageReaction.value}" data-reaction-stage-mode="${restingStage ? "resting" : "saved"}">
-          <div class="reaction-stage-visual"><img class="reaction-stage-image" src="${escapeHTML(imageAssets.reactionDetails[stageReaction.value])}" alt="" data-reaction-stage-image /></div>
-          <div class="reaction-stage-copy" aria-live="polite" aria-atomic="true"><strong class="reaction-stage-label" data-reaction-stage-label>${escapeHTML(restingStage ? "Pick a face" : stageReaction.label)}</strong><p class="reaction-stage-caption" data-reaction-stage-caption>${escapeHTML(restingStage ? "Hover, focus or tap a face to preview your reaction." : reactionStageCopy[stageReaction.value])}</p></div>
-        </div>
-        <div class="reaction-grid" role="group" aria-labelledby="reaction-question">${REACTION_LEVELS.map((reaction, index) => {
+    <section class="reaction-control film-rating" aria-labelledby="reaction-question" data-saved-reaction-value="${savedReaction?.value || ""}">
+      <div class="film-rating-heading"><span id="reaction-question" tabindex="-1">Your rating</span>${savedReaction ? `<button class="detail-text-action" type="button" data-clear-reaction aria-label="Clear rating">Clear</button>` : ""}</div>
+      <div class="film-rating-row">
+        <div class="film-rating-choices" role="group" aria-labelledby="reaction-question">${REACTION_LEVELS.map((reaction, index) => {
         const selected = reaction.value === savedReaction?.value;
         const tabIndex = selected || (!savedReaction && index === 0) ? 0 : -1;
-        return `<button class="reaction-choice ${selected ? "is-saved" : ""}" type="button" aria-pressed="${selected}" aria-label="Level ${reaction.value} of 5, ${escapeHTML(reaction.label)}" tabindex="${tabIndex}" data-reaction-choice data-reaction-value="${reaction.value}"><span class="reaction-number" aria-hidden="true">${reaction.value}</span><span class="reaction-face"><img src="${escapeHTML(imageAssets.reactionFaces[reaction.value])}" alt="" />${selected ? `<span class="reaction-check" aria-hidden="true"></span>` : ""}</span><strong>${escapeHTML(reaction.label)}</strong></button>`;
+        return `<button class="film-rating-number" type="button" aria-pressed="${selected}" aria-label="Level ${reaction.value} of 5, ${escapeHTML(reaction.label)}" title="${escapeHTML(reaction.label)}" tabindex="${tabIndex}" data-reaction-choice data-reaction-value="${reaction.value}">${reaction.value}</button>`;
         }).join("")}</div>
+        <span class="film-rating-label" data-rating-label aria-live="polite" aria-atomic="true">${savedReaction ? `${savedReaction.value} — ${escapeHTML(savedReaction.label)}` : "Choose a rating"}</span>
       </div>
-      <p class="reaction-consequence">Rating adds this film to My Cinema and marks it Watched. A Did Not Finish state stays Did Not Finish. Your reaction stays private and never changes Cine-Cord.</p>
-      ${savedReaction ? `<button class="detail-text-action reaction-clear-desktop" type="button" data-clear-reaction>Clear reaction</button>` : ""}
       <span class="sr-only" role="status" aria-live="polite">${escapeHTML(reactionLiveMessage)}</span>
     </section>`;
 }
@@ -1860,11 +1820,11 @@ function renderPrivateFilmPanel(context) {
   if (!personal) {
     return `
       <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
-        <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Not in your library</span><small>Adding is private · The group is not told</small></header>
+        <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Private</span></header>
         <div class="private-empty-actions">
-          <button class="secondary-button" type="button" data-personal-state="WANT_TO_WATCH" ${movie.movieId ? "" : "disabled"}><span class="material-symbols-outlined" aria-hidden="true">add</span>Add to Want to Watch</button>
+          <details class="film-add-menu"><summary>Add to My Cinema</summary><div class="film-add-options">${PERSONAL_FILM_STATES.map((state) => `<button class="secondary-button" type="button" data-personal-state="${state.value}" ${movie.movieId ? "" : "disabled"}>${escapeHTML(state.label)}</button>`).join("")}</div></details>
           <button class="secondary-button" type="button" data-open-reaction ${movie.movieId ? "" : "disabled"}>I have seen it — rate it</button>
-          <p>${movie.movieId ? "Rating opens the five reactions and adds the film to My Cinema for you only." : "Match this film with TMDB before saving private state."}</p>
+          <p>${movie.movieId ? "Not in your library yet. Adding or rating saves it privately." : "Match this film with TMDB before saving private state."}</p>
         </div>
         ${reactionEditorExpanded && movie.movieId ? renderReactionControl(movie, null) : ""}
       </section>`;
@@ -1872,22 +1832,16 @@ function renderPrivateFilmPanel(context) {
 
   const stateButtons = PERSONAL_FILM_STATES.map((state) => {
     const active = personal.state === state.value;
-    const phoneStateEditorAttributes = active && personal.rating
-      ? `data-toggle-personal-state-editor aria-expanded="${personalStateEditorExpanded}" aria-label="Change state, currently ${escapeHTML(state.label)}"`
-      : "";
-    return `<button class="private-state-button ${active ? "is-active" : ""}" type="button" data-personal-state="${state.value}" aria-pressed="${active}" ${phoneStateEditorAttributes}>${active ? `<span class="nav-marker" aria-hidden="true"></span>` : ""}${escapeHTML(state.label)}</button>`;
+    return `<button class="private-state-button ${active ? "is-active" : ""}" type="button" data-personal-state="${state.value}" aria-pressed="${active}">${escapeHTML(state.label)}</button>`;
   }).join("");
-  const savedPhoneReaction = personal.rating ? "has-phone-saved-reaction" : "";
-  const collapsedPhoneReaction = personal.rating && !reactionEditorExpanded ? "has-collapsed-phone-reaction" : "";
   return `
-    <section class="film-context-panel private-panel layout-container layout-container-private ${savedPhoneReaction} ${collapsedPhoneReaction} ${personalStateEditorExpanded ? "is-phone-state-editor-open" : ""}" aria-labelledby="private-panel-title">
-      <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Private to you</span><small>Only you can see this · Saved as you go</small></header>
+    <section class="film-context-panel private-panel layout-container layout-container-private" aria-labelledby="private-panel-title">
+      <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Private</span><small>Only you</small></header>
       <div class="private-controls">
         <div class="private-state-group" role="group" aria-label="My film state">${stateButtons}</div>
         <button class="favourite-switch ${personal.isFavourite ? "is-active" : ""}" type="button" role="switch" aria-checked="${personal.isFavourite}" data-toggle-favourite><span class="material-symbols-outlined" aria-hidden="true">favorite</span>Favourite <small>${personal.isFavourite ? "On" : "Off"}</small></button>
       </div>
       ${renderReactionControl(movie, personal)}
-      <div class="private-panel-actions"><button class="detail-text-action" type="button" data-remove-personal-film>Remove from My Cinema</button><span>Private notes, reviews and rewatches arrive in Phase 2B.</span></div>
     </section>`;
 }
 
@@ -1928,29 +1882,27 @@ function renderFilmDetails() {
   const { movie, origin } = context;
   const backLabel = origin === "my-films" ? "My Films" : "The List";
   const detailMeta = [movie.year, movie.runtime ? `${movie.runtime} min` : null, ...movie.genres].filter(Boolean).join(" · ");
-  const panels = origin === "my-films"
-    ? `${renderPrivateFilmPanel(context)}${renderSharedFilmPanel(context)}`
-    : `${renderSharedFilmPanel(context)}${renderPrivateFilmPanel(context)}`;
+  const primaryPanel = origin === "my-films" ? renderPrivateFilmPanel(context) : renderSharedFilmPanel(context);
+  const secondaryPanel = origin === "my-films" ? renderSharedFilmPanel(context) : renderPrivateFilmPanel(context);
   return `
-    <section class="film-detail-view ${origin === "my-films" ? "is-private-origin" : "is-shared-origin"} ${context.personal?.rating ? "has-personal-reaction" : "has-no-personal-reaction"}" aria-labelledby="film-detail-title" tabindex="-1">
-      ${renderPageHeader({
+    <section class="film-detail-view compact-film-detail ${origin === "my-films" ? "is-private-origin" : "is-shared-origin"}" aria-labelledby="film-detail-title" tabindex="-1">
+      <nav class="film-back-row" aria-label="Film navigation"><button class="quiet-button film-detail-back" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${escapeHTML(backLabel)}</button></nav>
+      <div class="film-detail-composition">
+        <div class="film-artwork">
+          <div class="detail-poster ${movie.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(movie))}" alt="${movie.posterUrl ? `${escapeHTML(movie.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${movie.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
+        </div>
+        ${renderPageHeader({
         id: "film-detail-title",
         eyebrow: origin === "my-films" ? "My Cinema · Private to you" : "Cine-Cord · Shared with the group",
         title: movie.title,
         description: detailMeta || "Movie details",
         titleClass: "film-page-title",
         className: "film-detail-page-header",
-        actions: `<button class="quiet-button film-detail-back" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${escapeHTML(backLabel)}</button>`,
       })}
-      <div class="film-detail-layout">
-        <aside class="film-detail-sidebar">
-          <div class="detail-poster ${movie.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(movie))}" alt="${movie.posterUrl ? `${escapeHTML(movie.title)} poster` : "Abstract Cine-Cord poster placeholder"}" />${movie.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}</div>
-          <dl class="film-fact-card"><div><dt>Year</dt><dd>${movie.year || "Pending"}</dd></div><div><dt>Runtime</dt><dd>${escapeHTML(runtimeLabel(movie))}</dd></div><div><dt>Genres</dt><dd>${movie.genres.length ? movie.genres.map(escapeHTML).join(" · ") : "Pending"}</dd></div>${movie.tmdbId ? `<div><dt>TMDB ID</dt><dd>${movie.tmdbId}</dd></div>` : ""}</dl>
-        </aside>
-        <div class="film-detail-content">
-          <p class="film-detail-overview">${escapeHTML(movie.overview || "Full movie details will appear here once this film is matched with TMDB.")}</p>
-          <div class="film-context-panels">${panels}</div>
-        </div>
+        <div class="film-primary-context">${primaryPanel}</div>
+        <section class="film-synopsis" aria-labelledby="film-synopsis-title"><h2 id="film-synopsis-title">Synopsis</h2><p>${escapeHTML(movie.overview || "A synopsis is not available for this film yet.")}</p></section>
+        <div class="film-secondary-context">${secondaryPanel}</div>
+        ${context.personal && !personalFilmsLoadError ? `<details class="film-more-actions"><summary>More options</summary><button class="detail-text-action" type="button" data-remove-personal-film>Remove from My Cinema</button></details>` : ""}
       </div>
     </section>`;
 }
@@ -2599,7 +2551,6 @@ function navigate(view) {
   currentView = legacyViewMap[view] || view;
   selectedFilmId = null;
   reactionEditorExpanded = false;
-  personalStateEditorExpanded = false;
   reactionLiveMessage = "";
   window.location.hash = currentView;
   render();
@@ -3316,7 +3267,7 @@ document.addEventListener("pointerout", (event) => {
   }
   const focusedChoice = control?.querySelector("[data-reaction-choice]:focus");
   if (focusedChoice) previewReactionChoice(focusedChoice);
-  else restoreReactionStage(control);
+  else restoreReactionLabel(control);
 });
 
 document.addEventListener("focusin", (event) => {
@@ -3335,7 +3286,7 @@ document.addEventListener("focusout", (event) => {
   }
   const hoveredChoice = activeReactionPreview(control);
   if (hoveredChoice) previewReactionChoice(hoveredChoice);
-  else restoreReactionStage(control);
+  else restoreReactionLabel(control);
 });
 
 document.addEventListener("submit", async (event) => {
@@ -3759,7 +3710,6 @@ document.addEventListener("click", async (event) => {
     filmDetailReturnScrollY = window.scrollY;
     selectedFilmId = selectFilmButton.dataset.selectFilm;
     reactionEditorExpanded = false;
-    personalStateEditorExpanded = false;
     reactionLiveMessage = "";
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -3770,7 +3720,6 @@ document.addEventListener("click", async (event) => {
     const previousFilmId = selectedFilmId;
     selectedFilmId = null;
     reactionEditorExpanded = false;
-    personalStateEditorExpanded = false;
     reactionLiveMessage = "";
     render();
     window.requestAnimationFrame(() => {
@@ -3789,7 +3738,6 @@ document.addEventListener("click", async (event) => {
     currentView = destination;
     selectedFilmId = destinationFilm.id;
     reactionEditorExpanded = false;
-    personalStateEditorExpanded = false;
     window.history.replaceState(null, "", `#${destination}`);
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -3803,28 +3751,6 @@ document.addEventListener("click", async (event) => {
     window.requestAnimationFrame(() => document.querySelector("#reaction-question")?.focus({ preventScroll: true }));
     return;
   }
-  if (event.target.closest("[data-change-reaction]")) {
-    reactionEditorExpanded = true;
-    personalStateEditorExpanded = false;
-    render();
-    window.requestAnimationFrame(() => document.querySelector("[data-reaction-choice][aria-pressed='true']")?.focus({ preventScroll: true }));
-    return;
-  }
-  if (event.target.closest("[data-collapse-reaction]")) {
-    reactionEditorExpanded = false;
-    render();
-    window.requestAnimationFrame(() => document.querySelector("[data-change-reaction]")?.focus({ preventScroll: true }));
-    return;
-  }
-
-  const stateEditorButton = event.target.closest("[data-toggle-personal-state-editor]");
-  if (stateEditorButton && window.matchMedia("(max-width: 640px)").matches) {
-    personalStateEditorExpanded = !personalStateEditorExpanded;
-    render();
-    window.requestAnimationFrame(() => document.querySelector("[data-toggle-personal-state-editor]")?.focus({ preventScroll: true }));
-    return;
-  }
-
   const personalStateButton = event.target.closest("[data-personal-state]");
   if (personalStateButton) {
     const context = selectedFilmContext();
@@ -3833,10 +3759,10 @@ document.addEventListener("click", async (event) => {
     personalStateButton.disabled = true;
     try {
       await savePersonalFilm(context.movie, { state: personalStateButton.dataset.personalState });
-      personalStateEditorExpanded = false;
       reactionLiveMessage = "";
       render();
-      const cleared = previousRating !== null && personalStateButton.dataset.personalState === "WANT_TO_WATCH";
+      window.requestAnimationFrame(() => document.querySelector(`[data-personal-state="${personalStateButton.dataset.personalState}"]`)?.focus({ preventScroll: true }));
+      const cleared = Boolean(previousRating) && personalStateButton.dataset.personalState === "WANT_TO_WATCH";
       showToast(`${context.movie.title} is ${personalStateLabel(personalStateButton.dataset.personalState)} in My Cinema.${cleared ? " Its reaction was cleared." : ""}`);
     } catch (error) {
       personalStateButton.disabled = false;
@@ -3853,10 +3779,11 @@ document.addEventListener("click", async (event) => {
     const reaction = reactionForValue(reactionButton.dataset.reactionValue);
     try {
       await savePersonalFilm(context.movie, { rating: reaction.value });
-      reactionEditorExpanded = window.matchMedia("(max-width: 640px)").matches;
-      personalStateEditorExpanded = false;
-      reactionLiveMessage = `Saved, ${reaction.label}.`;
+      reactionEditorExpanded = true;
+      const markedWatched = context.personal?.state !== "WATCHED" && context.personal?.state !== "DID_NOT_FINISH";
+      reactionLiveMessage = `Saved, ${reaction.label}.${markedWatched ? " Marked as Watched in My Cinema." : ""}`;
       render();
+      if (markedWatched) showToast("Rating saved. Marked as Watched in My Cinema.");
       window.requestAnimationFrame(() => document.querySelector(`[data-reaction-choice][data-reaction-value="${reaction.value}"]`)?.focus({ preventScroll: true }));
     } catch (error) {
       reactionButton.disabled = false;
@@ -3873,6 +3800,7 @@ document.addEventListener("click", async (event) => {
     try {
       const saved = await savePersonalFilm(context.movie, { isFavourite: !context.personal.isFavourite });
       render();
+      window.requestAnimationFrame(() => document.querySelector("[data-toggle-favourite]")?.focus({ preventScroll: true }));
       showToast(`${context.movie.title} ${saved.isFavourite ? "marked as a Favourite" : "removed from Favourites"}.`);
     } catch (error) {
       favouriteButton.disabled = false;
@@ -3887,9 +3815,9 @@ document.addEventListener("click", async (event) => {
     try {
       await savePersonalFilm(context.movie, { rating: null });
       reactionEditorExpanded = false;
-      personalStateEditorExpanded = false;
       reactionLiveMessage = "Reaction cleared. Film state and Favourite unchanged.";
       render();
+      window.requestAnimationFrame(() => document.querySelector("#reaction-question")?.focus({ preventScroll: true }));
       showToast(`Reaction cleared for ${context.movie.title}. Its state and Favourite were not changed.`);
     } catch (error) {
       showToast(`Reaction was not cleared: ${error.message}`);
@@ -3904,7 +3832,6 @@ document.addEventListener("click", async (event) => {
       await removePersonalFilm(context.movie);
       if (currentView === "my-films") selectedFilmId = null;
       reactionEditorExpanded = false;
-      personalStateEditorExpanded = false;
       render();
       showToast(`${context.movie.title} removed from My Cinema. Cine-Cord was not changed.`);
     } catch (error) {
@@ -3950,7 +3877,6 @@ document.addEventListener("click", async (event) => {
         currentView = "my-films";
         selectedFilmId = saved.id;
         reactionEditorExpanded = false;
-        personalStateEditorExpanded = false;
         window.history.replaceState(null, "", "#my-films");
         render();
         showToast(existingPersonalFilm ? `${saved.title} is already in My Cinema.` : `${saved.title} added privately to Want to Watch.`);
@@ -4343,7 +4269,6 @@ document.addEventListener("keydown", (event) => {
   if (selectedFilmId) {
     selectedFilmId = null;
     reactionEditorExpanded = false;
-    personalStateEditorExpanded = false;
     reactionLiveMessage = "";
     render();
     window.requestAnimationFrame(() => window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" }));
@@ -4360,7 +4285,6 @@ window.addEventListener("hashchange", () => {
     currentView = nextView;
     selectedFilmId = null;
     reactionEditorExpanded = false;
-    personalStateEditorExpanded = false;
     render();
   }
 });
