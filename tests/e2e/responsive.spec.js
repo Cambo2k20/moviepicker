@@ -522,6 +522,17 @@ test("the master Journal keeps archives read-only and current entries actionable
   await expect(page.locator(".journal-header .eyebrow")).toContainText("2 archived");
   await expect(page.locator(".journal-header .eyebrow")).toContainText("1 editable");
   await expect(page.locator(".journal-entry-card")).toHaveCount(3);
+  const postedDates = page.locator(".journal-entry-posted-date");
+  await expect(postedDates).toHaveText(["16 Aug 2026", "3 Aug 2025", "7 Jun 2020"]);
+  expect(await postedDates.evaluateAll((dates) => dates.map((date) => date.getAttribute("datetime")))).toEqual([
+    "2026-08-16T23:25:21.405+01:00",
+    "2025-08-03T00:20:41.860+01:00",
+    "2020-06-07T03:56:48.786+01:00",
+  ]);
+  expect(await page.locator(".journal-entry-card").evaluateAll((cards) => cards.every((card) => (
+    getComputedStyle(card.querySelector(".journal-entry-posted-date")).color
+      === getComputedStyle(card.querySelector(".journal-entry-year")).color
+  )))).toBe(true);
   if (testInfo.project.name === "phone") {
     const narrowCardGeometry = await page.evaluate(() => ({
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
@@ -624,7 +635,7 @@ test("the master Journal keeps archives read-only and current entries actionable
       actionLevels: ["primary", "secondary", "quiet", "quiet"],
       title: "Filth",
       year: "2013",
-      facts: ["Viewers — Dean, Kieran", "Recorded by Cameron"],
+      facts: ["Viewers — Dean, Kieran", "Recorded by Cameron · 16 Aug 2026"],
       comment: "Same rules still apply — corrected on Cine-Cord after posting.",
     });
     expect(cards.map(({ width, titleSize, contentOverflow }) => ({ width, titleSize, contentOverflow }))).toEqual([

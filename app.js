@@ -2303,6 +2303,12 @@ function journalTitleFitClass(title) {
   return "";
 }
 
+function journalPostedDate(entry) {
+  const value = entry.postedAt || entry.sourceCreatedAt;
+  if (!value || Number.isNaN(new Date(value).getTime())) return null;
+  return { value, label: formatSavedDate(String(value).slice(0, 10)) };
+}
+
 function renderJournalCard(entry) {
   const isArchive = entry.sourceType === "DISCORD_ARCHIVE";
   const isEditing = !isArchive
@@ -2318,6 +2324,7 @@ function renderJournalCard(entry) {
   const sourceCopy = isArchive
     ? `${entry.volumeName} · Original Discord message`
     : `Cine-Cord · Created by ${entry.authorName}`;
+  const postedDate = journalPostedDate(entry);
   const actionStateClass = isArchive
     ? "is-archive"
     : (hasDiscordMessage ? (isOutOfDate ? "is-stale" : "is-current") : "is-not-posted");
@@ -2336,7 +2343,7 @@ function renderJournalCard(entry) {
         <div class="journal-entry-copy">
           <div class="journal-entry-title-line"><h2 class="${journalTitleFitClass(entry.title)}" title="${escapeHTML(entry.title)}">${escapeHTML(entry.title)}</h2><span class="journal-entry-year">${entry.year ? escapeHTML(entry.year) : "Year not recorded"}</span></div>
           <p class="journal-entry-fact"><span>Viewers — </span><strong>${entry.viewerNames.length ? entry.viewerNames.map(escapeHTML).join(", ") : "No viewers parsed"}</strong></p>
-          <p class="journal-entry-fact"><span>Recorded by </span><strong>${escapeHTML(entry.authorName)}</strong></p>
+          <p class="journal-entry-fact journal-entry-attribution"><span>Recorded by </span><strong>${escapeHTML(entry.authorName)}</strong>${postedDate ? ` <span class="journal-entry-attribution-separator" aria-hidden="true">·</span> <time class="journal-entry-posted-date" datetime="${escapeHTML(postedDate.value)}">${escapeHTML(postedDate.label)}</time>` : ""}</p>
           ${entry.comment ? `<p class="journal-entry-comment">${escapeHTML(entry.comment)}</p>` : ""}
           ${entry.parserStatus === "REVIEW" ? `<p class="journal-review-note"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span>Imported safely, but one field needs a manual source check.</p>` : ""}
         </div>

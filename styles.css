@@ -8035,6 +8035,16 @@ body {
   overflow-wrap: anywhere;
 }
 
+.journal-entry-attribution {
+  flex-wrap: wrap;
+}
+
+.journal-entry-attribution-separator,
+.journal-entry-posted-date {
+  flex: 0 0 auto;
+  color: var(--dim);
+}
+
 .journal-entry-comment {
   display: -webkit-box;
   margin: 5px 0 0;
