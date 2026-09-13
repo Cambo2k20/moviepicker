@@ -7,15 +7,17 @@ Approved: 24 August 2026
 Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 
 Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
-identity, owner-only personal-film records and the owner-private viewing-event
-foundation are shipped, while the remaining private-data foundation is not.
+identity, owner-only personal-film records, the owner-private viewing-event
+foundation and verified current-Journal synchronisation are shipped, while the
+remaining private-data foundation is not.
 Phase 2A is complete: its My Films experience and the compact film-detail
 revision with numbered ratings were integrated into `main`, passed the
 production release gates and were published on 13 September 2026. The numbered
 detail controls supersede the detailed reaction artwork on that page; compact
 reaction faces remain on My Films cards. Phase 2B is in progress: its secure
-viewing-event storage is deployed, but history UI, current-Journal linking,
-private notes and reviews remain unbuilt. Phases 2C–5 have not started.
+viewing-event storage and current-Journal linking are deployed. The history UI
+and manual controls are implemented in code pending their frontend release
+gate; private notes and reviews remain unbuilt. Phases 2C–5 have not started.
 
 ## Purpose and authority
 
@@ -618,7 +620,8 @@ merge commit `4af2b0a`.
 
 ##### Phase 2B — History and personal detail
 
-Status: In progress; viewing-event foundation deployed on 13 September 2026
+Status: In progress; foundation and current-Journal sync deployed, history UI
+pending release
 
 - Viewing-event history UI and manual event controls
 - Current stable-identity Cine-Cord history linking
@@ -628,9 +631,17 @@ Status: In progress; viewing-event foundation deployed on 13 September 2026
 The owner-private viewing-event migration passed authenticated database tests,
 production migration parity, unit tests, build and Playwright before deployment
 from merge commit `521ea03`. It stores repeatable Finished or Did Not Finish
-events without changing the current personal-film row. It deliberately adds no
-history UI or automatic Journal linking; those remain separately reviewed
-Phase 2B patches.
+events without changing the current personal-film row. The additive
+current-Journal synchronisation then passed its database and release gates and
+was deployed from merge commit `27d5d92`. It creates source-linked events only
+from verified current viewer and canonical movie identities; imported Discord
+archive names remain untouched.
+
+The current implementation adds the compact per-film history UI, repeated
+Finished and Did Not Finish rows, manual add/edit/delete controls, private
+hide/reveal for source-linked events and routing to the authorised Journal for
+source correction. It does not add notes, reviews, lists or archive matching,
+and is not live until its own validation and release gates pass.
 
 ##### Phase 2C — Overview and lists
 

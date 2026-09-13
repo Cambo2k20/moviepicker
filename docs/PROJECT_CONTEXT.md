@@ -77,12 +77,18 @@ My Films currently supports:
   from shared Cine-Cord data
 - Compact numbered rating controls on film details, with reaction faces retained
   as compact personal indicators on My Films cards
+- A compact per-film viewing history for repeat Finished and Did Not Finish
+  events, including manual add, edit and delete controls
+- Source-linked current-Journal events that can be hidden privately or routed
+  to the authorised Journal editor for shared correction
 - Automatic persistence of private changes to the signed-in owner's record
 
 The Phase 2A My Films and compact film-detail experience passed responsive,
-interaction and production release validation and is deployed. Private notes,
-reviews, viewing-event history and personal lists are not implemented. Discover
-remains unavailable.
+interaction and production release validation and is deployed. The Phase 2B
+viewing-event backend and verified current-Journal synchronisation are also
+deployed. The viewing-history interface above is implemented in this checkout
+but is not production-shipped until its release gates pass. Private notes,
+reviews and personal lists are not implemented. Discover remains unavailable.
 
 ### Queue Roulette
 
