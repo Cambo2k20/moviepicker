@@ -51,12 +51,19 @@ const imageAssets = {
   andrew: new URL("./assets/avatar-andrew.png", import.meta.url).href,
   ross: new URL("./assets/avatar-ross.png", import.meta.url).href,
   journalFallback: new URL("./assets/hero-journal-web.png", import.meta.url).href,
-  reactions: {
-    1: new URL("./assets/reaction-1-didnt-like-it-v2.png", import.meta.url).href,
-    2: new URL("./assets/reaction-2-not-for-me-v2.png", import.meta.url).href,
-    3: new URL("./assets/reaction-3-it-was-okay-v2.png", import.meta.url).href,
-    4: new URL("./assets/reaction-4-really-liked-it-v2.png", import.meta.url).href,
-    5: new URL("./assets/reaction-5-loved-it-v2.png", import.meta.url).href,
+  reactionDetails: {
+    1: new URL("./assets/reaction-stage-1-didnt-like-it-v3.webp", import.meta.url).href,
+    2: new URL("./assets/reaction-stage-2-not-for-me-v3.webp", import.meta.url).href,
+    3: new URL("./assets/reaction-stage-3-it-was-okay-v3.webp", import.meta.url).href,
+    4: new URL("./assets/reaction-stage-4-really-liked-it-v3.webp", import.meta.url).href,
+    5: new URL("./assets/reaction-stage-5-loved-it-v3.webp", import.meta.url).href,
+  },
+  reactionFaces: {
+    1: new URL("./assets/reaction-face-1-didnt-like-it-v1.webp", import.meta.url).href,
+    2: new URL("./assets/reaction-face-2-not-for-me-v1.webp", import.meta.url).href,
+    3: new URL("./assets/reaction-face-3-it-was-okay-v1.webp", import.meta.url).href,
+    4: new URL("./assets/reaction-face-4-really-liked-it-v1.webp", import.meta.url).href,
+    5: new URL("./assets/reaction-face-5-loved-it-v1.webp", import.meta.url).href,
   },
 };
 const knownAvatars = {
@@ -72,6 +79,14 @@ const decisionModes = [
   { code: "02", title: "Queue Roulette", tone: "Weighted chaos", copy: "The longer a film has waited, the wider its slice — up to 4× weight, shown as “4× weight · waiting 5 months”. Each participant has one optional veto.", available: true },
   { code: "03", title: "Reel Bracket", tone: "Coming soon", copy: "Head-to-head voting is designed but is not implemented yet.", available: false }
 ];
+
+const reactionStageCopy = {
+  1: "Already heading for the aisle.",
+  2: "Arms folded. This one was not for them.",
+  3: "Stayed to the end. It was okay.",
+  4: "Leaned forward, clapped at the end, still in the seat.",
+  5: "On their feet for the standing ovation.",
+};
 
 const root = document.querySelector("#view-root");
 const partyModal = document.querySelector("#party-modal");
@@ -1747,20 +1762,63 @@ function filmMatchesSession(film, session) {
   return Boolean(selected && findFilmByIdentity([selected], film));
 }
 
+function setReactionStage(control, value, { resting = false, mode = "preview" } = {}) {
+  const stage = control?.querySelector("[data-reaction-stage]");
+  const reaction = reactionForValue(value);
+  if (!stage || !reaction) return;
+
+  const image = stage.querySelector("[data-reaction-stage-image]");
+  const label = stage.querySelector("[data-reaction-stage-label]");
+  const caption = stage.querySelector("[data-reaction-stage-caption]");
+  if (image) image.src = imageAssets.reactionDetails[reaction.value];
+  if (label) label.textContent = resting ? "Pick a face" : reaction.label;
+  if (caption) caption.textContent = resting
+    ? "Hover, focus or tap a face to preview your reaction."
+    : reactionStageCopy[reaction.value];
+  stage.dataset.reactionValue = String(reaction.value);
+  stage.dataset.reactionStageMode = resting ? "resting" : mode;
+  stage.classList.toggle("is-resting", resting);
+}
+
+function restoreReactionStage(control) {
+  const savedReaction = reactionForValue(control?.dataset.savedReactionValue);
+  setReactionStage(control, savedReaction?.value || 3, { resting: !savedReaction, mode: savedReaction ? "saved" : "resting" });
+}
+
+function previewReactionChoice(choice) {
+  const reaction = reactionForValue(choice?.dataset.reactionValue);
+  const control = choice?.closest(".reaction-control");
+  if (!control || !reaction) return;
+  setReactionStage(control, reaction.value);
+}
+
+function activeReactionPreview(control) {
+  const focused = control?.querySelector("[data-reaction-choice]:focus");
+  if (focused) return focused;
+  return [...(control?.querySelectorAll("[data-reaction-choice]") || [])]
+    .find((choice) => choice.matches(":hover")) || null;
+}
+
 function renderReactionControl(movie, personal) {
   const savedReaction = reactionForValue(personal?.rating);
+  const stageReaction = savedReaction || reactionForValue(3);
+  const restingStage = !savedReaction;
   const collapsedOnPhone = Boolean(savedReaction && !reactionEditorExpanded);
   const savedMessage = savedReaction ? `Saved · ${savedReaction.label}` : "No reaction yet";
   return `
-    <section class="reaction-control ${savedReaction ? "has-saved-reaction" : ""} ${collapsedOnPhone ? "is-collapsed-phone" : ""}" aria-labelledby="reaction-question">
-      <div class="reaction-heading"><span id="reaction-question">How much did you enjoy it?</span><strong>${escapeHTML(savedMessage)}</strong></div>
-      ${savedReaction ? `<div class="reaction-mobile-summary"><img src="${escapeHTML(imageAssets.reactions[savedReaction.value])}" alt="" /><span><small>Saved · Level ${savedReaction.value} of 5</small><strong>${escapeHTML(savedReaction.label)}</strong></span></div><div class="reaction-mobile-actions"><button class="secondary-button" type="button" data-change-reaction>Change reaction</button><button class="detail-text-action" type="button" data-clear-reaction>Clear</button></div>` : ""}
+    <section class="reaction-control ${savedReaction ? "has-saved-reaction" : ""} ${collapsedOnPhone ? "is-collapsed-phone" : ""}" aria-labelledby="reaction-question" data-saved-reaction-value="${savedReaction?.value || ""}">
+      <div class="reaction-heading"><span id="reaction-question" tabindex="-1">How much did you enjoy it?</span><strong>${escapeHTML(savedMessage)}</strong></div>
+      ${savedReaction ? `<div class="reaction-mobile-summary"><img src="${escapeHTML(imageAssets.reactionFaces[savedReaction.value])}" alt="" /><span><small>Saved · Level ${savedReaction.value} of 5</small><strong>${escapeHTML(savedReaction.label)}</strong></span></div><div class="reaction-mobile-actions"><button class="secondary-button" type="button" data-change-reaction>Change reaction</button><button class="detail-text-action" type="button" data-clear-reaction>Clear</button></div>` : ""}
       <div class="reaction-editor-shell">
         ${savedReaction ? `<div class="reaction-mobile-editor-heading"><span>Change reaction · Expanded</span><button class="icon-button" type="button" data-collapse-reaction aria-label="Close reaction choices"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>` : ""}
-        <div class="reaction-grid" role="radiogroup" aria-labelledby="reaction-question">${REACTION_LEVELS.map((reaction, index) => {
+        <div class="reaction-stage ${restingStage ? "is-resting" : ""}" data-reaction-stage data-reaction-value="${stageReaction.value}" data-reaction-stage-mode="${restingStage ? "resting" : "saved"}">
+          <div class="reaction-stage-visual"><img class="reaction-stage-image" src="${escapeHTML(imageAssets.reactionDetails[stageReaction.value])}" alt="" data-reaction-stage-image /></div>
+          <div class="reaction-stage-copy" aria-live="polite" aria-atomic="true"><strong class="reaction-stage-label" data-reaction-stage-label>${escapeHTML(restingStage ? "Pick a face" : stageReaction.label)}</strong><p class="reaction-stage-caption" data-reaction-stage-caption>${escapeHTML(restingStage ? "Hover, focus or tap a face to preview your reaction." : reactionStageCopy[stageReaction.value])}</p></div>
+        </div>
+        <div class="reaction-grid" role="group" aria-labelledby="reaction-question">${REACTION_LEVELS.map((reaction, index) => {
         const selected = reaction.value === savedReaction?.value;
         const tabIndex = selected || (!savedReaction && index === 0) ? 0 : -1;
-        return `<button class="reaction-choice ${selected ? "is-saved" : ""}" type="button" role="radio" aria-checked="${selected}" aria-label="Level ${reaction.value} of 5, ${escapeHTML(reaction.label)}" tabindex="${tabIndex}" data-reaction-value="${reaction.value}"><span class="reaction-number" aria-hidden="true">${reaction.value}</span><span class="reaction-art"><img src="${escapeHTML(imageAssets.reactions[reaction.value])}" alt="" />${selected ? `<span class="reaction-check material-symbols-outlined" aria-hidden="true">check</span>` : ""}</span><strong>${escapeHTML(reaction.label)}</strong></button>`;
+        return `<button class="reaction-choice ${selected ? "is-saved" : ""}" type="button" aria-pressed="${selected}" aria-label="Level ${reaction.value} of 5, ${escapeHTML(reaction.label)}" tabindex="${tabIndex}" data-reaction-choice data-reaction-value="${reaction.value}"><span class="reaction-number" aria-hidden="true">${reaction.value}</span><span class="reaction-face"><img src="${escapeHTML(imageAssets.reactionFaces[reaction.value])}" alt="" />${selected ? `<span class="reaction-check" aria-hidden="true"></span>` : ""}</span><strong>${escapeHTML(reaction.label)}</strong></button>`;
         }).join("")}</div>
       </div>
       <p class="reaction-consequence">Rating adds this film to My Cinema and marks it Watched. A Did Not Finish state stays Did Not Finish. Your reaction stays private and never changes Cine-Cord.</p>
@@ -1905,7 +1963,7 @@ function renderPersonalFilmCard(item) {
         <span class="poster-frame ${item.posterUrl ? "" : "is-placeholder"}"><img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" loading="lazy" /><span class="status-pill personal-state">${escapeHTML(personalStateLabel(item.state))}</span>${item.isFavourite ? `<span class="personal-favourite material-symbols-outlined" aria-label="Favourite">favorite</span>` : ""}</span>
         <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
       </button>
-      <footer class="personal-card-footer">${reaction ? `<span class="personal-card-reaction"><img src="${escapeHTML(imageAssets.reactions[reaction.value])}" alt="" /><strong>${escapeHTML(reaction.label)}</strong></span>` : `<span>No reaction yet</span>`}<span>Private</span></footer>
+      <footer class="personal-card-footer">${reaction ? `<span class="personal-card-reaction"><img src="${escapeHTML(imageAssets.reactionFaces[reaction.value])}" alt="" /><strong>${escapeHTML(reaction.label)}</strong></span>` : `<span>No reaction yet</span>`}<span>Private</span></footer>
     </article>`;
 }
 
@@ -3239,6 +3297,47 @@ document.addEventListener("focusout", (event) => {
   flushJournalDraftSave().catch(() => {});
 });
 
+document.addEventListener("pointerover", (event) => {
+  if (event.pointerType === "touch") return;
+  const choice = event.target.closest?.("[data-reaction-choice]");
+  if (!choice || choice.contains(event.relatedTarget)) return;
+  previewReactionChoice(choice);
+});
+
+document.addEventListener("pointerout", (event) => {
+  if (event.pointerType === "touch") return;
+  const choice = event.target.closest?.("[data-reaction-choice]");
+  if (!choice || choice.contains(event.relatedTarget)) return;
+  const control = choice.closest(".reaction-control");
+  const nextChoice = event.relatedTarget?.closest?.("[data-reaction-choice]");
+  if (nextChoice?.closest(".reaction-control") === control) {
+    previewReactionChoice(nextChoice);
+    return;
+  }
+  const focusedChoice = control?.querySelector("[data-reaction-choice]:focus");
+  if (focusedChoice) previewReactionChoice(focusedChoice);
+  else restoreReactionStage(control);
+});
+
+document.addEventListener("focusin", (event) => {
+  const choice = event.target.closest?.("[data-reaction-choice]");
+  if (choice) previewReactionChoice(choice);
+});
+
+document.addEventListener("focusout", (event) => {
+  const choice = event.target.closest?.("[data-reaction-choice]");
+  if (!choice) return;
+  const control = choice.closest(".reaction-control");
+  const nextChoice = event.relatedTarget?.closest?.("[data-reaction-choice]");
+  if (nextChoice?.closest(".reaction-control") === control) {
+    previewReactionChoice(nextChoice);
+    return;
+  }
+  const hoveredChoice = activeReactionPreview(control);
+  if (hoveredChoice) previewReactionChoice(hoveredChoice);
+  else restoreReactionStage(control);
+});
+
 document.addEventListener("submit", async (event) => {
   const journalEditor = event.target.closest("[data-journal-entry-form]");
   if (journalEditor) {
@@ -3701,14 +3800,14 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-reaction]")) {
     reactionEditorExpanded = true;
     render();
-    window.requestAnimationFrame(() => document.querySelector("[data-reaction-value]")?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => document.querySelector("#reaction-question")?.focus({ preventScroll: true }));
     return;
   }
   if (event.target.closest("[data-change-reaction]")) {
     reactionEditorExpanded = true;
     personalStateEditorExpanded = false;
     render();
-    window.requestAnimationFrame(() => document.querySelector("[data-reaction-value][aria-checked='true']")?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => document.querySelector("[data-reaction-choice][aria-pressed='true']")?.focus({ preventScroll: true }));
     return;
   }
   if (event.target.closest("[data-collapse-reaction]")) {
@@ -3746,7 +3845,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const reactionButton = event.target.closest("[data-reaction-value]");
+  const reactionButton = event.target.closest("[data-reaction-choice]");
   if (reactionButton) {
     const context = selectedFilmContext();
     if (!context?.movie?.movieId) return;
@@ -3754,11 +3853,11 @@ document.addEventListener("click", async (event) => {
     const reaction = reactionForValue(reactionButton.dataset.reactionValue);
     try {
       await savePersonalFilm(context.movie, { rating: reaction.value });
-      reactionEditorExpanded = false;
+      reactionEditorExpanded = window.matchMedia("(max-width: 640px)").matches;
       personalStateEditorExpanded = false;
       reactionLiveMessage = `Saved, ${reaction.label}.`;
       render();
-      window.requestAnimationFrame(() => document.querySelector(`[data-reaction-value="${reaction.value}"]`)?.focus({ preventScroll: true }));
+      window.requestAnimationFrame(() => document.querySelector(`[data-reaction-choice][data-reaction-value="${reaction.value}"]`)?.focus({ preventScroll: true }));
     } catch (error) {
       reactionButton.disabled = false;
       showToast(`Reaction was not saved: ${error.message}`);
@@ -4212,9 +4311,9 @@ partyForm.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  const reactionChoice = event.target.closest?.("[data-reaction-value]");
+  const reactionChoice = event.target.closest?.("[data-reaction-choice]");
   if (reactionChoice && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
-    const choices = [...reactionChoice.closest("[role='radiogroup']").querySelectorAll("[data-reaction-value]")];
+    const choices = [...reactionChoice.closest("[role='group']").querySelectorAll("[data-reaction-choice]")];
     const currentIndex = choices.indexOf(reactionChoice);
     const nextIndex = event.key === "Home"
       ? 0
@@ -4223,7 +4322,6 @@ document.addEventListener("keydown", (event) => {
         : Math.min(choices.length - 1, Math.max(0, currentIndex + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1)));
     event.preventDefault();
     choices[nextIndex]?.focus();
-    choices[nextIndex]?.click();
     return;
   }
   const navDestination = event.target.closest?.(".nav-destinations .nav-item");

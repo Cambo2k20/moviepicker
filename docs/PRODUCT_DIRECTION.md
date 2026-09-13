@@ -9,9 +9,10 @@ Scope: Cine-Cord, My Cinema, Discover and curated member profiles
 Current position: Phase 0 is complete. Phase 1 is in progress: canonical movie
 identity, owner-only personal-film records, states, reactions and Favourites
 are shipped, while the remaining private-data foundation is not. Phase 2A is
-also in progress: its core My Films experience is deployed, but final reaction
-artwork acceptance and responsive release QA remain open. Phases 2B–5 have not
-started.
+also in progress: its core My Films experience is deployed, and the final paired
+reaction artwork is accepted with responsive release QA passed on the
+implementation branch; mainline integration and publication remain pending.
+Phases 2B–5 have not started.
 
 ## Purpose and authority
 
@@ -214,13 +215,20 @@ Rules:
 
 ### Decision 003A — Rating interaction and artwork
 
-Status: Approved direction; candidate assets are implemented, but final
-production acceptance is not yet recorded
+Status: Approved for production; Cameron accepted the final paired artwork on
+30 August 2026 and responsive release QA passed on the implementation branch
 
-Five numbered controls are used. Hover previews the label and artwork; keyboard
-focus provides the same preview; touch selects and shows the reaction. Hover or
-focus alone never saves. The selected reaction remains visible, and text is
-always present so artwork is never the sole meaning.
+Five compact face controls are used, with the 1–5 value retained in each
+control's accessible name. On the selected-film view, one detailed patron stage
+shows the reaction currently being considered. Its display order is the active
+hover or keyboard-focus preview, then the saved reaction, then a subdued neutral
+Level 3 resting state labelled "Pick a face" when no reaction is saved.
+
+Hover and keyboard focus update the stage without saving. Leaving the control
+row restores the saved reaction or the neutral resting state. Click, Enter,
+Space or touch saves the chosen reaction and shows its matching stage. The
+selected reaction remains visible, and text is always present so artwork is
+never the sole meaning.
 
 The approved artwork direction uses one consistent faceless cinema patron and
 seat:
@@ -231,10 +239,16 @@ seat:
 4. Applauding while seated
 5. Standing ovation
 
-Use a fixed chair, canvas and baseline. Keep charcoal, white and Cine-Cord
-violet restrained. Simplify edge glow, upholstery, popcorn and action marks if
-they become noisy at real interface size. Five separate transparent assets are
-required; the exploratory contact sheet is not a production asset.
+The production set is paired: five compact transparent face assets for the
+controls and My Films card footers, plus five detailed transparent patron assets
+for the single selected-film stage. Yellow is confined to the private reaction
+faces and does not become a navigation, shared-data or general Cine-Cord accent.
+
+Use a fixed chair, canvas and baseline for the detailed patrons. Keep charcoal,
+white and Cine-Cord violet restrained. Simplify edge glow, upholstery, popcorn
+and action marks if they become noisy at real interface size. Ten separate
+production assets are required; exploratory contact sheets are not production
+assets.
 
 ### Decision 004 — Film states
 
@@ -583,7 +597,8 @@ This is the first user-facing release, delivered through smaller batches:
 
 ##### Phase 2A — Personal film and reaction core
 
-Status: In progress; the core experience is deployed
+Status: In progress; the core experience is deployed, and the final reaction
+set is accepted and validated with mainline integration and publication pending
 
 - Area-switching shell and My Films
 - Protected personal film search
@@ -591,14 +606,13 @@ Status: In progress; the core experience is deployed
 - Favourite marker
 - Unified private and shared film details
 
-The five final transparent reaction assets from Decision 003A must be accepted
-before Phase 2A is released. Accessible text and controls may support
-development, but the approved user-facing reaction experience does not ship as
-a permanently text-only substitute.
-
-The deployed experience includes candidate reaction assets. Phase 2A remains
-open until Cameron accepts the final production set and responsive release QA
-passes without the known My Films overflow and control-row defects.
+Cameron accepted the final paired reaction set from Decision 003A — five compact
+face assets and five detailed patron assets — on 30 August 2026. Responsive
+release QA passed across representative phone, tablet and desktop sizes,
+including the preview, restoration, keyboard and touch contracts above.
+Accessible text and controls remain part of the approved experience so artwork
+is never the sole meaning. Phase 2A remains in progress until the accepted set
+is integrated into main and published through the separate release gates.
 
 ##### Phase 2B — History and personal detail
 
