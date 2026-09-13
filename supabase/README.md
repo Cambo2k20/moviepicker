@@ -95,6 +95,16 @@ Rating insertion or change atomically marks the film `WATCHED` unless `DID_NOT_F
 
 This Phase 2A migration is local-only until its implementation, tests and user-facing flows are reviewed and explicitly approved for production deployment.
 
+## Phase 2B viewing-event foundation
+
+`20260913114500_add_personal_viewing_events.sql` adds the first local Phase 2B foundation. `personal_viewing_events` stores owner-private Finished or Did Not Finish history against canonical movie identity, independently from `personal_films`, so current state, rating or Favourite removal cannot silently erase history. Manual events may repeat for rewatches and may omit their watched date.
+
+The table also reserves a nullable current-Journal source. A partial unique index prevents one Journal entry from generating duplicate history for one owner. Source-linked facts cannot be edited or deleted through the personal browser surface: the owner may only hide or reveal the derived event, while shared corrections remain in the authorised Journal flow. Deleting the Journal source removes its derived event. This migration does not create source-linked rows; verified current-Journal synchronisation is a separate reviewed patch, and imported archive names remain ineligible for automatic linking.
+
+RLS requires both ownership and approved membership, including for administrators. Column privileges keep ownership, movie identity, source identity and audit timestamps immutable. Direct table deletion is withheld; `delete_manual_personal_viewing_event` deletes only the caller's manual rows. Membership removal hides retained events immediately, while Auth-account deletion cascades through the owner profile and removes them.
+
+This Phase 2B migration is local-only until its SQL, authenticated integration tests and deployment plan are separately approved. It adds no frontend history surface, note, review or automatic Journal linking.
+
 `20260824031315_add_discord_journal_publications.sql` adds the original publication record. `20260824122806_add_master_journal_and_discord_identities.sql` extends it for Phase 1, and `20260824143921_use_discord_server_profiles.sql` replaces the original account-wide identity cache with the verified The Discordians server profile. The caller must be the entry creator or an administrator; a new webhook post requires that caller's synchronised server display name/avatar, while later updates PATCH the stored Discord message ID without changing its original author. A unique row per Journal entry and the stored Discord message ID prevent ordinary duplicate posts. Runtime, genres, current viewers, status and the optional comment are built from canonical database values; Discord mentions are disabled. Manual **Copy for Discord** remains available even when a server profile has not been connected.
 
 Set the webhook in the hosted project's Edge Function secrets, then deploy the function with the platform JWT gateway disabled:
