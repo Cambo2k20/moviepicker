@@ -499,3 +499,41 @@ passed
 ## Final result
 
 passed
+
+---
+
+# Journal posted-date QA — 13 September 2026
+
+## Scope and decision
+
+- Focused Journal clarity patch within the approved master-Journal direction; no release-phase or product-direction decision changed.
+- Every Journal attribution now places the entry's posted date beside the recorder name.
+- Current Cine-Cord records prefer their Discord publication time and fall back to their creation time when no publication time exists. Imported archive records retain their original Discord message timestamp.
+- This is checkout validation only. Merge and live publication remain separate approval gates.
+
+## Browser evidence
+
+- Current entry: `Recorded by Cameron · 16 Aug 2026`.
+- Archive entries: `Recorded by Dean · 3 Aug 2025` and `Recorded by Cameron · 7 Jun 2020`.
+- The dates use semantic `time` elements with the complete source timestamp in `datetime`.
+- Computed date colour matched the release-year colour on all three cards: `rgb(137, 140, 152)`.
+- Phone-sized in-app browser inspection found zero attribution or document-level horizontal overflow.
+- Browser console check returned zero warnings or errors.
+
+## Automated validation
+
+- JavaScript syntax check: passed.
+- Unit tests: 57 passed, 0 failed.
+- Production build and local-reference check: passed; 13 local references verified and 11 images emitted.
+- Focused Journal Playwright run: 4 passed, 0 failed across phone, tablet, narrow-desktop and desktop projects.
+- Complete Playwright run with one worker: 51 passed, 29 intentionally skipped, 0 failed across all four projects.
+
+## Findings
+
+- The first focused run exposed missing literal spaces around the separator in raw text content. The attribution template was corrected and the focused and complete suites then passed.
+- No database or Supabase behavior changed, so database migration and RLS suites were not required for this patch.
+- No actionable P0, P1 or P2 findings remain.
+
+## Final result
+
+passed
