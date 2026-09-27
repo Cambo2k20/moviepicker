@@ -296,6 +296,7 @@ function loadDesignPreviewWorkspace() {
     { id: "preview-inception", title: "Inception", year: 2010, posterUrl: "https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", runtime: 148, genres: ["Action", "Science Fiction", "Thriller"], overview: "A skilled extractor is offered a chance to erase his past crimes by planting an idea in another person's mind.", createdAt: "2026-07-24T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 3, votedByMe: false, watched: false, tmdbId: 27205 },
     { id: "preview-martian", title: "The Martian", year: 2015, posterUrl: "https://image.tmdb.org/t/p/w500/5BHuvQ6p9kfc091Z8RiFNhCwL4b.jpg", runtime: 144, genres: ["Adventure", "Drama", "Science Fiction"], overview: "An astronaut stranded on Mars must rely on ingenuity and determination while Earth works to bring him home.", createdAt: "2026-08-20T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 286217 },
   ];
+  movieList.find((item) => item.id === "preview-alien").suggestedByAvatar = `${knownAvatars.dean}?source=discord-server-profile`;
   for (const item of movieList) {
     item.movieId = `preview-movie-${item.tmdbId}`;
     item.watchCount = 0;
@@ -548,6 +549,10 @@ function escapeHTML(value) {
 
 function avatarForName(name) {
   return knownAvatars[String(name).trim().toLowerCase()] || imageAssets.cameron;
+}
+
+function avatarForFilm(item) {
+  return item?.suggestedByAvatar || avatarForName(item?.suggestedBy);
 }
 
 function isCurrentAdmin() {
@@ -1775,6 +1780,7 @@ async function suggestPersonalFilm(movie) {
       id: `preview-shared-${movie.tmdbId || Date.now()}`,
       suggestedById: authUser.id,
       suggestedBy: currentProfile?.displayName || "Cameron",
+      suggestedByAvatar: currentProfile?.discordServerAvatar || avatarForName(currentProfile?.displayName),
       createdAt: new Date().toISOString(),
       watched: false,
       watchCount: 0,
@@ -2064,7 +2070,7 @@ function renderFilmCard(item) {
         <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
       </button>
       <footer class="poster-card-footer">
-        <span class="poster-suggester"><img src="${escapeHTML(avatarForName(item.suggestedBy))}" alt="" /><span>Added by <strong>${escapeHTML(item.suggestedBy)}</strong></span></span>
+        <span class="poster-suggester"><img src="${escapeHTML(avatarForFilm(item))}" alt="" /><span>Added by <strong>${escapeHTML(item.suggestedBy)}</strong></span></span>
         <button class="poster-vote ${item.votedByMe ? "is-voted" : ""}" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""} aria-label="${item.votedByMe ? "Remove vote from" : "Vote for"} ${escapeHTML(item.title)}"><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span><strong>${item.votes}</strong></button>
       </footer>
     </article>`;
@@ -3686,12 +3692,15 @@ async function loadWorkspace(providerToken = null) {
   movieList = (queueResult.data || []).map((item) => {
     const voters = votesByItem.get(item.id) || [];
     const posterUrl = item.poster_url || (item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null);
+    const suggestedBy = profileMap.get(item.suggested_by)?.display_name || "Former member";
+    const suggestedByIdentity = discordIdentityMap.get(item.suggested_by);
     return {
       id: item.id,
       title: item.title,
       year: item.release_year,
       suggestedById: item.suggested_by,
-      suggestedBy: profileMap.get(item.suggested_by)?.display_name || "Former member",
+      suggestedBy,
+      suggestedByAvatar: suggestedByIdentity?.avatar_url || avatarForName(suggestedBy),
       watched: item.watched,
       createdAt: item.created_at,
       votes: voters.length,

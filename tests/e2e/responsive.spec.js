@@ -301,6 +301,11 @@ test("a film marked watched never displays as never watched when no session coun
   await expect(watchedFilm.locator(".status-pill")).toHaveText("Watched once");
 });
 
+test("shared film cards use the suggester's Discord server avatar", async ({ page }) => {
+  const alienFilm = page.locator(".poster-card", { hasText: "Alien" });
+  await expect(alienFilm.locator(".poster-suggester img")).toHaveAttribute("src", /source=discord-server-profile/);
+});
+
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop film-detail artwork is covered once.");
 
