@@ -22,12 +22,16 @@ import {
   VIEWING_OUTCOMES,
   applyPersonalFilmPatch,
   findFilmByIdentity,
+  getPublishedReviewsForMovie,
   getVisiblePersonalFilms,
   getViewingEventsForMovie,
   normalisePersonalFilm,
+  normalisePersonalReview,
+  normalisePublishedReview,
   normalisePersonalViewingEvent,
   personalStateLabel,
   reactionForValue,
+  reviewHasUnpublishedChanges,
   viewingOutcomeLabel,
 } from "./personal-films-core.js";
 import { settleOptionalQuery } from "./workspace-core.js";
@@ -122,6 +126,13 @@ let personalFilms = [];
 let personalFilmsLoadError = false;
 let personalViewingEvents = [];
 let personalViewingEventsLoadError = false;
+let personalReviews = [];
+let publishedReviews = [];
+let personalReviewsLoadError = false;
+let publishedReviewsLoadError = false;
+let reviewEditorOpen = false;
+let reviewPendingAction = "";
+let reviewLiveMessage = "";
 let viewingEventsRetrying = false;
 let viewingEventEditorId = null;
 let viewingEventPendingId = null;
@@ -202,6 +213,8 @@ function persistDesignPreviewWorkspace() {
       previewNextEntryNumber,
       personalFilms,
       personalViewingEvents,
+      personalReviews,
+      publishedReviews,
       watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn, votes, votedByMe }) => ({ id, watched, watchCount, lastWatchedOn, votes, votedByMe })),
     }));
   } catch { /* a full or blocked store must not break the preview */ }
@@ -224,6 +237,8 @@ function restoreDesignPreviewWorkspace() {
   }
   if (Array.isArray(saved.personalFilms)) personalFilms = saved.personalFilms.map(normalisePersonalFilm);
   if (Array.isArray(saved.personalViewingEvents)) personalViewingEvents = saved.personalViewingEvents.map(normalisePersonalViewingEvent);
+  if (Array.isArray(saved.personalReviews)) personalReviews = saved.personalReviews.map(normalisePersonalReview);
+  if (Array.isArray(saved.publishedReviews)) publishedReviews = saved.publishedReviews.map(normalisePublishedReview);
   activeSession = saved.activeSession || null;
   sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
   journalSessionId = null;
@@ -370,6 +385,40 @@ function loadDesignPreviewWorkspace() {
       isHidden: false,
       createdAt: "2026-08-24T19:18:00Z",
       updatedAt: "2026-08-24T19:18:00Z",
+    }),
+  ];
+  const previewOtherMemberId = previewObserver ? "preview-cameron" : "preview-dean";
+  personalReviews = [
+    normalisePersonalReview({
+      id: "preview-review-pulp",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      body: "Wildly confident, endlessly quotable and much funnier than I remembered.",
+      containsSpoilers: false,
+      createdAt: "2026-08-24T19:30:00Z",
+      updatedAt: "2026-08-24T19:30:00Z",
+    }),
+  ];
+  publishedReviews = [
+    normalisePublishedReview({
+      reviewId: "preview-review-pulp",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-680",
+      body: "Wildly confident, endlessly quotable and much funnier than I remembered.",
+      containsSpoilers: false,
+      rating: 4,
+      publishedAt: "2026-08-24T19:35:00Z",
+      updatedAt: "2026-08-24T19:35:00Z",
+    }),
+    normalisePublishedReview({
+      reviewId: "preview-review-other-pulp",
+      ownerId: previewOtherMemberId,
+      movieId: "preview-movie-680",
+      body: "The structure still feels daring, and the performances make every detour worth it.",
+      containsSpoilers: true,
+      rating: null,
+      publishedAt: "2026-08-23T18:00:00Z",
+      updatedAt: "2026-08-23T18:00:00Z",
     }),
   ];
   isLoading = false;
@@ -1446,6 +1495,8 @@ async function lookupMovie(body) {
 
 const PERSONAL_FILM_SELECT = "id,owner_id,movie_id,state,rating,is_favourite,created_at,updated_at,movies(id,tmdb_id,title,release_year,poster_path,runtime_minutes,genres,overview,metadata_updated_at)";
 const PERSONAL_VIEWING_EVENT_SELECT = "id,owner_id,movie_id,outcome,watched_on,source_journal_entry_id,is_hidden,created_at,updated_at";
+const PERSONAL_REVIEW_SELECT = "id,owner_id,movie_id,body,contains_spoilers,created_at,updated_at";
+const PUBLISHED_REVIEW_SELECT = "review_id,owner_id,movie_id,body,contains_spoilers,rating,published_at,updated_at";
 
 function personalWritePatch(existing, patch) {
   const payload = {};
@@ -1462,6 +1513,12 @@ function replacePersonalFilm(film) {
   else personalFilms.unshift(film);
 }
 
+function clearLocalPublishedRating(movieId) {
+  publishedReviews = publishedReviews.map((review) => review.ownerId === authUser?.id && review.movieId === movieId
+    ? { ...review, rating: null, updatedAt: new Date().toISOString() }
+    : review);
+}
+
 async function savePersonalFilm(movie, patch) {
   if (!authUser || !activeGroup || !movie?.movieId) throw new Error("This film needs matched movie details before it can be saved privately.");
   const existing = findFilmByIdentity(personalFilms, movie);
@@ -1472,6 +1529,7 @@ async function savePersonalFilm(movie, patch) {
       ownerId: authUser.id,
     });
     replacePersonalFilm(saved);
+    if (saved.rating === null) clearLocalPublishedRating(saved.movieId);
     persistDesignPreviewWorkspace();
     return saved;
   }
@@ -1484,6 +1542,7 @@ async function savePersonalFilm(movie, patch) {
   if (!data) throw new Error("No private film row was saved. Refresh before trying again.");
   const saved = normalisePersonalFilm(data);
   replacePersonalFilm(saved);
+  if (saved.rating === null) clearLocalPublishedRating(saved.movieId);
   return saved;
 }
 
@@ -1492,6 +1551,7 @@ async function removePersonalFilm(film) {
   if (!existing) return;
   if (designPreviewMode) {
     personalFilms = personalFilms.filter((candidate) => candidate.id !== existing.id);
+    clearLocalPublishedRating(existing.movieId);
     persistDesignPreviewWorkspace();
     return;
   }
@@ -1499,6 +1559,7 @@ async function removePersonalFilm(film) {
   if (error) throw error;
   if (!data) throw new Error("The private film was not removed. Refresh before trying again.");
   personalFilms = personalFilms.filter((candidate) => candidate.id !== existing.id);
+  clearLocalPublishedRating(existing.movieId);
 }
 
 function replacePersonalViewingEvent(event) {
@@ -1580,6 +1641,112 @@ async function deleteManualViewingEvent(event) {
   if (error) throw error;
   if (!data) throw new Error("The manual viewing event was not deleted. Refresh before trying again.");
   personalViewingEvents = personalViewingEvents.filter((candidate) => candidate.id !== event.id);
+}
+
+function replacePersonalReview(review) {
+  const existingIndex = personalReviews.findIndex((candidate) => candidate.id === review.id);
+  if (existingIndex >= 0) personalReviews.splice(existingIndex, 1, review);
+  else personalReviews.push(review);
+}
+
+function replacePublishedReview(review) {
+  const existingIndex = publishedReviews.findIndex((candidate) => candidate.reviewId === review.reviewId);
+  if (existingIndex >= 0) publishedReviews.splice(existingIndex, 1, review);
+  else publishedReviews.push(review);
+}
+
+async function savePersonalReview(movie, review, { body, containsSpoilers }) {
+  const cleanBody = String(body || "").trim();
+  if (!authUser || !activeGroup || !movie?.movieId) throw new Error("This film needs a canonical movie record before a review can be saved.");
+  if (!cleanBody) throw new Error("Write something before saving the review.");
+  if (cleanBody.length > 1000) throw new Error("Keep the review to 1,000 characters or fewer.");
+
+  if (designPreviewMode) {
+    const now = new Date().toISOString();
+    const saved = normalisePersonalReview({
+      ...(review || {}),
+      id: review?.id || `preview-review-${Date.now()}`,
+      ownerId: authUser.id,
+      movieId: movie.movieId,
+      body: cleanBody,
+      containsSpoilers,
+      createdAt: review?.createdAt || now,
+      updatedAt: now,
+    });
+    replacePersonalReview(saved);
+    persistDesignPreviewWorkspace();
+    return saved;
+  }
+
+  const payload = { body: cleanBody, contains_spoilers: Boolean(containsSpoilers) };
+  const query = review
+    ? supabase.from("personal_reviews").update(payload).eq("id", review.id).eq("owner_id", authUser.id)
+    : supabase.from("personal_reviews").insert({ owner_id: authUser.id, movie_id: movie.movieId, ...payload });
+  const { data, error } = await query.select(PERSONAL_REVIEW_SELECT).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("No private review was saved. Refresh before trying again.");
+  const saved = normalisePersonalReview(data);
+  replacePersonalReview(saved);
+  return saved;
+}
+
+async function publishPersonalReview(review, movie) {
+  if (!review || review.ownerId !== authUser?.id) throw new Error("Save your private review before publishing it.");
+  if (designPreviewMode) {
+    const now = new Date().toISOString();
+    const personal = findFilmByIdentity(personalFilms, movie);
+    const published = normalisePublishedReview({
+      reviewId: review.id,
+      ownerId: review.ownerId,
+      movieId: review.movieId,
+      body: review.body.trim(),
+      containsSpoilers: review.containsSpoilers,
+      rating: personal?.rating ?? null,
+      publishedAt: now,
+      updatedAt: now,
+    });
+    replacePublishedReview(published);
+    persistDesignPreviewWorkspace();
+    return published;
+  }
+
+  const { data: published, error: publishError } = await supabase.rpc("publish_personal_review", { p_review_id: review.id });
+  if (publishError) throw publishError;
+  if (!published) throw new Error("The review was not published. Refresh before trying again.");
+  const { data, error } = await supabase.from("published_reviews").select(PUBLISHED_REVIEW_SELECT).eq("review_id", review.id).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The published review could not be loaded. Refresh before trying again.");
+  const snapshot = normalisePublishedReview(data);
+  replacePublishedReview(snapshot);
+  return snapshot;
+}
+
+async function unpublishPersonalReview(review) {
+  if (!review || review.ownerId !== authUser?.id) throw new Error("Only the review author can unpublish it.");
+  if (designPreviewMode) {
+    publishedReviews = publishedReviews.filter((candidate) => candidate.reviewId !== review.id);
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { data, error } = await supabase.rpc("unpublish_personal_review", { p_review_id: review.id });
+  if (error) throw error;
+  if (!data) throw new Error("The review was not unpublished. Refresh before trying again.");
+  publishedReviews = publishedReviews.filter((candidate) => candidate.reviewId !== review.id);
+}
+
+async function deletePersonalReview(review) {
+  if (!review || review.ownerId !== authUser?.id) throw new Error("Only the review author can delete it.");
+  if (designPreviewMode) {
+    personalReviews = personalReviews.filter((candidate) => candidate.id !== review.id);
+    publishedReviews = publishedReviews.filter((candidate) => candidate.reviewId !== review.id);
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { data, error } = await supabase.from("personal_reviews").delete().eq("id", review.id).eq("owner_id", authUser.id).select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The review was not deleted. Refresh before trying again.");
+  personalReviews = personalReviews.filter((candidate) => candidate.id !== review.id);
+  publishedReviews = publishedReviews.filter((candidate) => candidate.reviewId !== review.id);
 }
 
 async function suggestPersonalFilm(movie) {
@@ -2011,6 +2178,79 @@ function renderViewingHistory(context) {
     </section>`;
 }
 
+function personalReviewForMovie(movieId) {
+  return personalReviews.find((review) => review.ownerId === authUser?.id && review.movieId === movieId) || null;
+}
+
+function publishedReviewForDraft(review) {
+  return review ? publishedReviews.find((publication) => publication.reviewId === review.id) || null : null;
+}
+
+function renderReviewEditor(context, review, publication) {
+  const pending = Boolean(reviewPendingAction);
+  const publishLabel = publication ? "Update published review" : "Publish to Cine-Cord";
+  return `
+    <form class="personal-review-editor" data-personal-review-form>
+      <label for="personal-review-body"><span>Your review</span><textarea id="personal-review-body" name="body" rows="5" maxlength="1000" required placeholder="What did you think?" ${pending ? "disabled" : ""}>${escapeHTML(review?.body || "")}</textarea></label>
+      <div class="personal-review-options"><label class="spoiler-toggle"><input type="checkbox" name="contains_spoilers" ${review?.containsSpoilers ? "checked" : ""} ${pending ? "disabled" : ""} /><span>Contains spoilers</span></label><small><span data-review-character-count>${review?.body.length || 0}</span>/1,000</small></div>
+      <div class="personal-review-editor-actions">
+        <button class="secondary-button compact" type="submit" name="review_action" value="save" ${pending ? "disabled" : ""}>${reviewPendingAction === "save" ? "Saving…" : "Save privately"}</button>
+        <button class="primary-button compact" type="submit" name="review_action" value="publish" ${pending ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">public</span>${reviewPendingAction === "publish" ? "Publishing…" : publishLabel}</button>
+        <button class="quiet-button compact" type="button" data-cancel-review-editor ${pending ? "disabled" : ""}>Cancel</button>
+      </div>
+      <small class="personal-review-note">Publishing shares this text with approved Cine-Cord members. A rating is optional; if you have one, its current value is included in the published snapshot.</small>
+    </form>`;
+}
+
+function renderPersonalReview(context) {
+  if (!context.movie?.movieId) return "";
+  if (personalReviewsLoadError) {
+    return `<section class="personal-review" aria-labelledby="personal-review-title"><div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">rate_review</span><div><strong>Your review couldn’t load.</strong><p>Your other film details are still available.</p></div><button class="secondary-button compact" type="button" data-retry-reviews>Try again</button></div></section>`;
+  }
+
+  const review = personalReviewForMovie(context.movie.movieId);
+  const publication = publishedReviewForDraft(review);
+  const hasChanges = reviewHasUnpublishedChanges(review, publication, context.personal?.rating ?? null);
+  const pending = Boolean(reviewPendingAction);
+  if (reviewEditorOpen) return `<section class="personal-review is-editing" aria-labelledby="personal-review-title"><header class="personal-review-header"><div><span class="eyebrow">Private draft</span><h2 id="personal-review-title">${review ? "Edit your review" : "Write a review"}</h2></div></header>${renderReviewEditor(context, review, publication)}</section>`;
+
+  const status = publication ? (hasChanges ? "Unpublished changes" : "Published") : "Private";
+  return `
+    <section class="personal-review" aria-labelledby="personal-review-title">
+      <header class="personal-review-header"><div><span class="eyebrow">Your review</span><h2 id="personal-review-title">Review</h2></div><span class="review-visibility ${publication ? "is-published" : ""}">${escapeHTML(status)}</span></header>
+      ${review ? `<div class="personal-review-summary"><p>${escapeHTML(review.body)}</p>${review.containsSpoilers ? `<span class="spoiler-label"><span class="material-symbols-outlined" aria-hidden="true">visibility_off</span>Contains spoilers</span>` : ""}<div class="personal-review-actions"><button class="detail-text-action" type="button" data-edit-personal-review ${pending ? "disabled" : ""}>Edit</button>${!publication || hasChanges ? `<button class="detail-text-action" type="button" data-publish-personal-review ${pending ? "disabled" : ""}>${reviewPendingAction === "publish" ? "Publishing…" : publication ? "Update published review" : "Publish to Cine-Cord"}</button>` : ""}${publication ? `<button class="detail-text-action" type="button" data-unpublish-personal-review ${pending ? "disabled" : ""}>${reviewPendingAction === "unpublish" ? "Unpublishing…" : "Unpublish"}</button>` : ""}<button class="detail-text-action danger" type="button" data-delete-personal-review ${pending ? "disabled" : ""}>${reviewPendingAction === "delete" ? "Deleting…" : "Delete"}</button></div></div>` : `<div class="personal-review-empty"><p>Keep a private short review, then publish it to approved members when you choose.</p><button class="secondary-button compact" type="button" data-write-personal-review><span class="material-symbols-outlined" aria-hidden="true">edit</span>Write a review</button></div>`}
+      <span class="sr-only" role="status" aria-live="polite">${escapeHTML(reviewLiveMessage)}</span>
+    </section>`;
+}
+
+function renderPublishedReview(review) {
+  const author = members.find((member) => member.id === review.ownerId);
+  const authorName = author?.name || (review.ownerId === authUser?.id ? currentProfile?.displayName : null) || "Discordian";
+  const avatar = author?.avatar || avatarForName(authorName);
+  const reaction = reactionForValue(review.rating);
+  const reviewBody = review.containsSpoilers
+    ? `<details class="published-review-spoiler"><summary><span class="material-symbols-outlined" aria-hidden="true">visibility_off</span>Contains spoilers — reveal review</summary><p>${escapeHTML(review.body)}</p></details>`
+    : `<p class="published-review-body">${escapeHTML(review.body)}</p>`;
+  return `
+    <article class="published-review-card" data-published-review="${escapeHTML(review.reviewId)}">
+      <header><img src="${escapeHTML(avatar)}" alt="" /><div><strong>${escapeHTML(authorName)}${review.ownerId === authUser?.id ? " · You" : ""}</strong><small>Published ${escapeHTML(formatAddedDate(review.publishedAt))}</small></div>${reaction ? `<span class="published-review-rating">${reaction.value} — ${escapeHTML(reaction.label)}</span>` : `<span class="published-review-rating is-text-only">Text review</span>`}</header>
+      ${reviewBody}
+    </article>`;
+}
+
+function renderPublishedReviews(context) {
+  if (!context.movie?.movieId) return "";
+  if (publishedReviewsLoadError) {
+    return `<section class="member-reviews" aria-labelledby="member-reviews-title"><header class="member-reviews-header"><div><span class="eyebrow">Cine-Cord reviews</span><h2 id="member-reviews-title">Member reviews</h2></div></header><div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">reviews</span><div><strong>Published reviews couldn’t load.</strong><p>The rest of this film page is still available.</p></div><button class="secondary-button compact" type="button" data-retry-reviews>Try again</button></div></section>`;
+  }
+  const reviews = getPublishedReviewsForMovie(publishedReviews, context.movie.movieId);
+  return `
+    <section class="member-reviews" aria-labelledby="member-reviews-title">
+      <header class="member-reviews-header"><div><span class="eyebrow">Shared with approved members</span><h2 id="member-reviews-title">Member reviews</h2></div><small>${reviews.length} ${reviews.length === 1 ? "review" : "reviews"}</small></header>
+      ${reviews.length ? `<div class="published-review-list">${reviews.map(renderPublishedReview).join("")}</div>` : `<div class="member-reviews-empty"><span class="material-symbols-outlined" aria-hidden="true">reviews</span><div><strong>No published reviews yet.</strong><p>Private drafts stay private until their author chooses Publish to Cine-Cord.</p></div></div>`}
+    </section>`;
+}
+
 function renderPageHeader({ id, eyebrow, title, description = "", actions = "", className = "", titleClass = "page-title" }) {
   return `
     <header class="page-header layout-page-header ${className}">
@@ -2035,11 +2275,13 @@ function renderPersonalFilmsUnavailable({ compact = false } = {}) {
 function renderPrivateFilmPanel(context) {
   const { movie, personal } = context;
   const viewingHistory = renderViewingHistory(context);
+  const personalReview = renderPersonalReview(context);
   if (personalFilmsLoadError) {
     return `
       <section class="film-context-panel private-panel layout-container layout-container-private is-empty" aria-labelledby="private-panel-title">
         <header class="context-panel-header"><span id="private-panel-title"><i aria-hidden="true"></i>My Cinema · Temporarily unavailable</span><small>Cine-Cord remains available</small></header>
         ${renderPersonalFilmsUnavailable({ compact: true })}
+        ${personalReview}
         ${viewingHistory}
       </section>`;
   }
@@ -2053,6 +2295,7 @@ function renderPrivateFilmPanel(context) {
           <p>${movie.movieId ? "Not in your library yet. Adding or rating saves it privately." : "Match this film with TMDB before saving private state."}</p>
         </div>
         ${reactionEditorExpanded && movie.movieId ? renderReactionControl(movie, null) : ""}
+        ${personalReview}
         ${viewingHistory}
       </section>`;
   }
@@ -2069,6 +2312,7 @@ function renderPrivateFilmPanel(context) {
         <button class="favourite-switch ${personal.isFavourite ? "is-active" : ""}" type="button" role="switch" aria-checked="${personal.isFavourite}" data-toggle-favourite><span class="material-symbols-outlined" aria-hidden="true">favorite</span>Favourite <small>${personal.isFavourite ? "On" : "Off"}</small></button>
       </div>
       ${renderReactionControl(movie, personal)}
+      ${personalReview}
       ${viewingHistory}
     </section>`;
 }
@@ -2112,6 +2356,7 @@ function renderFilmDetails() {
   const detailMeta = [movie.year, movie.runtime ? `${movie.runtime} min` : null, ...movie.genres].filter(Boolean).join(" · ");
   const primaryPanel = origin === "my-films" ? renderPrivateFilmPanel(context) : renderSharedFilmPanel(context);
   const secondaryPanel = origin === "my-films" ? renderSharedFilmPanel(context) : renderPrivateFilmPanel(context);
+  const memberReviews = renderPublishedReviews(context);
   return `
     <section class="film-detail-view compact-film-detail ${origin === "my-films" ? "is-private-origin" : "is-shared-origin"}" aria-labelledby="film-detail-title" tabindex="-1">
       <nav class="film-back-row" aria-label="Film navigation"><button class="quiet-button film-detail-back" type="button" data-close-film-details><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to ${escapeHTML(backLabel)}</button></nav>
@@ -2130,6 +2375,7 @@ function renderFilmDetails() {
         <div class="film-primary-context">${primaryPanel}</div>
         <section class="film-synopsis" aria-labelledby="film-synopsis-title"><h2 id="film-synopsis-title">Synopsis</h2><p>${escapeHTML(movie.overview || "A synopsis is not available for this film yet.")}</p></section>
         <div class="film-secondary-context">${secondaryPanel}</div>
+        ${memberReviews}
         ${context.personal && !personalFilmsLoadError ? `<details class="film-more-actions"><summary>More options</summary><button class="detail-text-action" type="button" data-remove-personal-film>Remove from My Cinema</button></details>` : ""}
       </div>
     </section>`;
@@ -3209,6 +3455,27 @@ async function fetchPersonalViewingEvents() {
   );
 }
 
+async function fetchPersonalReviews() {
+  return settleOptionalQuery(
+    supabase
+      .from("personal_reviews")
+      .select(PERSONAL_REVIEW_SELECT)
+      .eq("owner_id", authUser.id)
+      .order("updated_at", { ascending: false }),
+    (rows) => rows.map(normalisePersonalReview),
+  );
+}
+
+async function fetchPublishedReviews() {
+  return settleOptionalQuery(
+    supabase
+      .from("published_reviews")
+      .select(PUBLISHED_REVIEW_SELECT)
+      .order("published_at", { ascending: false }),
+    (rows) => rows.map(normalisePublishedReview),
+  );
+}
+
 function applyPersonalFilmsResult(result) {
   personalFilms = result.data;
   personalFilmsLoadError = Boolean(result.error);
@@ -3219,6 +3486,18 @@ function applyPersonalViewingEventsResult(result) {
   personalViewingEvents = result.data;
   personalViewingEventsLoadError = Boolean(result.error);
   if (result.error) console.warn("Private viewing history could not be loaded.", result.error);
+}
+
+function applyPersonalReviewsResult(result) {
+  personalReviews = result.data;
+  personalReviewsLoadError = Boolean(result.error);
+  if (result.error) console.warn("Private reviews could not be loaded.", result.error);
+}
+
+function applyPublishedReviewsResult(result) {
+  publishedReviews = result.data;
+  publishedReviewsLoadError = Boolean(result.error);
+  if (result.error) console.warn("Published reviews could not be loaded.", result.error);
 }
 
 async function retryPersonalFilms() {
@@ -3248,6 +3527,18 @@ async function retryPersonalViewingEvents() {
   }
 }
 
+async function retryReviews() {
+  if (designPreviewMode) {
+    personalReviewsLoadError = false;
+    publishedReviewsLoadError = false;
+    return true;
+  }
+  const [privateResult, publishedResult] = await Promise.all([fetchPersonalReviews(), fetchPublishedReviews()]);
+  applyPersonalReviewsResult(privateResult);
+  applyPublishedReviewsResult(publishedResult);
+  return !privateResult.error && !publishedResult.error;
+}
+
 async function loadWorkspace(providerToken = null) {
   const { data: groups, error: groupError } = await supabase.from("groups").select("id,name,slug").eq("slug", "the-discordians").limit(1);
   if (groupError) throw groupError;
@@ -3262,6 +3553,13 @@ async function loadWorkspace(providerToken = null) {
   personalFilmsLoadError = false;
   personalViewingEvents = [];
   personalViewingEventsLoadError = false;
+  personalReviews = [];
+  publishedReviews = [];
+  personalReviewsLoadError = false;
+  publishedReviewsLoadError = false;
+  reviewEditorOpen = false;
+  reviewPendingAction = "";
+  reviewLiveMessage = "";
   viewingEventsRetrying = false;
   viewingEventEditorId = null;
   viewingEventPendingId = null;
@@ -3302,6 +3600,8 @@ async function loadWorkspace(providerToken = null) {
   }
   const personalFilmsPromise = fetchPersonalFilms();
   const personalViewingEventsPromise = fetchPersonalViewingEvents();
+  const personalReviewsPromise = fetchPersonalReviews();
+  const publishedReviewsPromise = fetchPublishedReviews();
   const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
@@ -3322,6 +3622,8 @@ async function loadWorkspace(providerToken = null) {
   if (firstError) throw firstError;
   applyPersonalFilmsResult(await personalFilmsPromise);
   applyPersonalViewingEventsResult(await personalViewingEventsPromise);
+  applyPersonalReviewsResult(await personalReviewsPromise);
+  applyPublishedReviewsResult(await publishedReviewsPromise);
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
   const discordIdentityMap = new Map((identitiesResult.data || []).map((identity) => [identity.profile_id, identity]));
@@ -3493,6 +3795,13 @@ async function syncSession(session) {
   personalFilmsLoadError = false;
   personalViewingEvents = [];
   personalViewingEventsLoadError = false;
+  personalReviews = [];
+  publishedReviews = [];
+  personalReviewsLoadError = false;
+  publishedReviewsLoadError = false;
+  reviewEditorOpen = false;
+  reviewPendingAction = "";
+  reviewLiveMessage = "";
   viewingEventsRetrying = false;
   viewingEventEditorId = null;
   viewingEventPendingId = null;
@@ -3580,6 +3889,37 @@ document.addEventListener("focusout", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const reviewEditor = event.target.closest("[data-personal-review-form]");
+  if (reviewEditor) {
+    event.preventDefault();
+    if (!reviewEditor.reportValidity()) return;
+    const context = selectedFilmContext();
+    if (!context?.movie?.movieId) return;
+    const existing = personalReviewForMovie(context.movie.movieId);
+    const form = new FormData(reviewEditor);
+    const action = event.submitter?.value === "publish" ? "publish" : "save";
+    reviewPendingAction = action;
+    render();
+    try {
+      const saved = await savePersonalReview(context.movie, existing, {
+        body: String(form.get("body") || ""),
+        containsSpoilers: form.get("contains_spoilers") === "on",
+      });
+      if (action === "publish") await publishPersonalReview(saved, context.movie);
+      reviewPendingAction = "";
+      reviewEditorOpen = false;
+      reviewLiveMessage = action === "publish" ? "Review published to approved Cine-Cord members." : "Private review saved.";
+      render();
+      window.requestAnimationFrame(() => document.querySelector("#personal-review-title")?.focus({ preventScroll: true }));
+      showToast(action === "publish" ? "Review published to Cine-Cord. A rating was included only if you have one." : "Review saved privately. Any published version was left unchanged.");
+    } catch (error) {
+      reviewPendingAction = "";
+      render();
+      showToast(`The review was not ${action === "publish" ? "published" : "saved"}: ${error.message}`);
+    }
+    return;
+  }
+
   const viewingEventEditor = event.target.closest("[data-viewing-event-form]");
   if (viewingEventEditor) {
     event.preventDefault();
@@ -4028,6 +4368,15 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const retryReviewsButton = event.target.closest("[data-retry-reviews]");
+  if (retryReviewsButton) {
+    retryReviewsButton.disabled = true;
+    const loaded = await retryReviews();
+    render();
+    showToast(loaded ? "Reviews loaded." : "Reviews are still unavailable. The rest of the film page is unchanged.");
+    return;
+  }
+
   const selectFilmButton = event.target.closest("[data-select-film]");
   if (selectFilmButton) {
     filmDetailReturnScrollY = window.scrollY;
@@ -4037,6 +4386,9 @@ document.addEventListener("click", async (event) => {
     viewingEventEditorId = null;
     viewingEventPendingId = null;
     viewingEventLiveMessage = "";
+    reviewEditorOpen = false;
+    reviewPendingAction = "";
+    reviewLiveMessage = "";
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
     window.requestAnimationFrame(() => document.querySelector(".film-detail-view")?.focus({ preventScroll: true }));
@@ -4050,6 +4402,9 @@ document.addEventListener("click", async (event) => {
     viewingEventEditorId = null;
     viewingEventPendingId = null;
     viewingEventLiveMessage = "";
+    reviewEditorOpen = false;
+    reviewPendingAction = "";
+    reviewLiveMessage = "";
     render();
     window.requestAnimationFrame(() => {
       window.scrollTo({ top: filmDetailReturnScrollY, behavior: "auto" });
@@ -4070,6 +4425,9 @@ document.addEventListener("click", async (event) => {
     viewingEventEditorId = null;
     viewingEventPendingId = null;
     viewingEventLiveMessage = "";
+    reviewEditorOpen = false;
+    reviewPendingAction = "";
+    reviewLiveMessage = "";
     window.history.replaceState(null, "", `#${destination}`);
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -4084,6 +4442,83 @@ document.addEventListener("click", async (event) => {
     render();
     window.requestAnimationFrame(() => document.querySelector("#viewing-history-title")?.focus({ preventScroll: true }));
     showToast(loaded ? "Viewing history loaded." : "Viewing history is still unavailable. Your other private film details are unchanged.");
+    return;
+  }
+
+  if (event.target.closest("[data-write-personal-review], [data-edit-personal-review]")) {
+    reviewEditorOpen = true;
+    reviewLiveMessage = "";
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#personal-review-body")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-review-editor]")) {
+    reviewEditorOpen = false;
+    reviewPendingAction = "";
+    render();
+    window.requestAnimationFrame(() => document.querySelector("#personal-review-title")?.focus({ preventScroll: true }));
+    return;
+  }
+
+  if (event.target.closest("[data-publish-personal-review]")) {
+    const context = selectedFilmContext();
+    const review = personalReviewForMovie(context?.movie?.movieId);
+    if (!context?.movie || !review) return;
+    reviewPendingAction = "publish";
+    render();
+    try {
+      await publishPersonalReview(review, context.movie);
+      reviewPendingAction = "";
+      reviewLiveMessage = "Review published to approved Cine-Cord members.";
+      render();
+      showToast("Review published to Cine-Cord. A rating was included only if you have one.");
+    } catch (error) {
+      reviewPendingAction = "";
+      render();
+      showToast(`The review was not published: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-unpublish-personal-review]")) {
+    const context = selectedFilmContext();
+    const review = personalReviewForMovie(context?.movie?.movieId);
+    if (!review) return;
+    reviewPendingAction = "unpublish";
+    render();
+    try {
+      await unpublishPersonalReview(review);
+      reviewPendingAction = "";
+      reviewLiveMessage = "Review unpublished. The private draft was kept.";
+      render();
+      showToast("Review unpublished. Your private draft was kept.");
+    } catch (error) {
+      reviewPendingAction = "";
+      render();
+      showToast(`The review was not unpublished: ${error.message}`);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-delete-personal-review]")) {
+    const context = selectedFilmContext();
+    const review = personalReviewForMovie(context?.movie?.movieId);
+    if (!review || !window.confirm("Delete this review? Its private draft and any published copy will be removed.")) return;
+    reviewPendingAction = "delete";
+    render();
+    try {
+      await deletePersonalReview(review);
+      reviewPendingAction = "";
+      reviewEditorOpen = false;
+      reviewLiveMessage = "Review deleted.";
+      render();
+      showToast("Review deleted. Any published copy was removed too.");
+    } catch (error) {
+      reviewPendingAction = "";
+      render();
+      showToast(`The review was not deleted: ${error.message}`);
+    }
     return;
   }
 
@@ -4617,6 +5052,10 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("input", (event) => {
   const form = event.target.closest("#discord-template-form");
   if (form) updateDiscordDraftPreview(form);
+  if (event.target.matches("#personal-review-body")) {
+    const counter = event.target.closest("[data-personal-review-form]")?.querySelector("[data-review-character-count]");
+    if (counter) counter.textContent = String(event.target.value.length);
+  }
 });
 
 document.addEventListener("change", async (event) => {

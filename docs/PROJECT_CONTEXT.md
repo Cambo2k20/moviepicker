@@ -22,10 +22,11 @@ authenticate successfully.
 ## Current implemented boundary
 
 This section describes the authoritative `main` checkout. The latest
-shipped-state verification on 13 September 2026 verified merge commit `4af2b0a`
-in the checkout, on `origin/main` and in the successful GitHub Pages deployment.
-That commit is audit evidence, not a permanent boundary: recheck the current
-branch, deployed frontend and hosted migration ledger before relying on it later.
+shipped-state reconciliation on 27 September 2026 verified merge commit
+`23b6d40` in the checkout, on `origin/main` and in the successful GitHub Pages
+deployment from run `34776009282`. That commit is audit evidence, not a
+permanent boundary: recheck the current branch, deployed frontend, Supabase
+project availability and hosted migration ledger before relying on it later.
 
 A build or commit does not by itself prove that matching migrations, Edge
 Functions or frontend assets have been deployed to production. The Pages
@@ -85,10 +86,15 @@ My Films currently supports:
 
 The Phase 2A My Films and compact film-detail experience passed responsive,
 interaction and production release validation and is deployed. The Phase 2B
-viewing-event backend and verified current-Journal synchronisation are also
-deployed. The viewing-history interface above is implemented in this checkout
-but is not production-shipped until its release gates pass. Private notes,
-reviews and personal lists are not implemented. Discover remains unavailable.
+viewing-event backend, verified current-Journal synchronisation and
+viewing-history interface are also deployed from merge commit `23b6d40`.
+Private notes are deliberately deferred. Reviews and personal lists are not
+deployed. The published-member-review database and film-detail implementation
+are present in this checkout and have passed the local authenticated database,
+unit, build and responsive browser gates. The hosted migration and production
+release gates have not run. Text-only reviews are valid; publishing includes a
+rating snapshot only when the member has one. Personal lists and Discover
+remain unavailable.
 
 ### Queue Roulette
 
@@ -209,11 +215,11 @@ Implemented persistence includes:
 - Explicit Discord publication records
 - Canonical movie records independent from shared or personal membership
 - Owner-only personal-film records with state, current reaction and Favourite
+- Owner-only viewing-event history with verified current-Journal links
 
 Not implemented:
 
-- Personal viewing-event history
-- Private notes and reviews
+- Private reviews and group-visible review publications in production
 - Personal lists and list ordering
 - Curated profile publications and group profile directory
 - Discover feedback or recommendation profiles
@@ -221,6 +227,8 @@ Not implemented:
 - Personal export and self-service account deletion
 - Live multiplayer presence
 - Final Wrapped, achievement or challenge persistence
+
+Private notes are deferred and are not part of the current release plan.
 
 ## Visual direction
 

@@ -161,6 +161,8 @@ function authAdminClient() {
 export function resetWorkspace() {
   runSql(`
     truncate table
+      public.published_reviews,
+      public.personal_reviews,
       public.personal_viewing_events,
       public.personal_films,
       public.journal_archive_entries,

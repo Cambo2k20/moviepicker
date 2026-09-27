@@ -14,10 +14,11 @@ Phase 2A is complete: its My Films experience and the compact film-detail
 revision with numbered ratings were integrated into `main`, passed the
 production release gates and were published on 13 September 2026. The numbered
 detail controls supersede the detailed reaction artwork on that page; compact
-reaction faces remain on My Films cards. Phase 2B is in progress: its secure
-viewing-event storage and current-Journal linking are deployed. The history UI
-and manual controls are implemented in code pending their frontend release
-gate; private notes and reviews remain unbuilt. Phases 2C–5 have not started.
+reaction faces remain on My Films cards. Phase 2B viewing history is shipped:
+secure viewing-event storage, current-Journal linking, the compact history UI
+and manual controls are deployed from merge commit `23b6d40`. Phase 2B is
+complete without private notes. Published member reviews are the approved next
+slice; personal lists and Phases 2D–5 have not started.
 
 ## Purpose and authority
 
@@ -116,11 +117,12 @@ Profiles directory.
 | Data or action | Default visibility | Shared effect |
 | --- | --- | --- |
 | Cine-Cord list, votes, sessions and Journal | Approved group | Already shared |
-| My Cinema state, rating, review, private note and lists | Owner only | None |
+| My Cinema state, rating, review and lists | Owner only | None |
 | Viewing events and personal viewing history | Owner only | None |
 | Discover answers, feedback and inferred taste | Owner only | None |
 | Top Four | Approved group after the member saves it to their profile | Profile only |
-| Featured list, rating or review | Approved group after explicit publication | Profile only |
+| Published rating or review | Approved group after explicit publication | Film detail and later profile |
+| Featured list | Approved group after explicit publication | Profile only |
 | Suggest for Cine-Cord | Explicit shared action | Uses shared-list rules |
 
 Application administrators may manage membership. They receive neither an
@@ -128,8 +130,8 @@ interface nor an application database policy granting access to another
 member's private My Cinema, viewing, list, note or Discover data. Administrator
 role never appears as an override in a private-table RLS predicate.
 
-Profile publication exposes only deliberately published records, never the
-underlying private library.
+An explicit publication exposes only the deliberately published snapshot,
+never the underlying private library.
 
 ## Decision register
 
@@ -163,7 +165,7 @@ the private personal marker.
 
 ### Decision 002 — Curated profiles and privacy
 
-Status: Approved direction
+Status: Amended approved direction, 27 September 2026
 
 Profiles are visible only to approved Cine-Cord members. There is no public
 profile mode.
@@ -189,6 +191,11 @@ An optional private note is a personal memory aid that can never be published.
 It is distinct from the optional review, which may be deliberately shared.
 
 Publishing profile content never adds a film to Cine-Cord.
+
+> Amended 2026-09-27 — Private notes are deferred and are no longer part of the
+> current release plan. A member may instead write an optional short review on
+> a film detail page and deliberately publish it to approved Cine-Cord members.
+> Publishing a review never adds the film to Cine-Cord.
 
 ### Decision 003 — Five-level enjoyment reaction
 
@@ -346,12 +353,16 @@ other.
 > viewing events and lists stay in their later phases with no roadmap filler
 > or empty editors on the current page.
 
+> Amended 2026-09-27 — Phase 2B completed without private notes. The next
+> proposed film-detail addition is a short review editor with an explicit
+> publish action for approved Cine-Cord members.
+
 Profile management is reached through View My Profile and Edit Profile rather
 than becoming a fourth private-data tab.
 
-### Decision 007 — Curated member profiles
+### Decision 007 — Published member reviews and curated profiles
 
-Status: Approved direction
+Status: Amended approved direction, 27 September 2026
 
 Profiles may contain verified identity, an optional introduction of at most
 160 characters, an ordered Top Four, published list snapshots, and individually published
@@ -370,6 +381,18 @@ Published ratings, reviews and Favourite markers are explicit snapshots. Later
 private edits show Unpublished changes until the member republishes. Clearing a
 rating, deleting a review or removing a Favourite immediately revokes the
 corresponding publication so deleted personal content cannot remain visible.
+
+> Amended 2026-09-27 — Published reviews do not need to wait for the full
+> profile release. An approved member may write or edit one short review per
+> film from the film detail page, keep it private, or deliberately publish it.
+> A rating is optional. Publishing copies the current rating into the
+> group-visible snapshot when one exists, while text-only reviews remain valid.
+> Clearing a rating removes that rating from the publication without removing
+> the review. Approved members may read published reviews on that film's detail
+> page. The author may unpublish or delete a review; either action immediately
+> removes the group-visible copy. The first release has spoiler marking but no
+> comments, replies, likes, reactions or public-internet view. Curated profiles
+> may later reuse the same published review snapshot.
 
 Edit Profile provides an exact preview and every item clearly says Private or
 Shown on profile.
@@ -478,13 +501,17 @@ Deferred from the first Discover release:
 
 ### Decision 009 — Personal data lifecycle
 
-Status: Approved direction
+Status: Amended approved direction, 27 September 2026
 
 | Category | Examples | Visibility |
 | --- | --- | --- |
 | Private personal | States, ratings, reviews, notes, lists, viewing events, history, Favourites and Discover feedback | Owner |
 | Curated profile | Top Four, featured lists, published reactions and reviews | Approved group |
 | Shared group | Cine-Cord list, votes, sessions, Journal and viewers | Group |
+
+> Amended 2026-09-27 — Private notes are deferred from the current release plan.
+> A deliberately published rating-and-review snapshot is approved-group content
+> on the film detail page before profiles exist; a later profile may reuse it.
 
 When a completed Cine-Cord session or Journal entry links a viewer through a
 real profile ID and resolves the film through a verified external or canonical
@@ -585,8 +612,8 @@ Shipped foundation:
 
 Still required in this phase:
 
-- Add private notes, reviews, lists, Discover feedback and explicit
-  profile-publication entities.
+- Add reviews, lists, Discover feedback, explicit review-publication entities
+  and later profile-publication entities.
 - Define the restricted removed-member, export, deletion and historical-
   identity foundations required by Decision 009.
 - Test several authenticated identities.
@@ -597,7 +624,7 @@ or function definitions.
 
 #### Phase 2 — My Cinema Core
 
-Status: In progress; Phase 2A complete and Phase 2B in progress
+Status: In progress; Phases 2A and 2B complete, Phase 2C implemented and validated locally while awaiting hosted migration and release gates
 
 This is the first user-facing release, delivered through smaller batches:
 
@@ -618,14 +645,12 @@ the compact face artwork on My Films cards. The revision passed responsive,
 interaction, database-parity and production deployment gates and is live from
 merge commit `4af2b0a`.
 
-##### Phase 2B — History and personal detail
+##### Phase 2B — Viewing history
 
-Status: In progress; foundation and current-Journal sync deployed, history UI
-pending release
+Status: Complete and deployed from merge commit `23b6d40`
 
 - Viewing-event history UI and manual event controls
 - Current stable-identity Cine-Cord history linking
-- Private note and optional review
 - Per-film personal-data removal and source-linked hiding
 
 The owner-private viewing-event migration passed authenticated database tests,
@@ -637,13 +662,36 @@ was deployed from merge commit `27d5d92`. It creates source-linked events only
 from verified current viewer and canonical movie identities; imported Discord
 archive names remain untouched.
 
-The current implementation adds the compact per-film history UI, repeated
-Finished and Did Not Finish rows, manual add/edit/delete controls, private
-hide/reveal for source-linked events and routing to the authorised Journal for
-source correction. It does not add notes, reviews, lists or archive matching,
-and is not live until its own validation and release gates pass.
+The compact per-film history UI, repeated Finished and Did Not Finish rows,
+manual add/edit/delete controls, private hide/reveal for source-linked events
+and routing to the authorised Journal for source correction passed release gates
+and is live from merge commit `23b6d40`, PR #44. It does not add reviews, lists
+or archive matching. Private notes are deferred and are not required to complete
+this phase.
 
-##### Phase 2C — Overview and lists
+##### Phase 2C — Published member reviews
+
+Status: Implementation and local validation complete; hosted migration and release pending
+
+- One optional short review per member and film, edited from film details
+- Private by default with a separate, explicit Publish to Cine-Cord action
+- Text-only publication is valid; a current rating is included when available
+- Published reviews readable only by approved Cine-Cord members on film details
+- Optional Contains spoilers marker, collapsed for other members until revealed
+- Edit, unpublish and delete controls for the author
+- Immediate publication removal when the review is unpublished or deleted or
+  the author's membership is removed
+- Clearing a rating removes only the published rating snapshot; the text review
+  remains visible
+- No comments, replies, likes, reactions or public-internet view
+
+The additive migration, owner and approved-member RLS, multi-member database
+tests and frontend validation are present and pass locally. Hosted migration,
+production acceptance and release remain separate gates. The later profile
+release may reuse the same publication; this slice does not require building
+profiles.
+
+##### Phase 2D — Overview and lists
 
 Status: Not started
 
@@ -701,15 +749,15 @@ Final table names may differ, but preserve these concepts:
 - **Movie:** canonical external identity and safe metadata independent of
   shared or personal membership.
 - **Personal film:** owner, current state, current rating, Favourite and private
-  review plus a non-publishable private note.
+  review.
 - **Viewing event:** owner, completion outcome of Finished or Did Not Finish,
   optional date and optional shared source. It never carries a rating; the
   single current rating belongs to the personal film.
 - **Personal list:** owner, title, description and deliberate order plus
   whether a separate publication currently exists.
 - **List item:** film membership and deliberate position.
-- **Profile publication:** an explicit snapshot of the exact Top Four, list,
-  reaction or review deliberately exposed.
+- **Publication:** an explicit snapshot of the exact rating, review, Top Four or
+  list deliberately exposed on film details or a profile.
 - **Discovery feedback:** private persistent signals such as Not Interested.
 - **Discovery session:** active-session-only mood and constraints that are not
   persisted.
@@ -752,6 +800,7 @@ Deferred:
 - Embedding-based recommendation
 - Automatic profile taste labels
 - Final challenge and achievement rules
+- Private notes
 
 Out of scope without a new decision:
 

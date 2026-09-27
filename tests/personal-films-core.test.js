@@ -5,11 +5,15 @@ import {
   applyPersonalFilmPatch,
   filmsShareIdentity,
   getVisiblePersonalFilms,
+  getPublishedReviewsForMovie,
   getViewingEventsForMovie,
   normalisePersonalFilm,
+  normalisePersonalReview,
+  normalisePublishedReview,
   normalisePersonalViewingEvent,
   personalStateLabel,
   reactionForValue,
+  reviewHasUnpublishedChanges,
   viewingOutcomeLabel,
 } from "../personal-films-core.js";
 
@@ -127,4 +131,40 @@ test("personal viewing events normalise and sort repeated history without mixing
   assert.equal(events[1].sourceJournalEntryId, "journal-entry");
   assert.equal(events[1].isHidden, true);
   assert.equal(viewingOutcomeLabel("DID_NOT_FINISH"), "Did Not Finish");
+});
+
+test("private review drafts stay distinct from published snapshots", () => {
+  const draft = normalisePersonalReview({
+    id: "review-1",
+    owner_id: "member-1",
+    movie_id: "movie-a",
+    body: "A private rewrite.",
+    contains_spoilers: true,
+  });
+  const publication = normalisePublishedReview({
+    review_id: "review-1",
+    owner_id: "member-1",
+    movie_id: "movie-a",
+    body: "The published version.",
+    contains_spoilers: false,
+    rating: null,
+    published_at: "2026-09-27T12:00:00Z",
+  });
+
+  assert.equal(draft.containsSpoilers, true);
+  assert.equal(publication.rating, null);
+  assert.equal(reviewHasUnpublishedChanges(draft, publication, null), true);
+  assert.equal(reviewHasUnpublishedChanges({ ...draft, body: publication.body, containsSpoilers: false }, publication, null), false);
+});
+
+test("published reviews sort by publication time and accept text without a rating", () => {
+  const reviews = [
+    normalisePublishedReview({ review_id: "older", movie_id: "movie-a", body: "Older", rating: null, published_at: "2026-09-20T12:00:00Z" }),
+    normalisePublishedReview({ review_id: "newer", movie_id: "movie-a", body: "Newer", rating: 4, published_at: "2026-09-27T12:00:00Z" }),
+    normalisePublishedReview({ review_id: "other", movie_id: "movie-b", body: "Other", rating: null, published_at: "2026-09-28T12:00:00Z" }),
+  ];
+
+  assert.deepEqual(getPublishedReviewsForMovie(reviews, "movie-a").map(({ reviewId }) => reviewId), ["newer", "older"]);
+  assert.equal(reviews[0].rating, null);
+  assert.equal(reviewHasUnpublishedChanges({ body: "Older", containsSpoilers: false }, reviews[0], 5), true);
 });

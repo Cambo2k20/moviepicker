@@ -8465,7 +8465,7 @@ textarea,
 .film-detail-composition {
   display: grid;
   grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-  grid-template-areas: "poster title" "poster primary" "poster synopsis" "poster secondary" ". more";
+  grid-template-areas: "poster title" "poster primary" "poster synopsis" "poster secondary" "poster reviews" ". more";
   align-items: start;
   gap: 22px 32px;
 }
@@ -8473,6 +8473,7 @@ textarea,
 .film-artwork { grid-area: poster; min-width: 0; }
 .film-primary-context { grid-area: primary; min-width: 0; }
 .film-secondary-context { grid-area: secondary; min-width: 0; }
+.member-reviews { grid-area: reviews; min-width: 0; }
 
 .film-artwork .detail-poster {
   width: 100%;
@@ -8615,7 +8616,7 @@ textarea,
   .film-back-row { margin-bottom: 16px; padding-top: 8px; }
   .film-detail-composition {
     grid-template-columns: 180px minmax(0, 1fr);
-    grid-template-areas: "poster title" "primary primary" "synopsis synopsis" "secondary secondary" "more more";
+    grid-template-areas: "poster title" "primary primary" "synopsis synopsis" "secondary secondary" "reviews reviews" "more more";
     gap: 20px;
   }
   .compact-film-detail .film-detail-page-header { align-self: center; }
@@ -8634,6 +8635,275 @@ textarea,
   .film-rating-heading .detail-text-action { min-height: 36px; }
   .film-rating-label { flex-basis: 100%; }
   .compact-film-detail .shared-compact-row p { flex-basis: auto; }
+}
+
+/* Private drafts and explicit group-visible review snapshots stay visually distinct. */
+.personal-review {
+  margin-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  background: #111319;
+}
+
+.personal-review-header,
+.member-reviews-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px 12px;
+}
+
+.personal-review-header > div,
+.member-reviews-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.personal-review-header .eyebrow,
+.member-reviews-header .eyebrow {
+  color: var(--purple-light);
+  font-size: 9px;
+}
+
+.personal-review-header h2,
+.member-reviews-header h2 {
+  margin: 0;
+  color: var(--text);
+  font: 500 20px "Space Grotesk", system-ui, sans-serif;
+}
+
+.review-visibility,
+.published-review-rating,
+.spoiler-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font: 600 9px ui-monospace, monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.review-visibility.is-published {
+  border-color: var(--purple);
+  color: var(--purple-light);
+}
+
+.personal-review-summary,
+.personal-review-empty {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.personal-review-summary > p,
+.personal-review-empty > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.spoiler-label {
+  width: fit-content;
+  gap: 6px;
+  border-color: #555b68;
+}
+
+.spoiler-label .material-symbols-outlined { font-size: 15px; }
+
+.personal-review-actions,
+.personal-review-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.personal-review-actions .detail-text-action {
+  min-height: 36px;
+  padding-inline: 0;
+  font-size: 11px;
+}
+
+.personal-review-actions .danger { color: #d7a2a8; }
+
+.personal-review-editor {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.personal-review-editor > label {
+  display: grid;
+  gap: 6px;
+  color: var(--dim);
+  font: 500 10px ui-monospace, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.personal-review-editor textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.6;
+  text-transform: none;
+}
+
+.personal-review-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.spoiler-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.spoiler-toggle input { width: 18px; height: 18px; accent-color: var(--purple); }
+.personal-review-note { color: var(--dim); font-size: 10px; line-height: 1.5; }
+
+.member-reviews {
+  border: 1px solid var(--border);
+  background: #101116;
+}
+
+.member-reviews-header {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.member-reviews-header > small {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.published-review-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border-soft);
+}
+
+.published-review-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  background: #15171d;
+}
+
+.published-review-card > header {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.published-review-card > header > img {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.published-review-card > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.published-review-card > header strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.published-review-card > header small {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.published-review-rating {
+  border-color: var(--purple);
+  color: var(--purple-light);
+  white-space: nowrap;
+}
+
+.published-review-rating.is-text-only { border-color: var(--border); color: var(--dim); }
+
+.published-review-body,
+.published-review-spoiler p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.published-review-spoiler {
+  border-top: 1px solid var(--border-soft);
+}
+
+.published-review-spoiler summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--purple-light);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.published-review-spoiler summary .material-symbols-outlined { font-size: 17px; }
+.published-review-spoiler p { padding-top: 8px; }
+
+.member-reviews-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px;
+  color: var(--muted);
+}
+
+.member-reviews-empty > .material-symbols-outlined { color: var(--purple-light); }
+.member-reviews-empty strong,
+.member-reviews-empty p { margin: 0; }
+.member-reviews-empty p { margin-top: 3px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 1100px) {
+  .published-review-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 560px) {
+  .personal-review-header,
+  .member-reviews-header,
+  .personal-review-summary,
+  .personal-review-empty,
+  .personal-review-editor,
+  .published-review-card,
+  .member-reviews-empty { padding-inline: 12px; }
+
+  .personal-review-header,
+  .member-reviews-header { align-items: flex-start; }
+  .published-review-card > header { grid-template-columns: 36px minmax(0, 1fr); }
+  .published-review-rating { grid-column: 2; width: fit-content; }
+  .personal-review-editor-actions .primary-button,
+  .personal-review-editor-actions .secondary-button { flex: 1 1 180px; }
 }
 
 /* Private viewing history stays compact inside the existing film-detail page. */

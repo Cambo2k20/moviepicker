@@ -459,6 +459,70 @@ test("private viewing history stays compact and separates repeated events from f
   await expect(page.locator(".viewing-history")).toContainText("Add a Finished or Did Not Finish viewing");
 });
 
+test("published member reviews stay readable and in bounds at every breakpoint", async ({ page }) => {
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Pulp Fiction" }).click();
+
+  const reviews = page.locator(".member-reviews");
+  await expect(reviews.getByRole("heading", { name: "Member reviews" })).toBeVisible();
+  await expect(reviews.locator(".published-review-card")).toHaveCount(2);
+  await expect(reviews).toContainText("4 — Really liked it");
+  await expect(reviews).toContainText("Text review");
+  await expect(reviews.getByText("The structure still feels daring", { exact: false })).toBeHidden();
+  await reviews.locator(".published-review-spoiler summary").click();
+  await expect(reviews.getByText("The structure still feels daring", { exact: false })).toBeVisible();
+
+  const geometry = await reviews.evaluate((element) => ({
+    overflow: element.scrollWidth - element.clientWidth,
+    documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+  }));
+  expect(geometry.overflow).toBeLessThanOrEqual(1);
+  expect(geometry.documentOverflow).toBeLessThanOrEqual(1);
+});
+
+test("a text-only review can be saved, published, updated, unpublished and deleted", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The complete review mutation contract is covered once.");
+
+  await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
+  await page.getByRole("button", { name: "View details for Alien" }).click();
+  await page.getByRole("button", { name: "Write a review" }).click();
+  const editor = page.locator("[data-personal-review-form]");
+  await editor.getByLabel("Your review").fill("A perfect machine wrapped in a haunted-house film.");
+  await editor.getByLabel("Contains spoilers").check();
+  await editor.getByRole("button", { name: "Publish to Cine-Cord" }).click();
+
+  const privateReview = page.locator(".personal-review");
+  const published = page.locator(".member-reviews");
+  await expect(privateReview.locator(".review-visibility")).toHaveText("Published");
+  await expect(published.locator(".published-review-card")).toHaveCount(1);
+  await expect(published).toContainText("Text review");
+  await expect(published).not.toContainText("Choose a rating");
+
+  await privateReview.getByRole("button", { name: "Edit" }).click();
+  await privateReview.getByRole("textbox", { name: "Your review" }).fill("A patient, frightening haunted-house film in space.");
+  await page.getByRole("button", { name: "Save privately" }).click();
+  await expect(privateReview.locator(".review-visibility")).toHaveText("Unpublished changes");
+  await published.locator(".published-review-spoiler summary").click();
+  await expect(published).toContainText("A perfect machine wrapped in a haunted-house film.");
+  await expect(published).not.toContainText("A patient, frightening haunted-house film in space.");
+
+  await privateReview.getByRole("button", { name: "Update published review" }).click();
+  await expect(privateReview.locator(".review-visibility")).toHaveText("Published");
+  await published.locator(".published-review-spoiler summary").click();
+  await expect(published).toContainText("A patient, frightening haunted-house film in space.");
+
+  await privateReview.getByRole("button", { name: "Unpublish" }).click();
+  await expect(published.locator(".published-review-card")).toHaveCount(0);
+  await expect(privateReview.locator(".review-visibility")).toHaveText("Private");
+
+  await privateReview.getByRole("button", { name: "Publish to Cine-Cord" }).click();
+  await expect(published.locator(".published-review-card")).toHaveCount(1);
+  page.once("dialog", (dialog) => dialog.accept());
+  await privateReview.getByRole("button", { name: "Delete" }).click();
+  await expect(published.locator(".published-review-card")).toHaveCount(0);
+  await expect(privateReview.getByRole("button", { name: "Write a review" })).toBeVisible();
+});
+
 test("manual viewing events can be added, corrected and deleted without changing the film record", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "The complete viewing-event mutation contract is covered once.");
 
