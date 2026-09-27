@@ -73,7 +73,7 @@ test("set up current Journal and immutable archive fixtures", async () => {
   `).value;
 });
 
-test("a verified current viewer and canonical movie create one private source event", () => {
+test("a verified current viewer and canonical movie create one private source event", async () => {
   runSql(`
     insert into public.journal_entries (
       group_id, title, release_year, watched_at, status, created_by, movie_id
@@ -103,7 +103,27 @@ test("a verified current viewer and canonical movie create one private source ev
     source_journal_entry_id: sourceEntryId,
     is_hidden: false,
   });
-  assert.equal(sqlRow("select count(*)::integer as count from public.personal_films").count, 0);
+  assert.deepEqual(sqlRow(`
+    select owner_id, movie_id, state, rating, is_favourite
+    from public.personal_films
+    where owner_id = '${owner.id}' and movie_id = '${alien.id}'
+  `), {
+    owner_id: owner.id,
+    movie_id: alien.id,
+    state: "WATCHED",
+    rating: null,
+    is_favourite: false,
+  });
+
+  const { data: personalFilm, error: personalFilmError } = await owner.client
+    .from("personal_films")
+    .update({ rating: 5, is_favourite: true })
+    .eq("owner_id", owner.id)
+    .eq("movie_id", alien.id)
+    .select("rating,is_favourite")
+    .single();
+  assert.equal(personalFilmError, null);
+  assert.deepEqual(personalFilm, { rating: 5, is_favourite: true });
 });
 
 test("Journal edits update source facts after viewer replacement without losing a private hidden choice", async () => {
@@ -154,6 +174,28 @@ test("Journal edits update source facts after viewer replacement without losing 
       watched_on: "2026-09-06",
       source_journal_entry_id: sourceEntryId,
       is_hidden: false,
+    },
+  ].sort((left, right) => left.owner_id.localeCompare(right.owner_id)));
+
+  assert.deepEqual(sqlRows(`
+    select owner_id, movie_id, state, rating, is_favourite
+    from public.personal_films
+    where movie_id = '${alien.id}'
+    order by owner_id
+  `), [
+    {
+      owner_id: owner.id,
+      movie_id: alien.id,
+      state: "DID_NOT_FINISH",
+      rating: 5,
+      is_favourite: true,
+    },
+    {
+      owner_id: otherMember.id,
+      movie_id: alien.id,
+      state: "DID_NOT_FINISH",
+      rating: null,
+      is_favourite: false,
     },
   ].sort((left, right) => left.owner_id.localeCompare(right.owner_id)));
 
@@ -258,6 +300,17 @@ test("viewer removal deletes only that viewer's derived event", async () => {
     from public.personal_viewing_events
     where source_journal_entry_id = '${sourceEntryId}' and owner_id = '${otherMember.id}'
   `).count, 1);
+  assert.deepEqual(sqlRow(`
+    select owner_id, movie_id, state, rating, is_favourite
+    from public.personal_films
+    where owner_id = '${otherMember.id}' and movie_id = '${alien.id}'
+  `), {
+    owner_id: otherMember.id,
+    movie_id: alien.id,
+    state: "DID_NOT_FINISH",
+    rating: null,
+    is_favourite: false,
+  });
   assert.equal(sqlRow(`select count(*)::integer as count from public.journal_entries where id = '${sourceEntryId}'`).count, 1);
 });
 
@@ -295,7 +348,15 @@ test("explicit backfill uses current tables only and leaves every imported Disco
     where id = '${archiveEntryId}'
   `).value, archiveSnapshot);
   assert.equal(sqlRow("select count(*)::integer as count from public.journal_archive_entries").count, 1);
-  assert.equal(sqlRow("select count(*)::integer as count from public.personal_films").count, 0);
+  assert.deepEqual(sqlRow(`
+    select owner_id, movie_id, state
+    from public.personal_films
+    where owner_id = '${owner.id}' and movie_id = '${alien.id}'
+  `), {
+    owner_id: owner.id,
+    movie_id: alien.id,
+    state: "WATCHED",
+  });
 });
 
 test("the deferred trigger and private synchronisers are not browser-callable", () => {
