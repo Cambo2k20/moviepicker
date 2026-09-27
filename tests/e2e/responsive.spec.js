@@ -1222,7 +1222,8 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await expect(savedCard.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
 
   // Deleting the entry leaves the watch history intact and returns the session
-  // to the outstanding Sessions inbox with a clean Journal form.
+  // to the outstanding Sessions inbox with a clean Journal form. The host can
+  // then remove the now-unlinked session from its edit view.
   await savedCard.getByRole("button", { name: "Edit" }).click();
   await savedCard.getByRole("button", { name: "Delete entry" }).click();
   await page.getByRole("dialog", { name: "Delete Journal entry?" }).getByRole("button", { name: "Delete entry and Discord post" }).click();
@@ -1231,6 +1232,11 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   const restoredSession = page.locator(".session-history-row", { hasText: winnerTitle });
   await expect(restoredSession).toBeVisible();
   await expect(restoredSession.getByRole("button", { name: "Write Journal post" })).toBeVisible();
+  await restoredSession.getByRole("button", { name: "Edit session" }).click();
+  await expect(page.getByRole("button", { name: "Delete session" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete session" }).click();
+  await expect(page.locator(".session-history-row", { hasText: winnerTitle })).toHaveCount(0);
 
   const overflowState = await page.evaluate(() => ({
     pageOverflow: document.documentElement.scrollWidth - window.innerWidth,

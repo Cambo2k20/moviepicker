@@ -803,6 +803,9 @@ function renderSessionSummary(session, { editorMode = null } = {}) {
           <div class="session-summary-actions">
             <button class="primary-button" type="submit"><span class="material-symbols-outlined" aria-hidden="true">${markingWatched ? "check_circle" : "save"}</span>${markingWatched ? "Confirm and mark watched" : "Save session details"}</button>
             <button class="secondary-button" type="button" data-cancel-session-edit>Cancel</button>
+            ${!markingWatched ? (session.journalEntry
+              ? `<small class="session-delete-note">Delete the linked Journal entry before deleting this session.</small>`
+              : `<button class="secondary-button compact danger-button" type="button" data-delete-session="${escapeHTML(session.id)}"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Delete session</button>`) : ""}
           </div>
         </form>
       </section>`;
@@ -2913,7 +2916,7 @@ function renderMembers() {
       <article class="invite-panel layout-container layout-container-neutral"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
       <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row layout-container layout-container-neutral"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="secondary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="quiet-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
       <section class="management-section" aria-labelledby="discord-hub-title"><div class="section-heading"><div><span class="eyebrow">Discord integration</span><h2 id="discord-hub-title">Cine-Cord hub</h2></div></div><article class="invite-panel layout-container layout-container-neutral"><div><h3>Keep the server entrance in one place.</h3><p>Publish or update one Discord message with buttons for Cine-Cord, Sessions, Journal and My Cinema. This never exposes private member data.</p></div><button class="primary-button compact" type="button" data-publish-cine-cord-hub><span class="material-symbols-outlined" aria-hidden="true">send</span>Publish or update hub</button></article></section>
-      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
+      <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>${String(member.name).trim().toLowerCase() === "cameron_brown00" ? `<button class="quiet-button danger" type="button" data-reassign-remove-member="${member.id}">Move shared films here and remove</button>` : ""}` : ""}</div></form>`).join("")}</div></section>
     </section>`;
 }
 
@@ -3290,6 +3293,23 @@ async function saveSessionDetails(session, { sessionDate, hostId, participantIds
     };
   }
   persistDesignPreviewWorkspace();
+}
+
+async function deleteMovieSession(session) {
+  if (!session || !canManageSession(session)) throw new Error("Only the session host or an administrator can delete this session.");
+  if (session.journalEntry) throw new Error("Delete the linked Journal entry before deleting this session.");
+  if (designPreviewMode) {
+    sessionHistory = sessionHistory.filter((candidate) => candidate.id !== session.id);
+    if (activeSession?.id === session.id) activeSession = null;
+    sessionDetailsEditing = null;
+    persistDesignPreviewWorkspace();
+    return;
+  }
+  const { error } = await supabase.rpc("delete_movie_session", { p_session_id: session.id });
+  if (error) throw error;
+  await loadWorkspace();
+  sessionDetailsEditing = null;
+  journalSessionId = null;
 }
 
 async function markSessionWatched(session, { sessionDate, hostId, participantIds }) {
@@ -4369,6 +4389,19 @@ document.addEventListener("click", async (event) => {
     if (error) { removeButton.disabled = false; showToast(`Member was not removed: ${error.message}`); return; }
     await loadWorkspace(); render(); showToast(`${member.name}'s website access was removed.`); return;
   }
+  const reassignRemoveButton = event.target.closest("[data-reassign-remove-member]");
+  if (reassignRemoveButton) {
+    const member = members.find((candidate) => candidate.id === reassignRemoveButton.dataset.reassignRemoveMember);
+    if (!member || member.id === authUser?.id) return;
+    if (!window.confirm(`Move every shared Cine-Cord film currently attributed to ${member.name} to your account, then remove their Cine-Cord access? Their private data will not be deleted.`)) return;
+    reassignRemoveButton.disabled = true;
+    const { data, error } = await supabase.rpc("reassign_shared_films_and_remove_member", { p_group_id: activeGroup.id, p_old_user_id: member.id });
+    if (error) { reassignRemoveButton.disabled = false; showToast(`The legacy account was not repaired: ${error.message}`); return; }
+    await loadWorkspace();
+    render();
+    showToast(`${Number(data) || 0} shared film${Number(data) === 1 ? "" : "s"} moved. ${member.name}'s Cine-Cord access was removed.`);
+    return;
+  }
 
   const retryPersonalFilmsButton = event.target.closest("[data-retry-personal-films]");
   if (retryPersonalFilmsButton) {
@@ -5018,6 +5051,23 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-cancel-session-edit]")) {
     sessionDetailsEditing = null;
     render();
+    return;
+  }
+  const deleteSessionButton = event.target.closest("[data-delete-session]");
+  if (deleteSessionButton) {
+    const session = sessionForId(deleteSessionButton.dataset.deleteSession);
+    if (!session || session.journalEntry || !canManageSession(session)) return;
+    const filmTitle = session.selectedFilm?.title || "this movie session";
+    if (!window.confirm(`Delete the ${filmTitle} session? This removes the session and its derived private viewing events. This cannot be undone.`)) return;
+    deleteSessionButton.disabled = true;
+    try {
+      await deleteMovieSession(session);
+      render();
+      showToast("Movie session deleted.");
+    } catch (error) {
+      deleteSessionButton.disabled = false;
+      showToast(`The movie session was not deleted: ${error.message}`);
+    }
     return;
   }
   const reviewWatchedButton = event.target.closest("[data-review-session-watched]");
