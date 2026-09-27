@@ -1037,8 +1037,20 @@ async function saveJournalEntry(session, draft) {
   return discordDraft;
 }
 
-function moveSavedSessionToJournal(session) {
+async function refreshPersonalCinema({ rerender = false } = {}) {
+  if (designPreviewMode || !authUser || !activeGroup) return;
+  const [personalFilmsResult, personalViewingEventsResult] = await Promise.all([
+    fetchPersonalFilms(),
+    fetchPersonalViewingEvents(),
+  ]);
+  applyPersonalFilmsResult(personalFilmsResult);
+  applyPersonalViewingEventsResult(personalViewingEventsResult);
+  if (rerender && currentView === "my-films") render();
+}
+
+async function moveSavedSessionToJournal(session) {
   if (!session?.journalEntry?.id) return;
+  await refreshPersonalCinema();
   journalSessionId = null;
   discordDraft = null;
   journalDetailsOpen = false;
@@ -3040,6 +3052,7 @@ function navigate(view) {
   if (currentView !== "journal") journalFocusedEntryId = null;
   window.location.hash = currentView;
   render();
+  if (currentView === "my-films") refreshPersonalCinema({ rerender: true }).catch(() => {});
   root.focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3840,6 +3853,7 @@ window.addEventListener("beforeunload", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && discordDraft) flushJournalDraftSave().catch(() => {});
+  if (document.visibilityState === "visible") refreshPersonalCinema({ rerender: currentView === "my-films" }).catch(() => {});
 });
 
 document.addEventListener("focusout", (event) => {
@@ -4039,7 +4053,7 @@ document.addEventListener("submit", async (event) => {
       showToast(copied
         ? `Journal entry #${savedDraft.entryNumber} saved and copied. Nothing was posted automatically.`
         : `Journal entry #${savedDraft.entryNumber} was saved. Automatic copy was blocked; use Copy for Discord from the saved entry.`);
-      moveSavedSessionToJournal(session);
+      await moveSavedSessionToJournal(session);
     } catch (error) {
       showToast(`The Journal entry was not saved: ${error.message}`);
     } finally {
@@ -4931,7 +4945,7 @@ document.addEventListener("click", async (event) => {
     } finally {
       journalPublishPendingId = null;
       journalSyncPendingId = null;
-      if (journalSaved) moveSavedSessionToJournal(session);
+      if (journalSaved) await moveSavedSessionToJournal(session);
       else {
         persistDesignPreviewWorkspace();
         render();
