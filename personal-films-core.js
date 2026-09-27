@@ -64,6 +64,31 @@ export function normalisePersonalViewingEvent(row) {
   };
 }
 
+export function normalisePersonalReview(row) {
+  return {
+    id: row.id,
+    ownerId: row.owner_id || row.ownerId || null,
+    movieId: row.movie_id || row.movieId || null,
+    body: String(row.body || ""),
+    containsSpoilers: Boolean(row.contains_spoilers ?? row.containsSpoilers),
+    createdAt: row.created_at || row.createdAt || null,
+    updatedAt: row.updated_at || row.updatedAt || null,
+  };
+}
+
+export function normalisePublishedReview(row) {
+  return {
+    reviewId: row.review_id || row.reviewId || null,
+    ownerId: row.owner_id || row.ownerId || null,
+    movieId: row.movie_id || row.movieId || null,
+    body: String(row.body || ""),
+    containsSpoilers: Boolean(row.contains_spoilers ?? row.containsSpoilers),
+    rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
+    publishedAt: row.published_at || row.publishedAt || null,
+    updatedAt: row.updated_at || row.updatedAt || null,
+  };
+}
+
 export function filmsShareIdentity(left, right) {
   if (!left || !right) return false;
   if (left.movieId && right.movieId) return left.movieId === right.movieId;
@@ -103,6 +128,21 @@ export function getViewingEventsForMovie(events, movieId) {
       if (dateOrder) return dateOrder;
       return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
     });
+}
+
+export function getPublishedReviewsForMovie(reviews, movieId) {
+  if (!movieId) return [];
+  return reviews
+    .filter((review) => review.movieId === movieId)
+    .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+}
+
+export function reviewHasUnpublishedChanges(review, publication, currentRating = null) {
+  if (!review || !publication) return false;
+  const rating = currentRating === null || currentRating === undefined ? null : Number(currentRating);
+  return review.body.trim() !== publication.body.trim()
+    || review.containsSpoilers !== publication.containsSpoilers
+    || rating !== publication.rating;
 }
 
 export function applyPersonalFilmPatch(existing, movie, patch, { id, ownerId, now = new Date().toISOString() } = {}) {
