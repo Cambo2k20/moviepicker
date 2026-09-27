@@ -178,6 +178,7 @@ let reactionLiveMessage = "";
 let rouletteState = null;
 let rouletteSpinTimer = null;
 let rouletteSpinToken = 0;
+let pendingPartyFilmId = null;
 let filmEditingId = null;
 let filmModalPurpose = "shared";
 let pendingFilmDraft = null;
@@ -644,6 +645,14 @@ function serialiseRouletteState() {
 function selectedFilmForSession(session) {
   if (!session) return null;
   return movieList.find((item) => item.id === session.selectedFilmId) || session.selectedFilm || null;
+}
+
+function isDirectWatchSession(session = activeSession) {
+  return session?.gameState?.selectionMode === "direct";
+}
+
+function sessionModeLabel(session) {
+  return isDirectWatchSession(session) ? "Direct watch" : session?.mode || "Watch session";
 }
 
 function createDiscordDraft(session, film) {
@@ -2061,14 +2070,18 @@ function renderFilmCard(item) {
   const selected = item.id === selectedFilmId;
   return `
     <article class="poster-card ${item.watched ? "is-watched" : ""} ${selected ? "is-selected" : ""}">
-      <button class="poster-card-open" type="button" data-select-film="${item.id}" aria-label="View details for ${escapeHTML(item.title)}" aria-pressed="${selected}">
-        <span class="poster-frame ${item.posterUrl ? "" : "is-placeholder"}">
+      <span class="poster-frame ${item.posterUrl ? "" : "is-placeholder"}">
+        <button class="poster-card-open" type="button" data-select-film="${item.id}" aria-label="View details for ${escapeHTML(item.title)}" aria-pressed="${selected}">
           <img src="${escapeHTML(filmPoster(item))}" alt="${item.posterUrl ? `${escapeHTML(item.title)} poster` : "Abstract Cine-Cord poster placeholder"}" loading="lazy" />
           ${item.posterUrl ? "" : `<span class="poster-pending"><span class="material-symbols-outlined" aria-hidden="true">movie</span> Artwork pending</span>`}
           <span class="status-pill ${item.watched ? "watched" : "ready"}">${escapeHTML(watchHistoryLabel(item))}</span>
+        </button>
+        <span class="poster-card-actions" aria-label="Actions for ${escapeHTML(item.title)}">
+          <button class="poster-action poster-action-watch" type="button" data-watch-now="${item.id}"><span class="material-symbols-outlined" aria-hidden="true">play_arrow</span>Watch now</button>
+          <button class="poster-action poster-action-details" type="button" data-select-film="${item.id}"><span class="material-symbols-outlined" aria-hidden="true">info</span>Film details</button>
         </span>
-        <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
-      </button>
+      </span>
+      <span class="poster-copy"><span class="poster-title-line"><strong>${escapeHTML(item.title)}</strong>${item.year ? `<span>${item.year}</span>` : ""}</span><span class="poster-metadata">${escapeHTML(metadataLine(item))}</span></span>
       <footer class="poster-card-footer">
         <span class="poster-suggester"><img src="${escapeHTML(avatarForFilm(item))}" alt="" /><span>Added by <strong>${escapeHTML(item.suggestedBy)}</strong></span></span>
         <button class="poster-vote ${item.votedByMe ? "is-voted" : ""}" type="button" data-vote="${item.id}" ${item.watched ? "disabled" : ""} aria-label="${item.votedByMe ? "Remove vote from" : "Vote for"} ${escapeHTML(item.title)}"><span class="material-symbols-outlined" aria-hidden="true">keyboard_arrow_up</span><strong>${item.votes}</strong></button>
@@ -2659,7 +2672,7 @@ function renderQueueRoulette() {
 }
 
 function renderPick() {
-  if (activeSession?.mode === "Queue Roulette" && rouletteState) return renderQueueRoulette();
+  if (activeSession?.mode === "Queue Roulette" && rouletteState && !isDirectWatchSession()) return renderQueueRoulette();
   const candidateCount = movieList.filter((item) => !item.watched).length;
   return `
     <section class="page-view" aria-labelledby="pick-title">
@@ -2689,7 +2702,7 @@ function renderSessions() {
         eyebrow: "Cine-Cord · Movie-night records",
         title: "Sessions",
         description: "Record the film and viewers, then hand the finished entry to The Journal.",
-        actions: activeSession?.mode === "Queue Roulette"
+        actions: activeSession?.mode === "Queue Roulette" && !isDirectWatchSession(activeSession)
           ? `<button class="primary-button" type="button" data-continue-roulette>Open current session</button>`
           : activeSession
             ? ""
@@ -2700,13 +2713,13 @@ function renderSessions() {
           ${rouletteWinner ? `<img class="session-film-poster" src="${escapeHTML(filmPoster(rouletteWinner))}" alt="${escapeHTML(rouletteWinner.title)} poster" />` : ""}
           <div class="active-session-head">
             <div>
-              <span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Roulette in progress")} &middot; ${escapeHTML(activeSession.mode)} &middot; Hosted by ${escapeHTML(activeSession.hostName)}</span>
+              <span class="eyebrow">${escapeHTML(activeSession.status === "CONFIRMED" ? "Confirmed" : "Session in progress")} &middot; ${escapeHTML(sessionModeLabel(activeSession))} &middot; Hosted by ${escapeHTML(activeSession.hostName)}</span>
               <h3>${activeSession.mode === "Queue Roulette" ? (rouletteWinner ? `${escapeHTML(rouletteWinner.title)} is confirmed ${escapeHTML(sessionDateLabel(activeSession.sessionDate || isoDateOnly(activeSession.startedAt)))}.` : "The wheel is ready when you are.") : "This session uses a mode that is not implemented yet."}</h3>
               <p class="session-members">${activeSession.participants?.length ? activeSession.members.map(escapeHTML).join(", ") : "No participants added yet"}</p>
               <p>${activeSession.candidateCount} list ${activeSession.candidateCount === 1 ? "film was" : "films were"} available when this session started.</p>
             </div>
             <div class="session-actions">
-              ${activeSession.mode === "Queue Roulette" ? `<button class="secondary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
+              ${activeSession.mode === "Queue Roulette" && !isDirectWatchSession(activeSession) ? `<button class="secondary-button compact" type="button" data-continue-roulette>${rouletteWinner ? "View session" : "Continue Roulette"}</button>` : ""}
               ${activeCanManage && activeSession.status === "CONFIRMED" ? `<button class="secondary-button compact" type="button" data-review-session-watched="${escapeHTML(activeSession.id)}"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Mark as watched</button>` : ""}
               ${activeCanManage ? `<button class="text-button danger" type="button" data-end-session>Cancel session</button>` : ""}
             </div>
@@ -2721,7 +2734,7 @@ function renderSessions() {
         const canEditJournal = canManageJournalEntry(session.journalEntry, session);
         const journalLabel = session.journalEntry ? (canEditJournal ? "Edit Journal post" : "View Journal post") : session.journalDraft ? "Continue Journal post" : "Write Journal post";
         const canOpenJournal = canEditJournal || canManage || session.journalEntry;
-        return `<div class="session-history-item"><article class="session-history-row layout-container layout-container-neutral">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(session.mode)} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
+        return `<div class="session-history-item"><article class="session-history-row layout-container layout-container-neutral">${film ? `<img src="${escapeHTML(filmPoster(film))}" alt="" />` : `<span class="session-history-placeholder material-symbols-outlined" aria-hidden="true">casino</span>`}<div><span>${escapeHTML(formatSavedDate(session.sessionDate))} &middot; ${escapeHTML(sessionModeLabel(session))} &middot; Hosted by ${escapeHTML(session.hostName)}</span><strong>${film ? escapeHTML(film.title) : "Watched film"}</strong><small>${session.members.map(escapeHTML).join(", ") || "No participants recorded"}</small></div><div class="session-history-actions"><span class="status-pill watched">Watched</span>${canEditDetails ? `<button class="secondary-button compact" type="button" data-edit-session-details="${escapeHTML(session.id)}">Edit session</button>` : ""}${canOpenJournal && journalSessionId !== session.id ? `<button class="secondary-button compact" type="button" data-open-journal="${escapeHTML(session.id)}">${journalLabel}</button>` : ""}</div></article>${sessionEditorMode(session) ? renderSessionSummary(session, { editorMode: sessionEditorMode(session) }) : ""}</div>`;
       }).join("")}</div></section>` : ""}
     </section>`;
 }
@@ -3067,7 +3080,7 @@ function navigate(view) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function openPartyModal(mode = "Queue Roulette") {
+function openPartyModal(mode = "Queue Roulette", film = null) {
   const selectedMode = decisionModes.find((candidate) => candidate.title === mode);
   if (!selectedMode?.available) {
     showToast(`${mode} is coming soon. Queue Roulette is the available decision game.`);
@@ -3078,10 +3091,18 @@ function openPartyModal(mode = "Queue Roulette") {
     navigate("sessions");
     return;
   }
-  if (!movieList.some((item) => !item.watched)) {
+  const directFilm = film && movieList.find((item) => item.id === film.id);
+  if (!directFilm && !movieList.some((item) => !item.watched)) {
     showToast("Add at least one ready film before starting a session.");
     return;
   }
+  pendingPartyFilmId = directFilm?.id || null;
+  partyModal.querySelector("#party-title").textContent = directFilm ? `Watch ${directFilm.title}` : "Start a watch party";
+  partyModal.querySelector(".modal-intro").textContent = directFilm
+    ? "Choose who is here. This film will be confirmed without Queue Roulette."
+    : "Choose who is here and how tonight's film will be decided.";
+  partyForm.querySelector("fieldset:nth-of-type(2)").hidden = Boolean(directFilm);
+  partyForm.querySelector("button[type='submit']").textContent = directFilm ? "Start this film" : "Create Watch Party";
   partyMembers.innerHTML = members.map((member) => `<label class="member-choice"><input type="checkbox" name="members" value="${escapeHTML(member.id)}" checked /><img src="${member.avatar}" alt="" /><span>${escapeHTML(member.name)}</span></label>`).join("");
   const radio = partyForm.querySelector(`input[name="mode"][value="${mode}"]`);
   if (radio) radio.checked = true;
@@ -3093,6 +3114,11 @@ function openPartyModal(mode = "Queue Roulette") {
 function closePartyModal() {
   partyModal.hidden = true;
   document.body.style.overflow = "";
+  pendingPartyFilmId = null;
+  partyModal.querySelector("#party-title").textContent = "Start a watch party";
+  partyModal.querySelector(".modal-intro").textContent = "Choose who is here and how tonight's film will be decided.";
+  partyForm.querySelector("fieldset:nth-of-type(2)").hidden = false;
+  partyForm.querySelector("button[type='submit']").textContent = "Create Watch Party";
 }
 
 function stopRouletteSpin() {
@@ -3160,7 +3186,10 @@ async function createMovieSession(participantIds, mode) {
   const selectedMembers = participantIds.map((id) => members.find((member) => member.id === id)).filter(Boolean);
   const memberNames = selectedMembers.map((member) => member.name);
   const candidateCount = movieList.filter((item) => !item.watched).length;
-  const initialRoulette = mode === "Queue Roulette" ? createRouletteState(selectedMembers) : null;
+  const directFilm = pendingPartyFilmId ? movieList.find((item) => item.id === pendingPartyFilmId) : null;
+  const initialRoulette = mode === "Queue Roulette"
+    ? createRouletteState(selectedMembers, { selectionMode: directFilm ? "direct" : "roulette" })
+    : null;
   const gameState = initialRoulette ? serialiseRouletteStateValue(initialRoulette) : {};
 
   if (designPreviewMode) {
@@ -3186,6 +3215,7 @@ async function createMovieSession(participantIds, mode) {
     };
     rouletteState = initialRoulette;
     journalSessionId = null;
+    if (directFilm) await confirmMovieSession(directFilm);
     persistDesignPreviewWorkspace();
     return;
   }
@@ -3202,6 +3232,7 @@ async function createMovieSession(participantIds, mode) {
     throw error;
   }
   await loadWorkspace();
+  if (directFilm) await confirmMovieSession(directFilm);
 }
 
 async function confirmMovieSession(winner) {
@@ -4426,6 +4457,13 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-party]")) { openPartyModal(); return; }
   if (event.target.closest("[data-close-modal]") || event.target === partyModal) { closePartyModal(); return; }
 
+  const watchNowButton = event.target.closest("[data-watch-now]");
+  if (watchNowButton) {
+    const item = movieList.find((candidate) => candidate.id === watchNowButton.dataset.watchNow);
+    if (item) openPartyModal("Queue Roulette", item);
+    return;
+  }
+
   const filterButton = event.target.closest("[data-list-filter]");
   if (filterButton) { listFilter = filterButton.dataset.listFilter; render(); return; }
   const myFilmsFilterButton = event.target.closest("[data-my-films-filter]");
@@ -4813,7 +4851,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("[data-open-current-session]")) { navigate(activeSession?.mode === "Queue Roulette" ? "pick" : "sessions"); return; }
+  if (event.target.closest("[data-open-current-session]")) { navigate(activeSession?.mode === "Queue Roulette" && !isDirectWatchSession() ? "pick" : "sessions"); return; }
 
   const matchFilmButton = event.target.closest("[data-match-film]");
   if (matchFilmButton) {
@@ -5198,6 +5236,7 @@ partyForm.addEventListener("submit", async (event) => {
   const form = new FormData(partyForm);
   const selectedMemberIds = form.getAll("members").map(String);
   if (!selectedMemberIds.length) { showToast("Choose at least one Discordian."); return; }
+  const directFilm = pendingPartyFilmId ? movieList.find((item) => item.id === pendingPartyFilmId) : null;
   const mode = String(form.get("mode"));
   if (!decisionModes.some((candidate) => candidate.title === mode && candidate.available)) {
     showToast("That decision game is not available yet. Choose Queue Roulette.");
@@ -5208,8 +5247,8 @@ partyForm.addEventListener("submit", async (event) => {
   try {
     await createMovieSession(selectedMemberIds, mode);
     closePartyModal();
-    navigate(mode === "Queue Roulette" ? "pick" : "sessions");
-    showToast(`${mode} session created and saved for ${selectedMemberIds.length} people.`);
+    navigate(directFilm ? "sessions" : mode === "Queue Roulette" ? "pick" : "sessions");
+    showToast(directFilm ? `${directFilm.title} session created for ${selectedMemberIds.length} people.` : `${mode} session created and saved for ${selectedMemberIds.length} people.`);
   } catch (error) {
     showToast(`The session was not created: ${error.message}`);
   } finally {

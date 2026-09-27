@@ -306,6 +306,27 @@ test("shared film cards use the suggester's Discord server avatar", async ({ pag
   await expect(alienFilm.locator(".poster-suggester img")).toHaveAttribute("src", /source=discord-server-profile/);
 });
 
+test("shared film posters expose film details and direct watch actions", async ({ page }) => {
+  const alienFilm = page.locator(".poster-card", { hasText: "Alien" });
+  const actions = alienFilm.locator(".poster-card-actions");
+
+  await alienFilm.hover();
+  await expect(actions).toBeVisible();
+  await expect(actions.getByRole("button", { name: "Watch now" })).toBeVisible();
+  await expect(actions.getByRole("button", { name: "Film details" })).toBeVisible();
+
+  await actions.getByRole("button", { name: "Watch now" }).click();
+  await expect(page.getByRole("dialog", { name: "Watch Alien" })).toBeVisible();
+  await expect(page.getByRole("dialog").locator("fieldset").nth(1)).toBeHidden();
+  await expect(page.getByRole("button", { name: "Start this film" })).toBeVisible();
+  await page.getByRole("button", { name: "Start this film" }).click();
+
+  await expect(page.locator(".session-summary")).toBeVisible();
+  await expect(page.locator(".active-session")).toContainText("Alien");
+  await expect(page.locator(".roulette-wheel-stage")).toHaveCount(0);
+  await expect(page.locator(".session-summary").getByRole("button", { name: "Mark as watched" })).toBeVisible();
+});
+
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop film-detail artwork is covered once.");
 
