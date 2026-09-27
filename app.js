@@ -2912,6 +2912,7 @@ function renderMembers() {
       })}
       <article class="invite-panel layout-container layout-container-neutral"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
       <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row layout-container layout-container-neutral"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="secondary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="quiet-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
+      <section class="management-section" aria-labelledby="discord-hub-title"><div class="section-heading"><div><span class="eyebrow">Discord integration</span><h2 id="discord-hub-title">Cine-Cord hub</h2></div></div><article class="invite-panel layout-container layout-container-neutral"><div><h3>Keep the server entrance in one place.</h3><p>Publish or update one Discord message with buttons for Cine-Cord, Sessions, Journal and My Cinema. This never exposes private member data.</p></div><button class="primary-button compact" type="button" data-publish-cine-cord-hub><span class="material-symbols-outlined" aria-hidden="true">send</span>Publish or update hub</button></article></section>
       <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>` : ""}</div></form>`).join("")}</div></section>
     </section>`;
 }
@@ -4324,6 +4325,23 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-copy-invite]")) {
     try { await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}`); showToast("Website access link copied."); }
     catch { showToast("Copy was blocked. Press and hold the link to copy it manually."); }
+    return;
+  }
+  const publishHubButton = event.target.closest("[data-publish-cine-cord-hub]");
+  if (publishHubButton) {
+    if (!isCurrentAdmin() || !activeGroup?.id) return;
+    publishHubButton.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke("publish-cine-cord-hub", { body: { groupId: activeGroup.id } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      showToast(data?.updated ? "The Cine-Cord Discord hub was updated." : "The Cine-Cord Discord hub was published.");
+      if (data?.messageUrl) window.open(data.messageUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      showToast(`The Cine-Cord Discord hub was not published: ${error.message}`);
+    } finally {
+      publishHubButton.disabled = false;
+    }
     return;
   }
 
