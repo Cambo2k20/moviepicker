@@ -3069,6 +3069,7 @@ legend,
   background: rgba(10, 11, 16, 0.78);
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transition: opacity 160ms ease, visibility 160ms ease;
 }
 
@@ -3093,6 +3094,7 @@ legend,
   font-weight: 700;
   letter-spacing: 0.02em;
   text-align: center;
+  pointer-events: auto;
 }
 
 .poster-action-watch {
