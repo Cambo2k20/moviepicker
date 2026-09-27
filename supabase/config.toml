@@ -388,6 +388,10 @@ deno_version = 2
 # project's sb_publishable key as a JWT, so authentication lives in the handler.
 verify_jwt = false
 
+[functions.publish-cine-cord-hub]
+# The handler verifies the caller's Supabase session and administrator role.
+verify_jwt = false
+
 [functions.sync-discord-server-profile]
 # This handler follows the same authenticated /auth/v1/user boundary, then
 # checks approved group membership before sending the one-use provider token to
