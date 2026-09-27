@@ -279,6 +279,28 @@ test("phone keeps the complete list filters behind the compact filter control", 
   await expect(filterControls).toBeHidden();
 });
 
+test("a film marked watched never displays as never watched when no session count exists", async ({ page }) => {
+  await page.evaluate(() => {
+    const storageKey = "cine-cord-design-preview-state";
+    const workspace = {
+      watchState: [{
+        id: "preview-home-alone",
+        watched: true,
+        watchCount: 0,
+        lastWatchedOn: null,
+      }],
+    };
+    localStorage.setItem(storageKey, JSON.stringify(workspace));
+  });
+  await page.reload();
+
+  const watchedFilm = page.locator(".poster-card", { hasText: "Home Alone" });
+  await expect(watchedFilm).toBeVisible();
+  await expect(watchedFilm).toHaveClass(/is-watched/);
+  await expect(watchedFilm.locator(".status-pill")).toHaveClass(/watched/);
+  await expect(watchedFilm.locator(".status-pill")).toHaveText("Watched once");
+});
+
 test("list actions and desktop film artwork remain clear", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop film-detail artwork is covered once.");
 

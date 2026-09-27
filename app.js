@@ -1322,7 +1322,8 @@ function rouletteWeightExplanation(weight, item, { weighted }) {
 // The list stores a boolean, so a watched film reads as one viewing until a real
 // count exists; the ladder is here so it becomes correct the moment one does.
 function watchHistoryLabel(item) {
-  const count = Number.isInteger(item.watchCount) ? item.watchCount : (item.watched ? 1 : 0);
+  const recordedCount = Number.isInteger(item.watchCount) ? item.watchCount : 0;
+  const count = Math.max(recordedCount, item.watched ? 1 : 0);
   if (count <= 0) return "Never watched";
   if (count === 1) return "Watched once";
   return `Watched ${count} times`;
