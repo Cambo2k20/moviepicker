@@ -2997,14 +2997,28 @@ legend,
 }
 
 .poster-card-open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
   display: block;
   width: 100%;
+  height: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.poster-card-open:focus-visible {
+  outline: 2px solid var(--purple-light);
+  outline-offset: -2px;
+}
+
+.personal-poster-card .poster-card-open {
+  position: static;
+  height: auto;
 }
 
 .poster-frame,
@@ -3040,6 +3054,76 @@ legend,
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(14, 15, 20, 0.88);
   backdrop-filter: blur(8px);
+}
+
+.poster-card-actions {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  background: rgba(10, 11, 16, 0.78);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, visibility 160ms ease;
+}
+
+.poster-card:hover .poster-card-actions,
+.poster-frame:focus-within .poster-card-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.poster-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  color: var(--white);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.poster-action-watch {
+  border-color: var(--purple-light);
+  background: var(--purple);
+}
+
+.poster-action-details {
+  background: rgba(20, 21, 28, 0.88);
+}
+
+.poster-action:hover,
+.poster-action:focus-visible {
+  border-color: var(--white);
+  filter: brightness(1.12);
+}
+
+.poster-action .material-symbols-outlined {
+  font-size: 18px;
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+  .poster-card-actions {
+    justify-content: flex-end;
+    padding: 12px;
+    background: linear-gradient(transparent 20%, rgba(10, 11, 16, 0.84));
+    opacity: 1;
+    visibility: visible;
+  }
 }
 
 .poster-pending {

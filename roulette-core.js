@@ -24,9 +24,10 @@ export function rouletteParticipants(session = {}) {
   return names.map((name, index) => normaliseParticipant({ id: ids[index], name }, index));
 }
 
-export function createRouletteState(participants = []) {
+export function createRouletteState(participants = [], { selectionMode = "roulette" } = {}) {
   return {
     phase: "ready",
+    selectionMode,
     participants: participants.map(normaliseParticipant),
     usedVetoes: [],
     vetoedFilmIds: [],
@@ -45,6 +46,7 @@ export function serialiseRouletteState(state) {
   return {
     version: 4,
     phase: state.phase,
+    selectionMode: state.selectionMode === "direct" ? "direct" : "roulette",
     usedVetoes: [...state.usedVetoes],
     vetoedFilmIds: [...state.vetoedFilmIds],
     excludedFilmIds: [...state.excludedFilmIds],
@@ -59,8 +61,8 @@ export function serialiseRouletteState(state) {
 
 export function restoreRouletteState(session) {
   const participants = rouletteParticipants(session);
-  const restored = createRouletteState(participants);
   const saved = session?.gameState && typeof session.gameState === "object" ? session.gameState : {};
+  const restored = createRouletteState(participants, { selectionMode: saved.selectionMode === "direct" ? "direct" : "roulette" });
   const validPhases = new Set(["ready", "spinning", "settling", "reveal", "confirmed"]);
   const savedPhase = validPhases.has(saved.phase) ? saved.phase : null;
   restored.phase = ["spinning", "settling"].includes(savedPhase)

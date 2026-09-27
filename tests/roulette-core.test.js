@@ -40,6 +40,12 @@ test("individual film exclusions filter the current pool and survive restore", (
   assert.deepEqual(restored.excludedFilmIds, ["new"]);
 });
 
+test("direct-watch selection survives roulette-state serialisation", () => {
+  const state = createRouletteState([], { selectionMode: "direct" });
+  const restored = restoreRouletteState({ status: "CONFIRMED", gameState: serialiseRouletteState(state) });
+  assert.equal(restored.selectionMode, "direct");
+});
+
 test("age weighting gives the oldest film four chances and the newest one", () => {
   const weights = calculateRouletteWeights(films, true);
   assert.equal(weights.get("old"), 4);
