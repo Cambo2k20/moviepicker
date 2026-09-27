@@ -140,6 +140,9 @@ Deno.serve(async (req: Request) => {
     const payload = hubPayload();
     const metadata = await webhookMetadata(webhook);
     const messageUrl = existing?.discord_message_id ? discordWebhookMessageUrl(webhook, existing.discord_message_id) : null;
+    const executeUrl = new URL(webhook);
+    executeUrl.searchParams.set("with_components", "true");
+    if (messageUrl) messageUrl.searchParams.set("with_components", "true");
     const attemptStartedAt = new Date().toISOString();
     const reserved = await write(supabaseUrl, "discord_hub_publications?on_conflict=group_id", serviceKey, "POST", {
       group_id: groupId,
@@ -161,7 +164,7 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify(payload),
       });
     } else {
-      discordResponse = await fetch(webhook, {
+      discordResponse = await fetch(executeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
