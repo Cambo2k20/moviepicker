@@ -178,6 +178,8 @@ let journalFocusedEntryId = null;
 let journalReconciliationRows = null;
 let journalReconciliationBusy = false;
 let journalReconciliationMatchBusy = false;
+let journalReconciliationMatchProgress = 0;
+let journalReconciliationMatchTotal = 0;
 let journalReconciliationError = "";
 let journalReconciliationCandidates = new Map();
 let journalReconciliationQuery = "";
@@ -188,6 +190,13 @@ let journalBulkPreview = null;
 let journalBulkBusy = false;
 let journalBulkSelectedIds = new Set();
 let journalBulkError = "";
+let journalTriagePreview = null;
+let journalTriageBusy = false;
+let journalTriageError = "";
+let journalTriageCategory = "SUGGESTED";
+let journalTriageVisibleLimit = 24;
+let journalTriageApprovedIds = new Set();
+let journalTriageSkippedIds = new Set();
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -3289,6 +3298,40 @@ function designPreviewJournalReconciliationRows() {
       match_status: "NO_CANONICAL_MOVIE",
       match_reason: "No canonical movie has the same title and release year.",
     },
+    {
+      archive_entry_id: "preview-archive-showcase",
+      entry_label: "#1344",
+      title: "Xbox Showcase",
+      release_year: 2025,
+      watched_at: "2026-09-25",
+      archive_status: "FINISHED",
+      parser_status: "PARSED",
+      viewer_names: ["Cameron"],
+      target_viewers: ["Cambo"],
+      already_synced_viewers: [],
+      movie_id: null,
+      canonical_title: null,
+      candidate_count: 0,
+      match_status: "NO_CANONICAL_MOVIE",
+      match_reason: "No canonical movie has the same title and release year.",
+    },
+    {
+      archive_entry_id: "preview-archive-firm",
+      entry_label: "#1343",
+      title: "The Firm",
+      release_year: 2007,
+      watched_at: "2026-09-24",
+      archive_status: "FINISHED",
+      parser_status: "PARSED",
+      viewer_names: ["Cameron", "Dean"],
+      target_viewers: ["Cambo", "deanshelton17"],
+      already_synced_viewers: [],
+      movie_id: null,
+      canonical_title: null,
+      candidate_count: 2,
+      match_status: "AMBIGUOUS_MOVIE",
+      match_reason: "More than one possible film was found.",
+    },
   ];
 }
 
@@ -3308,6 +3351,38 @@ function renderJournalBulkApproval() {
     </div>`;
 }
 
+function renderJournalTriage() {
+  const proposals = journalTriagePreview?.proposals || [];
+  const categoryRows = proposals.filter((row) => row.category === journalTriageCategory);
+  const visibleRows = categoryRows.slice(0, journalTriageVisibleLimit);
+  const approvedCount = journalTriageApprovedIds.size;
+  const skippedCount = journalTriageSkippedIds.size;
+  const selectedCount = approvedCount + skippedCount;
+  const categories = [
+    ["SUGGESTED", "Suggested", journalTriagePreview?.suggestedCount],
+    ["NO_CANDIDATE", "No match", journalTriagePreview?.noCandidateCount],
+    ["MANUAL", "Individual", journalTriagePreview?.manualCount],
+  ];
+  return `
+    <div class="journal-triage" aria-label="Journal review queue">
+      <div class="journal-bulk-heading"><div><h3>Review the remaining entries</h3><p>Check suggested films in batches. A missing TMDB suggestion does not mean an entry is not a film.</p></div><button class="secondary-button compact" type="button" data-preview-journal-triage ${journalTriageBusy || journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalTriageBusy ? "Loading…" : journalTriagePreview ? "Refresh queue" : "Load review queue"}</button></div>
+      ${journalTriageError ? `<p class="journal-bulk-error" role="alert">${escapeHTML(journalTriageError)}</p>` : ""}
+      ${journalTriagePreview ? `
+        <div class="journal-triage-tabs" role="group" aria-label="Review category">${categories.map(([key, label, count]) => `<button type="button" data-triage-category="${key}" aria-pressed="${journalTriageCategory === key}">${escapeHTML(label)} <strong>${Number(count || 0).toLocaleString()}</strong></button>`).join("")}</div>
+        <div class="journal-bulk-select-actions"><span>${approvedCount.toLocaleString()} to approve · ${skippedCount.toLocaleString()} archive only</span><div>${journalTriageCategory === "SUGGESTED" ? `<button class="quiet-button compact" type="button" data-triage-select-visible ${visibleRows.every((row) => journalTriageApprovedIds.has(row.archive_entry_id)) ? "disabled" : ""}>Select visible suggestions</button>` : ""}<button class="quiet-button compact" type="button" data-triage-clear ${selectedCount ? "" : "disabled"}>Clear selections</button></div></div>
+        <div class="journal-triage-list">${visibleRows.length ? visibleRows.map((row) => {
+          const canApprove = row.category === "SUGGESTED" && row.can_approve === true;
+          const selected = canApprove ? journalTriageApprovedIds.has(row.archive_entry_id) : journalTriageSkippedIds.has(row.archive_entry_id);
+          const poster = row.poster_path ? `<img src="${escapeHTML(tmdbPoster(row.poster_path, "w185"))}" alt="" loading="lazy" />` : `<span class="material-symbols-outlined" aria-hidden="true">movie</span>`;
+          return `<article class="journal-triage-row"><label><input type="checkbox" ${canApprove ? "data-triage-approve" : "data-triage-skip"} value="${escapeHTML(row.archive_entry_id)}" ${selected ? "checked" : ""} ${journalTriageBusy ? "disabled" : ""} aria-label="${canApprove ? "Approve suggested film for" : "Keep archive only for"} ${escapeHTML(row.archive_title)}" /><span class="journal-triage-poster">${poster}</span><span class="journal-triage-content"><span class="journal-triage-source">${escapeHTML(row.entry_label || "Entry")} · ${escapeHTML(row.archive_title)} ${escapeHTML(row.archive_year || "")}</span><strong>${escapeHTML(row.movie_title || (row.category === "NO_CANDIDATE" ? "No TMDB film suggested" : "Choose individually"))}${row.movie_year ? ` <small>${escapeHTML(row.movie_year)}</small>` : ""}</strong><small>${canApprove ? `TMDB ${Math.round(Number(row.match_score || 0) * 100)}/100 · ${Number(row.year_delta || 0)}-year difference` : escapeHTML(row.match_reason || "Needs individual review")} · ${escapeHTML((row.viewer_keys || []).map((key) => key === "dean" ? "Dean" : "Cambo").join(", "))}</small>${row.overview ? `<span class="journal-triage-overview">${escapeHTML(row.overview)}</span>` : ""}</span></label><button class="quiet-button compact" type="button" data-triage-open="${escapeHTML(row.archive_entry_id)}">Review individually</button></article>`;
+        }).join("") : `<p class="journal-bulk-empty">No entries in this category.</p>`}</div>
+        ${visibleRows.length < categoryRows.length ? `<button class="secondary-button compact journal-triage-more" type="button" data-triage-more>Show more</button>` : ""}
+        <div class="journal-bulk-footer"><p>Approval saves the film and confirmed viewers; archive-only is reversible. Neither action creates private history. Sync is separate.</p><button class="primary-button compact" type="button" data-apply-journal-triage ${journalTriageBusy || !selectedCount || selectedCount > 100 ? "disabled" : ""}>Save ${selectedCount.toLocaleString()} decision${selectedCount === 1 ? "" : "s"}</button></div>
+        ${selectedCount > 100 ? `<p class="journal-bulk-error">Save at most 100 decisions in one batch.</p>` : ""}
+      ` : ""}
+    </div>`;
+}
+
 function renderJournalReconciliationPanel() {
   const rows = journalReconciliationRows || [];
   const counts = rows.reduce((result, row) => {
@@ -3322,10 +3397,10 @@ function renderJournalReconciliationPanel() {
       <div class="section-heading"><div><span class="eyebrow">Private history repair</span><h2 id="journal-reconciliation-title">Reconcile Journal history</h2></div><span class="request-count">${rows.length ? rows.length.toLocaleString() : "—"}</span></div>
       <article class="invite-panel layout-container layout-container-neutral">
         <div><h3>Review archive matches before creating private history.</h3><p>Exact local matches stay safe and unchanged. Find likely TMDB films for the remaining entries, compare ranked title and year suggestions, then approve only what you recognise. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
-        <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="secondary-button compact" type="button" data-discover-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy || !rows.length ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>${journalReconciliationMatchBusy ? "Finding TMDB matches…" : "Find likely TMDB matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
+        <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="secondary-button compact" type="button" data-discover-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy || !rows.length ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>${journalReconciliationMatchBusy ? `Finding ${journalReconciliationMatchProgress}/${journalReconciliationMatchTotal}…` : "Find likely TMDB matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
       </article>
       ${journalReconciliationError ? `<div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span><div><strong>Journal history preview failed.</strong><p>${escapeHTML(journalReconciliationError)}</p></div><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation>Try again</button></div>` : ""}
-      ${journalReconciliationRows !== null ? renderJournalBulkApproval() : ""}
+      ${journalReconciliationRows !== null ? renderJournalBulkApproval() + renderJournalTriage() : ""}
       ${journalReconciliationRows === null ? `<div class="empty-state compact-empty"><span class="material-symbols-outlined" aria-hidden="true">manage_search</span><p>Preview the imported Journal before making any private-history changes.</p></div>` : `
         <div class="journal-reconciliation-summary" aria-label="Journal history reconciliation summary">
           <span><strong>${counts.READY || 0}</strong> ready</span><span><strong>${counts.ALREADY_SYNCED || 0}</strong> already synced</span><span><strong>${(counts.NEEDS_REVIEW || 0) + (counts.AMBIGUOUS_MOVIE || 0) + (counts.NO_CANONICAL_MOVIE || 0)}</strong> need review</span><span><strong>${(counts.NO_CONFIRMED_VIEWER || 0) + (counts.MISSING_TARGET_PROFILE || 0)}</strong> missing viewer/account</span>
@@ -3340,7 +3415,7 @@ function renderJournalReconciliationPanel() {
           const statusLabel = journalReconciliationStatusLabels[row.match_status] || row.match_status;
           const statusClass = String(row.match_status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
           const targetViewers = Array.isArray(row.target_viewers) && row.target_viewers.length ? row.target_viewers.join(", ") : "None recognised";
-          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Private-history viewers: ${escapeHTML(targetViewers)}</p>${reconciliationMovieSummary(row)}</div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div>${renderJournalReconciliationReview(row)}</article>`;
+          return `<article class="journal-reconciliation-row" data-reconciliation-entry-id="${escapeHTML(row.archive_entry_id)}"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Private-history viewers: ${escapeHTML(targetViewers)}</p>${reconciliationMovieSummary(row)}</div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div>${renderJournalReconciliationReview(row)}</article>`;
         }).join("") : `<div class="empty-state compact-empty">No imported Journal rows were found.</div>`}</div>
         ${filteredRows.length > displayedRows.length ? `<button class="secondary-button compact journal-reconciliation-more-button" type="button" data-show-more-journal-reconciliation>Show more entries</button>` : ""}
       `}
@@ -3390,6 +3465,10 @@ async function refreshJournalReconciliation() {
   journalBulkPreview = null;
   journalBulkSelectedIds = new Set();
   journalBulkError = "";
+  journalTriagePreview = null;
+  journalTriageApprovedIds = new Set();
+  journalTriageSkippedIds = new Set();
+  journalTriageError = "";
   render();
   try {
     if (designPreviewMode) {
@@ -3411,7 +3490,7 @@ async function refreshJournalReconciliation() {
 }
 
 async function discoverJournalReconciliationMatches() {
-  if (!isCurrentAdmin() || !activeGroup?.id || journalReconciliationMatchBusy || journalBulkBusy) return;
+  if (!isCurrentAdmin() || !activeGroup?.id || journalReconciliationMatchBusy || journalBulkBusy || journalTriageBusy) return;
   const targets = (journalReconciliationRows || [])
     .filter((row) => ["NEEDS_REVIEW", "NO_CANONICAL_MOVIE", "AMBIGUOUS_MOVIE"].includes(row.match_status))
     .map((row) => row.archive_entry_id)
@@ -3421,8 +3500,13 @@ async function discoverJournalReconciliationMatches() {
     return;
   }
   journalReconciliationMatchBusy = true;
+  journalReconciliationMatchProgress = 0;
+  journalReconciliationMatchTotal = targets.length;
   journalReconciliationError = "";
   journalBulkPreview = null;
+  journalTriagePreview = null;
+  journalTriageApprovedIds = new Set();
+  journalTriageSkippedIds = new Set();
   render();
   try {
     if (designPreviewMode) {
@@ -3438,8 +3522,10 @@ async function discoverJournalReconciliationMatches() {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      archiveEntryIds.forEach((entryId) => journalReconciliationCandidates.delete(entryId));
       mergeJournalReconciliationCandidates(data?.candidates || []);
       scanned += Number(data?.entriesScanned) || archiveEntryIds.length;
+      journalReconciliationMatchProgress = scanned;
       render();
     }
     showToast(`TMDB suggestions found for ${scanned} archive ${scanned === 1 ? "entry" : "entries"}.`);
@@ -3448,6 +3534,8 @@ async function discoverJournalReconciliationMatches() {
     showToast(`TMDB matching was not completed: ${journalReconciliationError}`);
   } finally {
     journalReconciliationMatchBusy = false;
+    journalReconciliationMatchProgress = 0;
+    journalReconciliationMatchTotal = 0;
     render();
   }
 }
@@ -3509,6 +3597,104 @@ async function applyJournalBulkApproval() {
     journalBulkBusy = false;
     render();
   }
+}
+
+async function previewJournalTriage() {
+  if (!isCurrentAdmin() || !activeGroup?.id || journalTriageBusy || journalReconciliationBusy || journalReconciliationMatchBusy || journalBulkBusy) return;
+  journalTriageBusy = true;
+  journalTriageError = "";
+  journalTriagePreview = null;
+  journalTriageApprovedIds = new Set();
+  journalTriageSkippedIds = new Set();
+  render();
+  try {
+    if (designPreviewMode) {
+      const fixtureProposals = [
+        { archive_entry_id: "preview-archive-green-lantern", entry_label: "#1346", archive_title: "Green Lantern: Beware My Power", archive_year: 2022, viewer_keys: ["dean"], tmdb_id: 946310, movie_title: "Green Lantern: Beware My Power", movie_year: 2022, match_score: 0.96, year_delta: 0, category: "SUGGESTED", can_approve: true, overview: "Green Lantern John Stewart faces an interplanetary threat." },
+        { archive_entry_id: "preview-archive-showcase", entry_label: "#1344", archive_title: "Xbox Showcase", archive_year: 2025, viewer_keys: ["cambo"], category: "NO_CANDIDATE", can_approve: false, match_reason: "No canonical movie has the same title and release year." },
+        { archive_entry_id: "preview-archive-firm", entry_label: "#1343", archive_title: "The Firm", archive_year: 2007, viewer_keys: ["cambo", "dean"], tmdb_id: 12345, movie_title: "The Firm", movie_year: 2009, match_score: 0.91, year_delta: 2, category: "MANUAL", can_approve: false, match_reason: "More than one possible film was found." },
+      ];
+      const unresolvedIds = new Set((journalReconciliationRows || [])
+        .filter((row) => !row.review_decision && ["NEEDS_REVIEW", "NO_CANONICAL_MOVIE", "AMBIGUOUS_MOVIE"].includes(row.match_status))
+        .map((row) => row.archive_entry_id));
+      const proposals = fixtureProposals.filter((row) => unresolvedIds.has(row.archive_entry_id));
+      journalTriagePreview = {
+        token: "preview",
+        proposals,
+        suggestedCount: proposals.filter((row) => row.category === "SUGGESTED").length,
+        noCandidateCount: proposals.filter((row) => row.category === "NO_CANDIDATE").length,
+        manualCount: proposals.filter((row) => row.category === "MANUAL").length,
+      };
+    } else {
+      const { data, error } = await supabase.rpc("preview_archive_history_triage", { p_group_id: activeGroup.id });
+      if (error) throw error;
+      journalTriagePreview = data;
+    }
+  } catch (error) {
+    journalTriageError = error.message || "The review queue could not be loaded.";
+  } finally {
+    journalTriageBusy = false;
+    render();
+  }
+}
+
+async function applyJournalTriage() {
+  const approvedIds = [...journalTriageApprovedIds];
+  const skippedIds = [...journalTriageSkippedIds];
+  const count = approvedIds.length + skippedIds.length;
+  if (!isCurrentAdmin() || !activeGroup?.id || !journalTriagePreview || journalTriageBusy || !count || count > 100) return;
+  if (!window.confirm(`Save ${approvedIds.length} approved film match${approvedIds.length === 1 ? "" : "es"} and ${skippedIds.length} archive-only entr${skippedIds.length === 1 ? "y" : "ies"}? This does not create private viewing history. Review the selected rows before continuing.`)) return;
+  journalTriageBusy = true;
+  journalTriageError = "";
+  render();
+  try {
+    if (designPreviewMode) {
+      journalReconciliationRows = (journalReconciliationRows || []).map((row) => {
+        if (approvedIds.includes(row.archive_entry_id)) return { ...row, match_status: "READY", review_decision: "APPROVED", reviewed_viewer_keys: ["dean"], canonical_title: "Green Lantern: Beware My Power" };
+        if (skippedIds.includes(row.archive_entry_id)) return { ...row, match_status: "SKIPPED", review_decision: "SKIPPED" };
+        return row;
+      });
+      journalTriagePreview = null;
+      journalTriageApprovedIds = new Set();
+      journalTriageSkippedIds = new Set();
+    } else {
+      const { data, error } = await supabase.rpc("apply_archive_history_triage", {
+        p_group_id: activeGroup.id,
+        p_expected_token: journalTriagePreview.token,
+        p_approved_ids: approvedIds,
+        p_skipped_ids: skippedIds,
+      });
+      if (error) throw error;
+      if (Number(data?.approvedCount) !== approvedIds.length || Number(data?.skippedCount) !== skippedIds.length) throw new Error("The saved counts did not match the selection. Refresh the queue before continuing.");
+      await refreshJournalReconciliation();
+    }
+    showToast(`${count} Journal review decision${count === 1 ? "" : "s"} saved. Sync remains separate.`);
+  } catch (error) {
+    journalTriageError = error.message || "The review decisions could not be saved. Refresh the queue before retrying.";
+    journalTriagePreview = null;
+    journalTriageApprovedIds = new Set();
+    journalTriageSkippedIds = new Set();
+  } finally {
+    journalTriageBusy = false;
+    render();
+  }
+}
+
+function openJournalTriageEntry(entryId) {
+  const row = (journalReconciliationRows || []).find((item) => item.archive_entry_id === entryId);
+  if (!row) return;
+  journalReconciliationQuery = row.title || row.entry_label || "";
+  journalReconciliationStatusFilter = "review";
+  const targetIndex = journalReconciliationRowsForDisplay()
+    .findIndex((item) => item.archive_entry_id === entryId);
+  journalReconciliationVisibleLimit = Math.max(24, targetIndex + 1);
+  render();
+  const article = root.querySelector(`[data-reconciliation-entry-id="${CSS.escape(entryId)}"]`);
+  if (!article) return;
+  const details = article.querySelector(".journal-reconciliation-review");
+  if (details) details.open = true;
+  article.scrollIntoView({ block: "center", behavior: "smooth" });
+  article.querySelector(".journal-reconciliation-review summary")?.focus({ preventScroll: true });
 }
 
 async function applyJournalReconciliation() {
@@ -3619,6 +3805,9 @@ async function saveJournalReconciliationReview(form, decision = "APPROVED") {
   if (decision === "SKIPPED" && !window.confirm("Skip this archive entry? It will not create private viewing history until you review it again.")) return;
   journalReconciliationReviewBusyId = archiveEntryId;
   journalBulkPreview = null;
+  journalTriagePreview = null;
+  journalTriageApprovedIds = new Set();
+  journalTriageSkippedIds = new Set();
   form.querySelectorAll("button, input").forEach((control) => { control.disabled = true; });
   setJournalReconciliationReviewStatus(form, decision === "SKIPPED" ? "Skipping entry…" : "Saving review…");
   try {
@@ -4631,6 +4820,13 @@ async function loadWorkspace(providerToken = null) {
   journalBulkBusy = false;
   journalBulkSelectedIds = new Set();
   journalBulkError = "";
+  journalTriagePreview = null;
+  journalTriageBusy = false;
+  journalTriageError = "";
+  journalTriageCategory = "SUGGESTED";
+  journalTriageVisibleLimit = 24;
+  journalTriageApprovedIds = new Set();
+  journalTriageSkippedIds = new Set();
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
@@ -5518,6 +5714,43 @@ document.addEventListener("click", async (event) => {
     await discoverJournalReconciliationMatches();
     return;
   }
+  if (event.target.closest("[data-preview-journal-triage]")) {
+    await previewJournalTriage();
+    return;
+  }
+  if (event.target.closest("[data-apply-journal-triage]")) {
+    await applyJournalTriage();
+    return;
+  }
+  const triageCategoryButton = event.target.closest("[data-triage-category]");
+  if (triageCategoryButton) {
+    journalTriageCategory = triageCategoryButton.dataset.triageCategory;
+    journalTriageVisibleLimit = 24;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-triage-select-visible]")) {
+    const visible = (journalTriagePreview?.proposals || []).filter((row) => row.category === "SUGGESTED").slice(0, journalTriageVisibleLimit);
+    visible.forEach((row) => journalTriageApprovedIds.add(row.archive_entry_id));
+    render();
+    return;
+  }
+  if (event.target.closest("[data-triage-clear]")) {
+    journalTriageApprovedIds = new Set();
+    journalTriageSkippedIds = new Set();
+    render();
+    return;
+  }
+  if (event.target.closest("[data-triage-more]")) {
+    journalTriageVisibleLimit += 24;
+    render();
+    return;
+  }
+  const triageOpenButton = event.target.closest("[data-triage-open]");
+  if (triageOpenButton) {
+    openJournalTriageEntry(triageOpenButton.dataset.triageOpen);
+    return;
+  }
   if (event.target.closest("[data-preview-journal-bulk]")) {
     await previewJournalBulkApproval();
     return;
@@ -6362,6 +6595,15 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-triage-approve], [data-triage-skip]")) {
+    const id = event.target.value;
+    const targetSet = event.target.matches("[data-triage-approve]") ? journalTriageApprovedIds : journalTriageSkippedIds;
+    if (event.target.checked) targetSet.add(id);
+    else targetSet.delete(id);
+    render();
+    root.querySelector(`[value="${CSS.escape(id)}"][data-triage-approve], [value="${CSS.escape(id)}"][data-triage-skip]`)?.focus();
+    return;
+  }
   if (event.target.matches("[data-select-journal-bulk]")) {
     if (event.target.checked) journalBulkSelectedIds.add(event.target.value);
     else journalBulkSelectedIds.delete(event.target.value);

@@ -11,6 +11,20 @@ import {
 test("normalises punctuation, accents and ampersands without losing title words", () => {
   assert.equal(normaliseArchiveMatchTitle("Amélie & Co."), "amelieandco");
   assert.deepEqual(archiveMatchQueries("Spider-Man: No Way Home"), ["Spider-Man: No Way Home", "spider man no way home"]);
+  assert.deepEqual(archiveMatchQueries("Werewolf By Night (Spooktober X)"), [
+    "Werewolf By Night (Spooktober X)", "Werewolf By Night", "werewolf by night spooktober x",
+  ]);
+  assert.deepEqual(archiveMatchQueries("The Goonies - Live"), ["The Goonies - Live", "The Goonies", "the goonies live"]);
+});
+
+test("compares title tokens against the spaced candidate title", () => {
+  const match = scoreArchiveMovieMatch({
+    archiveTitle: "Film Adventure Amazing",
+    archiveYear: 2020,
+    candidateTitle: "Amazing Film Adventure",
+    candidateYear: 2020,
+  });
+  assert.equal(match.titleScore, 1);
 });
 
 test("allows a five-year release window but rejects a wider mismatch", () => {

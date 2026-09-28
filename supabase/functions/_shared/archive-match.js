@@ -41,14 +41,13 @@ function editSimilarity(left, right) {
 
 export function titleMatchScore(archiveTitle, candidateTitle, candidateOriginalTitle = "") {
   const archiveKey = normaliseArchiveMatchTitle(archiveTitle);
-  const keys = [candidateTitle, candidateOriginalTitle]
-    .map(normaliseArchiveMatchTitle)
-    .filter(Boolean);
-  if (!archiveKey || !keys.length) return 0;
-  return Math.max(...keys.map((candidateKey) => {
+  const titles = [candidateTitle, candidateOriginalTitle].filter(Boolean);
+  if (!archiveKey || !titles.length) return 0;
+  return Math.max(...titles.map((title) => {
+    const candidateKey = normaliseArchiveMatchTitle(title);
     if (candidateKey === archiveKey) return 1;
     const compactEdit = editSimilarity(archiveKey, candidateKey);
-    const tokens = tokenSimilarity(archiveTitle, candidateKey);
+    const tokens = tokenSimilarity(archiveTitle, title);
     return Math.max(compactEdit, tokens);
   }));
 }
@@ -116,5 +115,9 @@ export function rankArchiveMovieMatches({ archiveTitle, archiveYear, results, li
 export function archiveMatchQueries(title) {
   const raw = String(title || "").trim();
   const cleaned = cleanTitle(raw);
-  return [...new Set([raw, cleaned].filter(Boolean))].slice(0, 2);
+  const withoutAnnotation = raw
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .replace(/\s+-\s+(?:short film|live)\s*$/i, "")
+    .trim();
+  return [...new Set([raw, withoutAnnotation, cleaned].filter(Boolean))].slice(0, 3);
 }
