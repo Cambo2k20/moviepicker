@@ -275,3 +275,69 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   `), { owner_id: dean.id, movie_id: matrix.id, outcome: "FINISHED", source_archive_entry_id: manualReviewEntryId });
   assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${skippedReviewEntryId}'`).count, 0);
 });
+
+test("the archive preview handles a catalog and review queue at production scale", async () => {
+  resetWorkspace();
+  const group = groupId();
+  const admin = await createIdentity({ name: "Cambo", role: "admin" });
+
+  runSql(`
+    insert into public.movies (tmdb_id, title, release_year)
+    select 900000 + n, 'Catalog Film ' || n, 1970 + (n % 60)
+    from generate_series(1, 419) as n;
+
+    insert into public.journal_archive_entries (
+      group_id, volume_id, discord_message_id, discord_jump_url,
+      entry_label, entry_sort_number, title, release_year, watched_at,
+      status, viewer_names, author_display_name, message_created_at,
+      raw_content, parser_status
+    )
+    select
+      '${group}', volume.id, (800000000000000000::bigint + n)::text,
+      'https://discord.com/channels/272427070779293697/713935563912118293/' || (800000000000000000::bigint + n),
+      n::text, n, 'Catalog Film ' || (1 + (n % 419)) || ' Revised',
+      1970 + ((1 + (n % 419)) % 60), '2026-09-20',
+      'FINISHED', array['Cambo'], 'Cambo', '2026-09-20T20:00:00Z',
+      '- Entry #' || n, 'PARSED'
+    from generate_series(1, 1371) as n
+    cross join public.journal_volumes volume
+    where volume.discord_channel_id = '713935563912118293';
+
+    insert into public.archive_history_reconciliation_reviews (
+      archive_entry_id, movie_id, viewer_keys, decision, reviewed_by
+    )
+    select entry.id, movie.id, array['cambo'], 'APPROVED', '${admin.id}'
+    from public.journal_archive_entries entry
+    join public.movies movie
+      on movie.tmdb_id = 900000 + (1 + (entry.entry_sort_number::integer % 419))
+    where entry.group_id = '${group}' and entry.entry_sort_number <= 439;
+  `);
+
+  const startedAt = performance.now();
+  const { data: preview, error } = await admin.client.rpc("preview_archive_history_reconciliation", { p_group_id: group });
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(error, null);
+  assert.equal(preview.length, 1000); // PostgREST caps a single response at 1,000 rows.
+  assert.ok(preview.some((row) => row.review_decision === "APPROVED"));
+  assert.ok(preview.some((row) => row.review_decision === null));
+  assert.ok(elapsedMs < 8000, `Preview took ${Math.round(elapsedMs)} ms`);
+
+  runSql(`
+    begin;
+    set local role authenticated;
+    select pg_catalog.set_config('request.jwt.claim.sub', '${admin.id}', true);
+    set local statement_timeout = '8s';
+    do $$
+    begin
+      if (select count(*) from public.preview_archive_history_reconciliation('${group}')) <> 1371 then
+        raise exception 'Archive preview did not return every row';
+      end if;
+      if (select count(*) from public.preview_archive_history_reconciliation('${group}')
+          where review_decision = 'APPROVED') <> 439 then
+        raise exception 'Archive preview lost approved decisions';
+      end if;
+    end;
+    $$;
+    commit;
+  `);
+});
