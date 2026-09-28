@@ -1393,6 +1393,14 @@ textarea::placeholder {
   gap: 6px;
 }
 
+.journal-reconciliation-candidates-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .journal-reconciliation-candidate {
   display: flex;
   align-items: center;
