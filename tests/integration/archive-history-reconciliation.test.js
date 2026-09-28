@@ -23,6 +23,8 @@ let matrix;
 let readyEntryId;
 let dnfEntryId;
 let queueItemId;
+let manualReviewEntryId;
+let skippedReviewEntryId;
 
 function sqlString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -171,4 +173,59 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   assert.equal(finalPreviewError, null);
   assert.equal(finalPreview.find((row) => row.archive_entry_id === readyEntryId).match_status, "ALREADY_SYNCED");
   assert.equal(finalPreview.find((row) => row.archive_entry_id === dnfEntryId).match_status, "ALREADY_SYNCED");
+
+  manualReviewEntryId = archiveEntry({ messageId: "700000000000000007", label: "1395", title: "Unknown Discord title", year: 2001, viewers: ["Andrew"] });
+  skippedReviewEntryId = archiveEntry({ messageId: "700000000000000008", label: "1394", title: "Another unknown title", year: 2002, viewers: ["Dean"] });
+
+  const { error: memberReviewError } = await dean.client.rpc("save_archive_history_reconciliation_review", {
+    p_group_id: group,
+    p_archive_entry_id: manualReviewEntryId,
+    p_movie_id: matrix.id,
+    p_viewer_keys: ["dean"],
+    p_decision: "APPROVED",
+  });
+  assert.match(memberReviewError?.message || "", /group administrator/i);
+
+  const { data: savedReview, error: saveReviewError } = await cambo.client.rpc("save_archive_history_reconciliation_review", {
+    p_group_id: group,
+    p_archive_entry_id: manualReviewEntryId,
+    p_movie_id: matrix.id,
+    p_viewer_keys: ["dean"],
+    p_decision: "APPROVED",
+  });
+  assert.equal(saveReviewError, null);
+  assert.equal(savedReview.decision, "APPROVED");
+
+  const { error: skipReviewError } = await cambo.client.rpc("save_archive_history_reconciliation_review", {
+    p_group_id: group,
+    p_archive_entry_id: skippedReviewEntryId,
+    p_movie_id: null,
+    p_viewer_keys: [],
+    p_decision: "SKIPPED",
+  });
+  assert.equal(skipReviewError, null);
+
+  const { data: reviewedPreview, error: reviewedPreviewError } = await cambo.client.rpc("preview_archive_history_reconciliation", { p_group_id: group });
+  assert.equal(reviewedPreviewError, null);
+  assert.equal(reviewedPreview.find((row) => row.archive_entry_id === manualReviewEntryId).match_status, "READY");
+  assert.deepEqual(reviewedPreview.find((row) => row.archive_entry_id === manualReviewEntryId).reviewed_viewer_keys, ["dean"]);
+  assert.equal(reviewedPreview.find((row) => row.archive_entry_id === skippedReviewEntryId).match_status, "SKIPPED");
+
+  const { data: manualApply, error: manualApplyError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
+    p_group_id: group,
+    p_archive_entry_ids: [manualReviewEntryId],
+  });
+  assert.equal(manualApplyError, null);
+  assert.deepEqual(manualApply, {
+    entries_applied: 1,
+    events_created: 1,
+    events_already_present: 0,
+    events_total: 1,
+  });
+  assert.deepEqual(sqlRow(`
+    select owner_id, movie_id, outcome, source_archive_entry_id
+    from public.personal_viewing_events
+    where source_archive_entry_id = '${manualReviewEntryId}'
+  `), { owner_id: dean.id, movie_id: matrix.id, outcome: "FINISHED", source_archive_entry_id: manualReviewEntryId });
+  assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${skippedReviewEntryId}'`).count, 0);
 });

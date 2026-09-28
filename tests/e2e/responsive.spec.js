@@ -249,6 +249,16 @@ test("admin Journal reconciliation previews safe private-history matches", async
   await expect(panel).toContainText("Resident Evil");
   await expect(panel).toContainText("No canonical movie");
   await expect(panel.getByRole("button", { name: "Sync 1 film", exact: true })).toBeEnabled();
+  await expect(panel.locator("summary").filter({ hasText: "Review this entry" })).toHaveCount(2);
+
+  await panel.locator("select[name='status']").selectOption("review");
+  await panel.getByRole("button", { name: "Filter", exact: true }).click();
+  const reviewRow = panel.locator(".journal-reconciliation-row").filter({ hasText: "Green Lantern: Beware My Power" });
+  await expect(reviewRow).toBeVisible();
+  await reviewRow.locator("summary").click();
+  await expect(reviewRow.locator("[data-reconciliation-review-form]")).toBeVisible();
+  await expect(reviewRow.getByRole("checkbox", { name: /Cambo/ })).toBeVisible();
+  await expect(reviewRow.getByRole("checkbox", { name: /Dean/ })).toBeVisible();
 });
 
 test("phone and tablet destination row supports keyboard movement and reveals the active route", async ({ page }, testInfo) => {

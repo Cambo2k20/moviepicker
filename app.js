@@ -163,6 +163,10 @@ let journalFocusedEntryId = null;
 let journalReconciliationRows = null;
 let journalReconciliationBusy = false;
 let journalReconciliationError = "";
+let journalReconciliationQuery = "";
+let journalReconciliationStatusFilter = "all";
+let journalReconciliationVisibleLimit = 24;
+let journalReconciliationReviewBusyId = null;
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -2926,12 +2930,98 @@ function renderStats() {
 const journalReconciliationStatusLabels = {
   READY: "Ready to sync",
   ALREADY_SYNCED: "Already synced",
+  SKIPPED: "Skipped",
   NEEDS_REVIEW: "Needs review",
   NO_CANONICAL_MOVIE: "No canonical movie",
   AMBIGUOUS_MOVIE: "Ambiguous movie",
   NO_CONFIRMED_VIEWER: "No confirmed viewer",
   MISSING_TARGET_PROFILE: "Missing account",
 };
+
+const journalReconciliationStatusFilters = [
+  ["all", "All statuses"],
+  ["review", "Needs review"],
+  ["no-viewer", "Missing viewer/account"],
+  ["ready", "Ready to sync"],
+  ["already-synced", "Already synced"],
+  ["skipped", "Skipped"],
+];
+
+function reconciliationViewerChoices() {
+  const cambo = members.find((member) => ["cambo", "camebo", "cameron"].includes(String(member.name).trim().toLowerCase()));
+  const dean = members.find((member) => ["dean", "deanshelton17"].includes(String(member.name).trim().toLowerCase()));
+  return [
+    { key: "cambo", label: cambo?.name || "Cambo", source: "Cambo / Camebo / Cameron", available: Boolean(cambo) },
+    { key: "dean", label: dean?.name || "deanshelton17", source: "Dean", available: Boolean(dean) },
+  ];
+}
+
+function reconciliationViewerKeyFromName(name) {
+  const value = String(name || "").trim().toLowerCase();
+  if (value === "cambo" || value === "camebo" || value === "cameron") return "cambo";
+  if (value === "dean" || value === "deanshelton17") return "dean";
+  return null;
+}
+
+function journalReconciliationRowsForDisplay() {
+  const query = journalReconciliationQuery.trim().toLowerCase();
+  const status = journalReconciliationStatusFilter;
+  const statusMatches = (row) => {
+    if (status === "review") return ["NEEDS_REVIEW", "NO_CANONICAL_MOVIE", "AMBIGUOUS_MOVIE"].includes(row.match_status);
+    if (status === "no-viewer") return ["NO_CONFIRMED_VIEWER", "MISSING_TARGET_PROFILE"].includes(row.match_status);
+    if (status === "ready") return row.match_status === "READY";
+    if (status === "already-synced") return row.match_status === "ALREADY_SYNCED";
+    if (status === "skipped") return row.match_status === "SKIPPED";
+    return true;
+  };
+  return (journalReconciliationRows || []).filter((row) => {
+    const searchable = [
+      row.entry_label,
+      row.title,
+      row.release_year,
+      row.match_reason,
+      ...(row.viewer_names || []),
+      ...(row.target_viewers || []),
+    ].join(" ").toLowerCase();
+    return statusMatches(row) && (!query || searchable.includes(query));
+  });
+}
+
+function renderJournalReconciliationCandidates(matches) {
+  if (!matches.length) return `<p class="journal-reconciliation-search-note">No matching films found. Try a broader title or remove the year.</p>`;
+  return matches.map((match) => `
+    <button class="journal-reconciliation-candidate" type="button" data-reconciliation-select-movie="${escapeHTML(match.tmdbId)}">
+      <span><strong>${escapeHTML(match.title)}</strong><small>${match.year || "Year unknown"}</small></span>
+      <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+    </button>`).join("");
+}
+
+function renderJournalReconciliationReview(row) {
+  if (row.match_status === "ALREADY_SYNCED") return "";
+  const selectedViewerKeys = Array.isArray(row.reviewed_viewer_keys) && row.reviewed_viewer_keys.length
+    ? row.reviewed_viewer_keys
+    : (row.target_viewers || []).map(reconciliationViewerKeyFromName).filter(Boolean);
+  const selectedMovieId = row.reviewed_movie_id || row.movie_id || "";
+  const selectedMovieTitle = row.canonical_title || "";
+  const choices = reconciliationViewerChoices();
+  return `
+    <details class="journal-reconciliation-review" ${row.review_decision === "APPROVED" ? "open" : ""}>
+      <summary><span class="material-symbols-outlined" aria-hidden="true">rule</span>${row.review_decision === "APPROVED" ? "Edit review" : "Review this entry"}</summary>
+      <form data-reconciliation-review-form data-archive-entry-id="${escapeHTML(row.archive_entry_id)}" data-movie-id="${escapeHTML(selectedMovieId)}">
+        <div class="journal-reconciliation-review-heading"><div><strong>Confirm the private-history match</strong><p>Choose the canonical film and the current accounts that should receive a private viewing event. The imported Discord entry stays unchanged.</p></div></div>
+        <div class="journal-reconciliation-search">
+          <label><span>Search canonical films</span><input name="movie_query" value="${escapeHTML(row.title || "")}" maxlength="200" /></label>
+          <label><span>Release year <small>Optional</small></span><input name="movie_year" type="number" min="1888" max="2200" value="${escapeHTML(row.release_year || "")}" /></label>
+          <button class="secondary-button compact" type="button" data-reconciliation-search-movie><span class="material-symbols-outlined" aria-hidden="true">search</span>Search</button>
+        </div>
+        <div class="journal-reconciliation-selected-movie" data-reconciliation-selected-movie>${selectedMovieId ? `<span class="material-symbols-outlined" aria-hidden="true">movie</span><span>Selected: <strong>${escapeHTML(selectedMovieTitle || "Canonical movie selected")}</strong></span>` : `<span class="material-symbols-outlined" aria-hidden="true">help</span><span>No canonical film selected yet.</span>`}</div>
+        <div class="journal-reconciliation-candidates" data-reconciliation-candidates aria-live="polite"></div>
+        <fieldset class="journal-reconciliation-viewers"><legend>Private history viewers</legend><p>Source names: ${escapeHTML((row.viewer_names || []).join(", ") || "None recorded")}</p><div>${choices.map((choice) => `<label class="journal-reconciliation-viewer"><input type="checkbox" name="viewer_key" value="${choice.key}" ${selectedViewerKeys.includes(choice.key) ? "checked" : ""} ${choice.available ? "" : "disabled"} /><span><strong>${escapeHTML(choice.label)}</strong><small>Matches ${escapeHTML(choice.source)}${choice.available ? "" : " · account not in this group"}</small></span></label>`).join("")}</div></fieldset>
+        <div class="journal-reconciliation-review-actions"><button class="primary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">check</span>Approve match</button><button class="quiet-button danger compact" type="button" data-reconciliation-skip>Skip this entry</button></div>
+        <p class="journal-reconciliation-review-status" data-reconciliation-review-status role="status"></p>
+      </form>
+    </details>`;
+}
 
 function designPreviewJournalReconciliationRows() {
   return [
@@ -2979,12 +3069,13 @@ function renderJournalReconciliationPanel() {
     return result;
   }, {});
   const readyCount = counts.READY || 0;
-  const displayedRows = rows.slice(0, 12);
+  const filteredRows = journalReconciliationRowsForDisplay();
+  const displayedRows = filteredRows.slice(0, journalReconciliationVisibleLimit);
   return `
     <section class="management-section journal-reconciliation" aria-labelledby="journal-reconciliation-title">
       <div class="section-heading"><div><span class="eyebrow">Private history repair</span><h2 id="journal-reconciliation-title">Reconcile Journal history</h2></div><span class="request-count">${rows.length ? rows.length.toLocaleString() : "—"}</span></div>
       <article class="invite-panel layout-container layout-container-neutral">
-        <div><h3>Turn confirmed archive matches into private history.</h3><p>This matches an imported Discord entry to one canonical film and creates owner-private events for the current Cambo and Dean accounts. It updates their My Cinema state, leaves the shared list alone and skips anything ambiguous.</p></div>
+        <div><h3>Review archive matches before creating private history.</h3><p>Search each blocked Discord entry, choose its canonical film and confirm which current accounts watched it. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
         <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
       </article>
       ${journalReconciliationError ? `<div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span><div><strong>Journal history preview failed.</strong><p>${escapeHTML(journalReconciliationError)}</p></div><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation>Try again</button></div>` : ""}
@@ -2992,13 +3083,19 @@ function renderJournalReconciliationPanel() {
         <div class="journal-reconciliation-summary" aria-label="Journal history reconciliation summary">
           <span><strong>${counts.READY || 0}</strong> ready</span><span><strong>${counts.ALREADY_SYNCED || 0}</strong> already synced</span><span><strong>${(counts.NEEDS_REVIEW || 0) + (counts.AMBIGUOUS_MOVIE || 0) + (counts.NO_CANONICAL_MOVIE || 0)}</strong> need review</span><span><strong>${(counts.NO_CONFIRMED_VIEWER || 0) + (counts.MISSING_TARGET_PROFILE || 0)}</strong> missing viewer/account</span>
         </div>
+        <form class="journal-reconciliation-filters" data-journal-reconciliation-filter-form>
+          <label><span>Find an archive entry</span><input name="query" value="${escapeHTML(journalReconciliationQuery)}" placeholder="Title, entry number or viewer" /></label>
+          <label><span>Status</span><select name="status">${journalReconciliationStatusFilters.map(([value, label]) => `<option value="${value}" ${journalReconciliationStatusFilter === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+          <button class="secondary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>Filter</button>
+          <span class="journal-reconciliation-filter-count">Showing ${displayedRows.length.toLocaleString()} of ${filteredRows.length.toLocaleString()} matching entries</span>
+        </form>
         <div class="journal-reconciliation-list">${displayedRows.length ? displayedRows.map((row) => {
           const statusLabel = journalReconciliationStatusLabels[row.match_status] || row.match_status;
           const statusClass = String(row.match_status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
           const targetViewers = Array.isArray(row.target_viewers) && row.target_viewers.length ? row.target_viewers.join(", ") : "None recognised";
-          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Confirmed viewers: ${escapeHTML(targetViewers)}</p></div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div></article>`;
+          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Private-history viewers: ${escapeHTML(targetViewers)}</p>${row.canonical_title ? `<p>Canonical film: ${escapeHTML(row.canonical_title)}</p>` : ""}</div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div>${renderJournalReconciliationReview(row)}</article>`;
         }).join("") : `<div class="empty-state compact-empty">No imported Journal rows were found.</div>`}</div>
-        ${rows.length > displayedRows.length ? `<p class="journal-reconciliation-more">Showing the first ${displayedRows.length} rows. The summary includes all ${rows.length.toLocaleString()} archive entries.</p>` : ""}
+        ${filteredRows.length > displayedRows.length ? `<button class="secondary-button compact journal-reconciliation-more-button" type="button" data-show-more-journal-reconciliation>Show more entries</button>` : ""}
       `}
     </section>`;
 }
@@ -3050,6 +3147,117 @@ async function applyJournalReconciliation() {
   } finally {
     journalReconciliationBusy = false;
     render();
+  }
+}
+
+function setJournalReconciliationReviewStatus(form, message, tone = "") {
+  const status = form?.querySelector("[data-reconciliation-review-status]");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
+}
+
+async function searchJournalReconciliationMovie(form) {
+  const searchButton = form.querySelector("[data-reconciliation-search-movie]");
+  const query = String(form.elements.movie_query?.value || "").trim();
+  const yearValue = String(form.elements.movie_year?.value || "").trim();
+  const year = yearValue ? Number(yearValue) : null;
+  if (!query) {
+    setJournalReconciliationReviewStatus(form, "Enter a film title to search.", "warning");
+    return;
+  }
+  if (year !== null && (!Number.isInteger(year) || year < 1888 || year > 2200)) {
+    setJournalReconciliationReviewStatus(form, "Enter a valid release year or leave it blank.", "warning");
+    return;
+  }
+  searchButton.disabled = true;
+  searchButton.querySelector(".material-symbols-outlined")?.replaceChildren(document.createTextNode("progress_activity"));
+  setJournalReconciliationReviewStatus(form, "Searching the canonical film catalogue…");
+  try {
+    const { matches = [] } = await lookupMovie({ action: "search", query, year });
+    form.querySelector("[data-reconciliation-candidates]").innerHTML = renderJournalReconciliationCandidates(matches);
+    setJournalReconciliationReviewStatus(form, matches.length ? `${matches.length} matches found. Choose the correct film.` : "No matching films found. Try a broader title.", matches.length ? "success" : "warning");
+  } catch (error) {
+    setJournalReconciliationReviewStatus(form, error.message || "The canonical film search failed.", "warning");
+  } finally {
+    searchButton.disabled = false;
+    searchButton.querySelector(".material-symbols-outlined")?.replaceChildren(document.createTextNode("search"));
+  }
+}
+
+async function selectJournalReconciliationMovie(button) {
+  const form = button.closest("[data-reconciliation-review-form]");
+  if (!form || button.disabled) return;
+  button.disabled = true;
+  setJournalReconciliationReviewStatus(form, "Loading the selected canonical film…");
+  try {
+    const { movie } = await lookupMovie({ action: "details", tmdbId: Number(button.dataset.reconciliationSelectMovie) });
+    if (!movie?.movieId) throw new Error("That film could not be added to the canonical catalogue.");
+    form.dataset.movieId = movie.movieId;
+    form.dataset.movieTitle = movie.title || "Canonical movie selected";
+    form.querySelector("[data-reconciliation-selected-movie]").innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">movie</span><span>Selected: <strong>${escapeHTML(movie.title || "Canonical movie selected")}</strong>${movie.year ? ` <small>${movie.year}</small>` : ""}</span>`;
+    form.querySelector("[data-reconciliation-candidates]").innerHTML = "";
+    setJournalReconciliationReviewStatus(form, "Canonical film selected. Choose the private-history viewers, then approve.", "success");
+  } catch (error) {
+    setJournalReconciliationReviewStatus(form, error.message || "The canonical film could not be selected.", "warning");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveJournalReconciliationReview(form, decision = "APPROVED") {
+  const archiveEntryId = form.dataset.archiveEntryId;
+  if (!archiveEntryId || journalReconciliationReviewBusyId) return;
+  const movieId = decision === "APPROVED" ? (form.dataset.movieId || null) : null;
+  const viewerKeys = decision === "APPROVED"
+    ? [...form.querySelectorAll("input[name='viewer_key']:checked")].map((input) => input.value)
+    : [];
+  if (decision === "APPROVED" && !movieId) {
+    setJournalReconciliationReviewStatus(form, "Choose a canonical film before approving this entry.", "warning");
+    return;
+  }
+  if (decision === "APPROVED" && !viewerKeys.length) {
+    setJournalReconciliationReviewStatus(form, "Choose at least one current viewer before approving this entry.", "warning");
+    return;
+  }
+  if (decision === "SKIPPED" && !window.confirm("Skip this archive entry? It will not create private viewing history until you review it again.")) return;
+  journalReconciliationReviewBusyId = archiveEntryId;
+  form.querySelectorAll("button, input").forEach((control) => { control.disabled = true; });
+  setJournalReconciliationReviewStatus(form, decision === "SKIPPED" ? "Skipping entry…" : "Saving review…");
+  try {
+    if (designPreviewMode) {
+      const choices = reconciliationViewerChoices();
+      journalReconciliationRows = (journalReconciliationRows || []).map((row) => row.archive_entry_id !== archiveEntryId ? row : {
+        ...row,
+        match_status: decision === "SKIPPED" ? "SKIPPED" : "READY",
+        match_reason: decision === "SKIPPED" ? "Manually skipped by an administrator." : "Manually approved canonical film and private-history viewers.",
+        review_decision: decision,
+        reviewed_movie_id: movieId,
+        reviewed_viewer_keys: viewerKeys,
+        movie_id: movieId,
+        canonical_title: decision === "SKIPPED" ? null : (form.dataset.movieTitle || row.canonical_title),
+        target_viewers: decision === "SKIPPED" ? [] : viewerKeys.map((key) => choices.find((choice) => choice.key === key)?.label || key),
+      });
+      journalReconciliationReviewBusyId = null;
+      render();
+      showToast(decision === "SKIPPED" ? "Archive entry skipped." : "Archive match approved. It is ready to sync.");
+      return;
+    }
+    const { error } = await supabase.rpc("save_archive_history_reconciliation_review", {
+      p_group_id: activeGroup.id,
+      p_archive_entry_id: archiveEntryId,
+      p_movie_id: movieId,
+      p_viewer_keys: viewerKeys,
+      p_decision: decision,
+    });
+    if (error) throw error;
+    await refreshJournalReconciliation();
+    showToast(decision === "SKIPPED" ? "Archive entry skipped." : "Archive match approved. It is ready to sync.");
+  } catch (error) {
+    setJournalReconciliationReviewStatus(form, error.message || "The review could not be saved.", "warning");
+  } finally {
+    journalReconciliationReviewBusyId = null;
+    if (document.body.contains(form)) form.querySelectorAll("button, input").forEach((control) => { control.disabled = false; });
   }
 }
 
@@ -3784,6 +3992,10 @@ async function loadWorkspace(providerToken = null) {
   journalReconciliationRows = null;
   journalReconciliationBusy = false;
   journalReconciliationError = "";
+  journalReconciliationQuery = "";
+  journalReconciliationStatusFilter = "all";
+  journalReconciliationVisibleLimit = 24;
+  journalReconciliationReviewBusyId = null;
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
@@ -4260,6 +4472,22 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-journal-reconciliation-filter-form]")) {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    journalReconciliationQuery = String(form.get("query") || "").trim();
+    journalReconciliationStatusFilter = String(form.get("status") || "all");
+    journalReconciliationVisibleLimit = 24;
+    render();
+    return;
+  }
+
+  if (event.target.matches("[data-reconciliation-review-form]")) {
+    event.preventDefault();
+    await saveJournalReconciliationReview(event.target, "APPROVED");
+    return;
+  }
+
   if (event.target.matches("#auth-form")) {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -4530,6 +4758,26 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-apply-journal-reconciliation]")) {
     await applyJournalReconciliation();
+    return;
+  }
+  if (event.target.closest("[data-show-more-journal-reconciliation]")) {
+    journalReconciliationVisibleLimit += 24;
+    render();
+    return;
+  }
+  const reconciliationSearchButton = event.target.closest("[data-reconciliation-search-movie]");
+  if (reconciliationSearchButton) {
+    await searchJournalReconciliationMovie(reconciliationSearchButton.closest("[data-reconciliation-review-form]"));
+    return;
+  }
+  const reconciliationMovieButton = event.target.closest("[data-reconciliation-select-movie]");
+  if (reconciliationMovieButton) {
+    await selectJournalReconciliationMovie(reconciliationMovieButton);
+    return;
+  }
+  const reconciliationSkipButton = event.target.closest("[data-reconciliation-skip]");
+  if (reconciliationSkipButton) {
+    await saveJournalReconciliationReview(reconciliationSkipButton.closest("[data-reconciliation-review-form]"), "SKIPPED");
     return;
   }
   const publishHubButton = event.target.closest("[data-publish-cine-cord-hub]");

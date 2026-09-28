@@ -1271,6 +1271,218 @@ textarea::placeholder {
   margin: 14px 0 0;
 }
 
+.journal-reconciliation-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 220px auto auto;
+  gap: 10px;
+  align-items: end;
+  margin: 4px 0 18px;
+}
+
+.journal-reconciliation-filters label,
+.journal-reconciliation-search label {
+  display: grid;
+  gap: 6px;
+}
+
+.journal-reconciliation-filters label > span,
+.journal-reconciliation-search label > span,
+.journal-reconciliation-viewers legend {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journal-reconciliation-filter-count {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.journal-reconciliation-more-button {
+  margin-top: 16px;
+}
+
+.journal-reconciliation-review {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.journal-reconciliation-review > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--purple-light);
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.journal-reconciliation-review > summary::-webkit-details-marker {
+  display: none;
+}
+
+.journal-reconciliation-review > summary .material-symbols-outlined {
+  font-size: 17px;
+}
+
+.journal-reconciliation-review[open] > summary {
+  margin-bottom: 16px;
+}
+
+.journal-reconciliation-review form {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.journal-reconciliation-review-heading strong {
+  font-size: 15px;
+}
+
+.journal-reconciliation-review-heading p,
+.journal-reconciliation-viewers p,
+.journal-reconciliation-search-note,
+.journal-reconciliation-review-status {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.journal-reconciliation-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.journal-reconciliation-selected-movie {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.journal-reconciliation-selected-movie .material-symbols-outlined {
+  color: var(--purple-light);
+  font-size: 17px;
+}
+
+.journal-reconciliation-selected-movie strong {
+  color: var(--text);
+}
+
+.journal-reconciliation-selected-movie small {
+  color: var(--muted);
+}
+
+.journal-reconciliation-candidates {
+  display: grid;
+  gap: 6px;
+}
+
+.journal-reconciliation-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.journal-reconciliation-candidate:hover,
+.journal-reconciliation-candidate:focus-visible {
+  border-color: var(--purple-light);
+  background: rgba(126, 87, 255, 0.08);
+}
+
+.journal-reconciliation-candidate > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.journal-reconciliation-candidate small {
+  color: var(--muted);
+}
+
+.journal-reconciliation-candidate .material-symbols-outlined {
+  color: var(--purple-light);
+}
+
+.journal-reconciliation-viewers {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  padding: 12px;
+}
+
+.journal-reconciliation-viewers > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.journal-reconciliation-viewer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 210px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+}
+
+.journal-reconciliation-viewer:has(input:checked) {
+  border-color: var(--purple-light);
+  background: rgba(126, 87, 255, 0.08);
+}
+
+.journal-reconciliation-viewer > span {
+  display: grid;
+  gap: 3px;
+}
+
+.journal-reconciliation-viewer small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.journal-reconciliation-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.journal-reconciliation-review-status[data-tone="warning"] {
+  color: #f0a0b0;
+}
+
+.journal-reconciliation-review-status[data-tone="success"] {
+  color: var(--success);
+}
+
+.journal-reconciliation-result .status-pill.skipped {
+  color: var(--muted);
+}
+
 .section-heading {
   display: flex;
   align-items: end;
@@ -2806,6 +3018,24 @@ legend,
   .journal-reconciliation-row {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .journal-reconciliation-filters,
+  .journal-reconciliation-search {
+    grid-template-columns: 1fr;
+  }
+
+  .journal-reconciliation-filter-count {
+    align-self: start;
+  }
+
+  .journal-reconciliation-review {
+    grid-column: 1;
+  }
+
+  .journal-reconciliation-viewer {
+    min-width: 0;
+    width: 100%;
   }
 
   .request-row {
