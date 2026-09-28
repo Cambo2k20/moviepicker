@@ -554,8 +554,16 @@ release year, an unambiguous TMDB suggestion or an existing approved film
 identity, a parsed watch record and a current account for every selected
 viewer. The administrator sees the full dry run and confirms it before saving
 review decisions; a separate Sync creates owner-private events. Ambiguous
-films, other names and incomplete records remain for individual review. This
-exception does not turn archive names into a general account-matching rule.
+films require human review; other names and incomplete records remain for
+individual review. This exception does not turn archive names into a general
+account-matching rule.
+An administrator who has checked the displayed TMDB poster and year may also
+approve selected ambiguous candidate rows in batches of at most 100. This is
+an explicit human review, not automatic matching: unparsed or incomplete
+records, missing artwork/year and unresolved viewers still require individual
+review. The candidate and viewer set are rechecked against a fresh server-side
+preview before saving; an existing canonical match is disclosed, not silently
+changed. Sync remains separate.
 A later Find My History flow suggests possible matches for private review. The
 member must claim or reject each result. A claim does not rewrite the archive
 and may be withdrawn.
