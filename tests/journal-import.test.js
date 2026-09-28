@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { JOURNAL_CHANNELS, parseJournalMessage } from "../scripts/import-discord-journal.mjs";
+import {
+  JOURNAL_CHANNELS,
+  parseJournalMessage,
+  planArchiveViewingHistory,
+  resolveHistoricalViewerTargets,
+} from "../scripts/import-discord-journal.mjs";
 
 const channel = JOURNAL_CHANNELS[0];
 
@@ -88,4 +93,44 @@ test("marks incomplete entries for review while preserving raw content", () => {
 test("skips divider and conversation messages", () => {
   assert.equal(parseJournalMessage(message("————————————————————"), channel).reason, "divider");
   assert.equal(parseJournalMessage(message("This is not a Journal post"), channel).reason, "not_a_journal_entry");
+});
+
+test("resolves confirmed accounts inside compacted historical viewer text", () => {
+  assert.deepEqual(resolveHistoricalViewerTargets(["Cameron Dean Andrew Adam Luke"]), ["cambo", "dean"]);
+  assert.deepEqual(resolveHistoricalViewerTargets(["Adam  Dean", "Cambo (Zzz)"]), ["cambo", "dean"]);
+  assert.deepEqual(resolveHistoricalViewerTargets(["Adam. Andrew", "Cory"]), []);
+});
+
+test("plans archive viewing events only for confirmed profiles and unique movies", () => {
+  const plan = planArchiveViewingHistory([
+    {
+      id: "archive-1",
+      title: "Alien",
+      release_year: 1979,
+      watched_at: "2026-09-28",
+      status: "FINISHED",
+      viewer_names: ["Cameron Dean Andrew"],
+    },
+    {
+      id: "archive-2",
+      title: "Unknown Film",
+      release_year: 2020,
+      watched_at: "2026-09-28",
+      status: "FINISHED",
+      viewer_names: ["Cameron"],
+    },
+  ], {
+    profiles: [
+      { id: "profile-cambo", display_name: "Cambo" },
+      { id: "profile-dean", display_name: "deanshelton17" },
+    ],
+    movies: [
+      { id: "movie-alien", title: "Alien", original_title: "Alien", release_year: 1979 },
+    ],
+  });
+
+  assert.equal(plan.events.length, 2);
+  assert.deepEqual(plan.events.map((event) => event.owner_id).sort(), ["profile-cambo", "profile-dean"]);
+  assert.equal(plan.events[0].source_archive_entry_id, "archive-1");
+  assert.deepEqual(plan.skipped.map((entry) => entry.reason), ["no_unique_canonical_movie"]);
 });
