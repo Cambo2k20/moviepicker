@@ -2,6 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fetchArchiveHistoryPreview } from "../../archive-reconciliation-core.js";
 
 import {
   createIdentity,
@@ -321,6 +322,11 @@ test("the archive preview handles a catalog and review queue at production scale
   assert.ok(preview.some((row) => row.review_decision === "APPROVED"));
   assert.ok(preview.some((row) => row.review_decision === null));
   assert.ok(elapsedMs < 8000, `Preview took ${Math.round(elapsedMs)} ms`);
+
+  const completePreview = await fetchArchiveHistoryPreview(admin.client, group);
+  assert.equal(completePreview.length, 1371);
+  assert.equal(new Set(completePreview.map((row) => row.archive_entry_id)).size, 1371);
+  assert.equal(completePreview.filter((row) => row.review_decision === "APPROVED").length, 439);
 
   runSql(`
     begin;

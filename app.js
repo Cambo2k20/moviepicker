@@ -35,6 +35,7 @@ import {
   viewingOutcomeLabel,
 } from "./personal-films-core.js";
 import { settleOptionalQuery } from "./workspace-core.js";
+import { fetchArchiveHistoryCandidates, fetchArchiveHistoryPreview } from "./archive-reconciliation-core.js";
 
 const SUPABASE_URL = "https://tbmxxdodprmynyiiaofj.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_D-ZMbt0ttcYPHEDtghl7AQ_wstwsoti";
@@ -3371,15 +3372,15 @@ function mergeJournalReconciliationCandidates(candidates = []) {
   journalReconciliationCandidates = next;
 }
 
-async function loadCachedJournalReconciliationCandidates(entryIds) {
-  if (designPreviewMode || !activeGroup?.id || !entryIds.length) return;
-  const { data, error } = await supabase.rpc("get_archive_history_match_candidates", {
-    p_group_id: activeGroup.id,
-    p_archive_entry_ids: entryIds,
-  });
-  if (error) return;
-  journalReconciliationCandidates = new Map();
-  mergeJournalReconciliationCandidates(data || []);
+async function loadCachedJournalReconciliationCandidates() {
+  if (designPreviewMode || !activeGroup?.id) return;
+  try {
+    const candidates = await fetchArchiveHistoryCandidates(supabase, activeGroup.id);
+    journalReconciliationCandidates = new Map();
+    mergeJournalReconciliationCandidates(candidates);
+  } catch {
+    journalReconciliationCandidates = new Map();
+  }
 }
 
 async function refreshJournalReconciliation() {
@@ -3396,10 +3397,8 @@ async function refreshJournalReconciliation() {
         ["preview-archive-green-lantern", [{ tmdbId: 946310, title: "Green Lantern: Beware My Power", year: 2022, score: 1, titleScore: 1, yearDelta: 0, matchBand: "STRONG", candidateRank: 1 }]],
       ]);
     } else {
-      const { data, error } = await supabase.rpc("preview_archive_history_reconciliation", { p_group_id: activeGroup.id });
-      if (error) throw error;
-      journalReconciliationRows = Array.isArray(data) ? data : [];
-      await loadCachedJournalReconciliationCandidates(journalReconciliationRows.map((row) => row.archive_entry_id));
+      journalReconciliationRows = await fetchArchiveHistoryPreview(supabase, activeGroup.id);
+      await loadCachedJournalReconciliationCandidates();
     }
   } catch (error) {
     journalReconciliationRows = null;
@@ -3510,8 +3509,11 @@ async function applyJournalBulkApproval() {
 
 async function applyJournalReconciliation() {
   if (!isCurrentAdmin() || !activeGroup?.id || journalReconciliationBusy || journalBulkBusy) return;
-  const readyCount = (journalReconciliationRows || []).filter((row) => row.match_status === "READY").length;
-  if (!readyCount || !window.confirm(`Create private viewing history for ${readyCount} exact Journal match${readyCount === 1 ? "" : "es"}? Ambiguous entries and the shared list will be left unchanged.`)) return;
+  const readyIds = (journalReconciliationRows || [])
+    .filter((row) => row.match_status === "READY")
+    .map((row) => row.archive_entry_id);
+  const readyCount = readyIds.length;
+  if (!readyCount || !window.confirm(`Create private viewing history for ${readyCount} ready Journal match${readyCount === 1 ? "" : "es"}? Ambiguous entries and the shared list will be left unchanged.`)) return;
   journalReconciliationBusy = true;
   journalReconciliationError = "";
   render();
@@ -3522,10 +3524,14 @@ async function applyJournalReconciliation() {
         : row);
       showToast(`${readyCount} private film history match${readyCount === 1 ? "" : "es"} synced in preview.`);
     } else {
-      const { data, error } = await supabase.rpc("apply_archive_history_reconciliation", { p_group_id: activeGroup.id, p_archive_entry_ids: null });
+      const { data, error } = await supabase.rpc("apply_archive_history_reconciliation", { p_group_id: activeGroup.id, p_archive_entry_ids: readyIds });
       if (error) throw error;
       await refreshJournalReconciliation();
-      showToast(`${Number(data?.events_created) || 0} private history event${Number(data?.events_created) === 1 ? "" : "s"} created. The shared list was unchanged.`);
+      if (Number(data?.entries_applied) !== readyCount) {
+        showToast(`Only ${Number(data?.entries_applied) || 0} of ${readyCount} ready Journal matches synced. Review the refreshed preview before trying again.`);
+      } else {
+        showToast(`${Number(data?.events_created) || 0} private history event${Number(data?.events_created) === 1 ? "" : "s"} created. The shared list was unchanged.`);
+      }
     }
   } catch (error) {
     journalReconciliationError = error.message || "Private Journal history could not be synced.";
