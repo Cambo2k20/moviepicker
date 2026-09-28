@@ -1175,6 +1175,106 @@ textarea::placeholder {
   justify-content: flex-end;
 }
 
+.journal-bulk-approval {
+  margin-top: 24px;
+  padding: 22px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.journal-bulk-heading,
+.journal-bulk-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.journal-bulk-heading h3,
+.journal-bulk-heading p,
+.journal-bulk-footer p {
+  margin: 0;
+}
+
+.journal-bulk-heading h3 {
+  font-size: 18px;
+}
+
+.journal-bulk-heading p,
+.journal-bulk-footer p,
+.journal-bulk-empty {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.journal-bulk-heading button,
+.journal-bulk-footer button {
+  flex: 0 0 auto;
+}
+
+.journal-bulk-error {
+  color: var(--danger);
+}
+
+.journal-bulk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 20px 0 8px;
+  color: var(--text);
+}
+
+.journal-bulk-summary strong {
+  color: var(--purple-light);
+  font-size: 22px;
+}
+
+.journal-bulk-summary span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.journal-bulk-list {
+  border-top: 1px solid var(--border-soft);
+}
+
+.journal-bulk-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) 24px minmax(0, 1fr) 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.journal-bulk-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.journal-bulk-row > span:first-child,
+.journal-bulk-row > span:last-child,
+.journal-bulk-row small {
+  color: var(--muted);
+}
+
+.journal-bulk-row .material-symbols-outlined {
+  color: var(--purple-light);
+  font-size: 18px;
+}
+
+.journal-bulk-row small {
+  white-space: nowrap;
+}
+
+.journal-bulk-footer {
+  padding-top: 20px;
+}
+
 .journal-reconciliation-summary {
   display: flex;
   flex-wrap: wrap;
@@ -3021,6 +3121,21 @@ legend,
   .journal-reconciliation-actions .secondary-button,
   .journal-reconciliation-actions .primary-button {
     width: auto;
+  }
+
+  .journal-bulk-heading,
+  .journal-bulk-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .journal-bulk-row {
+    grid-template-columns: 50px minmax(0, 1fr) 20px minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .journal-bulk-row > span:last-child {
+    grid-column: 2 / -1;
   }
 
   .journal-reconciliation-row {

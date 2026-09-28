@@ -321,6 +321,24 @@ test("admin Journal reconciliation previews safe private-history matches", async
   await expect(reviewRow.getByRole("checkbox", { name: /Dean/ })).toBeVisible();
 });
 
+test("admin can dry-run and approve clear Journal matches before a separate Sync", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview#members");
+  const panel = page.locator(".journal-reconciliation");
+  await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
+  await panel.getByRole("button", { name: "Preview clear matches", exact: true }).click();
+
+  const batch = panel.locator(".journal-bulk-approval");
+  await expect(batch.locator(".journal-bulk-summary")).toContainText("1 clear match");
+  await expect(batch.locator(".journal-bulk-row")).toContainText("Green Lantern: Beware My Power");
+  await expect(batch.getByRole("button", { name: "Approve 1 match", exact: true })).toBeEnabled();
+  page.once("dialog", (dialog) => dialog.accept());
+  await batch.getByRole("button", { name: "Approve 1 match", exact: true }).click();
+
+  const row = panel.locator(".journal-reconciliation-row").filter({ hasText: "Green Lantern: Beware My Power" });
+  await expect(row).toContainText("Ready to sync");
+  await expect(panel.getByRole("button", { name: "Sync 2 films", exact: true })).toBeEnabled();
+});
+
 test("phone and tablet destination row supports keyboard movement and reveals the active route", async ({ page }, testInfo) => {
   test.skip(!["phone", "tablet"].includes(testInfo.project.name), "The two-tier footer is used on phone and tablet.");
 

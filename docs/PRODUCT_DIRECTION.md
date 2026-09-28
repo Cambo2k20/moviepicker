@@ -536,8 +536,8 @@ When a completed Cine-Cord session or Journal entry links a viewer through a
 real profile ID and resolves the film through a verified external or canonical
 movie identity, it appears automatically as a source-linked My Cinema viewing
 event. A linked session's verified movie identity may supply that resolution.
-A title-and-year-only match is a suggestion that the member confirms, never an
-automatic link.
+Outside the explicit archive repair below, a title-and-year-only match is a
+suggestion that the member confirms, never an automatic link.
 
 A shared FINISHED result creates a Watched event and current state. A shared
 DNF result creates a Did Not Finish event and current state. The link creates
@@ -547,9 +547,18 @@ date and completion outcome follow the Journal, and the member may hide it from
 My Cinema without changing the shared entry.
 
 The imported archive stores names rather than verified profile IDs, so those
-names are never silently assigned to accounts. A later Find My History flow
-suggests possible matches for private review. The member must claim or reject
-each result. A claim does not rewrite the archive and may be withdrawn.
+names are never silently assigned to accounts. An explicit, administrator-run
+Phase 2B repair may approve archive matches for the already-confirmed Cambo and
+Dean aliases only. Bulk approval is limited to exact normalised title and
+release year, an unambiguous TMDB suggestion or an existing approved film
+identity, a parsed watch record and a current account for every selected
+viewer. The administrator sees the full dry run and confirms it before saving
+review decisions; a separate Sync creates owner-private events. Ambiguous
+films, other names and incomplete records remain for individual review. This
+exception does not turn archive names into a general account-matching rule.
+A later Find My History flow suggests possible matches for private review. The
+member must claim or reject each result. A claim does not rewrite the archive
+and may be withdrawn.
 
 Members edit their own state, rating, Favourite, private note, private review,
 lists, manual viewings, Discover feedback and publication choices.
