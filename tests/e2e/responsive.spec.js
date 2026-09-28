@@ -159,6 +159,7 @@ test("the unified application canvas scales to a comfortable high-resolution den
     ["sessions", "Sessions"],
     ["journal", "The Journal"],
     ["stats", "Group Stats"],
+    ["profiles", "Member Profiles"],
     ["my-films", "My Films"],
     ["members", "Members"],
   ];
@@ -221,8 +222,9 @@ test("area navigation keeps future sections truthful and available routes workin
   await expect(myCinema).toContainText("Private");
   await expect(discover).toBeDisabled();
   await expect(discover).toContainText(/Private.*Coming soon|Private.*Soon/);
-  await expect(memberProfiles).toBeDisabled();
+  await expect(memberProfiles).toBeEnabled();
 
+  await myCinema.scrollIntoViewIfNeeded();
   await myCinema.click();
   await expect(page.getByRole("heading", { name: "My Films", exact: true })).toBeVisible();
   await expect(myCinemaArea).toHaveClass(/is-open/);
@@ -238,6 +240,57 @@ test("area navigation keeps future sections truthful and available routes workin
   await page.locator('[data-nav-area="cine-cord"] .nav-area-toggle').click();
   await expect(page.getByRole("heading", { name: "The List", exact: true })).toBeVisible();
   await expect(cineCordArea).toHaveClass(/is-open/);
+});
+
+test("member profiles publish a cinematic privacy-controlled snapshot", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview#profiles");
+  await expect(page.getByRole("heading", { name: "Member Profiles", exact: true })).toBeVisible();
+  await expect(page.locator(".member-profile-card")).toHaveCount(5);
+  const cameronProfile = page.locator('[data-view="profile"][data-profile-id="preview-cameron"]');
+  await cameronProfile.scrollIntoViewIfNeeded();
+  await cameronProfile.click();
+  await expect(page.locator("#member-profile-title")).toHaveText("Cameron");
+  await expect(page.locator(".member-profile-hero-backdrop")).toBeVisible();
+  await expect(page.locator(".member-profile-stats > div")).toHaveCount(4);
+  await expect(page.locator(".member-profile-stats")).toContainText("Films watched");
+  await expect(page.locator(".member-profile-stats")).toContainText("Sessions attended");
+  await expect(page.locator(".member-profile-stats")).toContainText("Average rating");
+  await expect(page.locator(".member-profile-stats")).toContainText("Completion rate");
+  await expect(page.getByRole("heading", { name: "Top Five", exact: true })).toBeVisible();
+  await expect(page.locator(".member-profile-featured-film")).toHaveCount(5);
+  await expect(page.locator(".member-profile-recent-watch")).toHaveCount(3);
+  await expect(page.locator(".member-profile-genre")).toHaveCount(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+
+  await page.getByRole("button", { name: "Edit profile", exact: true }).click();
+  await expect(page).toHaveURL(/#profile-edit$/);
+  await expect(page.getByRole("heading", { name: "Edit Profile", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Shape your cinema profile", exact: true })).toBeVisible();
+  await expect(page.locator(".member-profile-slot select")).toHaveCount(5);
+  await expect(page.locator("select[name='banner_movie_id']")).toBeVisible();
+  await expect(page.locator("input[name='include_recent_watches']")).toBeChecked();
+  await expect(page.locator("input[name='include_genre_breakdown']")).toBeChecked();
+  await page.locator("textarea[name='introduction']").fill("A deliberately published profile.");
+  await page.locator("select[name='banner_movie_id']").selectOption("preview-movie-348");
+  await expect(page.locator(".member-profile-banner-preview")).toContainText("Alien");
+  await page.getByRole("button", { name: "Update published profile", exact: true }).click();
+  await expect(page.getByText("Your profile is now visible to approved Cine-Cord members.")).toBeVisible();
+  await expect(page).toHaveURL(/#profile\/preview-cameron$/);
+  await expect(page.locator("#member-profile-title")).toHaveText("Cameron");
+  await expect(page.getByText("A deliberately published profile.")).toBeVisible();
+  await expect(page.locator(".member-profile-hero-backdrop")).toHaveAttribute("src", /AmR3JG1VQVxU8TfAvljUhfSFUOx/);
+  await expect(page.locator(".member-profile-featured-film")).toHaveCount(5);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+});
+
+test("member profile deep links open the requested view on a fresh load", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview=profile-deep-link#profile/preview-andrew");
+  await expect(page.locator("#member-profile-title")).toHaveText("Andrew");
+  await expect(page.locator(".member-profile-featured-film")).toHaveCount(5);
+
+  await page.goto("/moviepicker/?design-preview=profile-editor-deep-link#profile-edit");
+  await expect(page.getByRole("heading", { name: "Edit Profile", exact: true })).toBeVisible();
+  await expect(page.locator("[data-member-profile-form]")).toBeVisible();
 });
 
 test("admin Journal reconciliation previews safe private-history matches", async ({ page }) => {
@@ -389,7 +442,7 @@ test("My Films stays private and the unified detail follows its entry context", 
   test.skip(testInfo.project.name !== "desktop", "Context ordering is covered once on desktop.");
 
   await page.locator('[data-nav-area="my-cinema"] .nav-area-toggle').click();
-  await expect(page.locator(".personal-poster-card")).toHaveCount(4);
+  await expect(page.locator(".personal-poster-card")).toHaveCount(5);
   const matrixCard = page.locator(".personal-poster-card").filter({ has: page.getByRole("button", { name: "View details for The Matrix" }) });
   const compactReaction = matrixCard.locator(".personal-card-reaction");
   await expect(compactReaction).toContainText("Really liked it");
@@ -1245,7 +1298,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await page.getByRole("button", { name: "Copy for Discord" }).click();
   await expect(page.getByRole("heading", { name: "The Journal" })).toBeVisible();
   await expect(page.locator("#toast")).toContainText(/Journal entry #1317 (?:saved and copied|was saved)/);
-  let savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+  let savedCard = page.locator(".journal-entry-card.is-current", { hasText: "Entry #1317" });
   await expect(savedCard).toContainText("Entry #1317");
   await page.locator('[data-view="sessions"]').click();
   await expect(page.locator(".session-history-row", { hasText: winnerTitle })).toHaveCount(0);
@@ -1254,7 +1307,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
   await page.locator('[data-view="list"]').click();
   await expect(page.locator(".poster-card").filter({ hasText: winnerTitle }).locator(".status-pill")).toHaveText("Watched once");
   await page.locator('[data-view="journal"]').click();
-  savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+  savedCard = page.locator(".journal-entry-card.is-current", { hasText: "Entry #1317" });
 
   // Publishing remains an explicit action on the Journal card and survives a refresh.
   page.once("dialog", (dialog) => dialog.accept());
@@ -1265,7 +1318,7 @@ test("a confirmed Queue Roulette result and Discord form stay in-bounds", async 
     /^https:\/\/discord\.com\/channels\/preview-guild\/preview-channel\/preview-\d+$/,
   );
   await page.reload();
-  savedCard = page.locator(".journal-entry-card.is-current", { hasText: winnerTitle });
+  savedCard = page.locator(".journal-entry-card.is-current", { hasText: "Entry #1317" });
   await expect(savedCard).toContainText("Discord copy current");
   await expect(savedCard.getByRole("button", { name: "Post to Discord" })).toHaveCount(0);
 
