@@ -160,6 +160,9 @@ let journalYearFilter = "all";
 let journalViewerFilter = "all";
 let journalVisibleLimit = 60;
 let journalFocusedEntryId = null;
+let journalReconciliationRows = null;
+let journalReconciliationBusy = false;
+let journalReconciliationError = "";
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -2920,6 +2923,136 @@ function renderStats() {
     </section>`;
 }
 
+const journalReconciliationStatusLabels = {
+  READY: "Ready to sync",
+  ALREADY_SYNCED: "Already synced",
+  NEEDS_REVIEW: "Needs review",
+  NO_CANONICAL_MOVIE: "No canonical movie",
+  AMBIGUOUS_MOVIE: "Ambiguous movie",
+  NO_CONFIRMED_VIEWER: "No confirmed viewer",
+  MISSING_TARGET_PROFILE: "Missing account",
+};
+
+function designPreviewJournalReconciliationRows() {
+  return [
+    {
+      archive_entry_id: "preview-archive-resident-evil",
+      entry_label: "#1345",
+      title: "Resident Evil",
+      release_year: 2026,
+      watched_at: "2026-09-26",
+      archive_status: "FINISHED",
+      parser_status: "PARSED",
+      viewer_names: ["Adam", "Andrew", "Cameron", "Danny", "Dean", "Kieran"],
+      target_viewers: ["Cameron", "Dean"],
+      already_synced_viewers: [],
+      movie_id: "preview-movie-resident-evil",
+      canonical_title: "Resident Evil",
+      candidate_count: 1,
+      match_status: "READY",
+      match_reason: "Exact title and year match; private history can be created.",
+    },
+    {
+      archive_entry_id: "preview-archive-green-lantern",
+      entry_label: "#1346",
+      title: "Green Lantern: Beware My Power",
+      release_year: 2022,
+      watched_at: "2026-09-27",
+      archive_status: "FINISHED",
+      parser_status: "PARSED",
+      viewer_names: ["Andrew", "Dean"],
+      target_viewers: ["Dean"],
+      already_synced_viewers: [],
+      movie_id: null,
+      canonical_title: null,
+      candidate_count: 0,
+      match_status: "NO_CANONICAL_MOVIE",
+      match_reason: "No canonical movie has the same title and release year.",
+    },
+  ];
+}
+
+function renderJournalReconciliationPanel() {
+  const rows = journalReconciliationRows || [];
+  const counts = rows.reduce((result, row) => {
+    result[row.match_status] = (result[row.match_status] || 0) + 1;
+    return result;
+  }, {});
+  const readyCount = counts.READY || 0;
+  const displayedRows = rows.slice(0, 12);
+  return `
+    <section class="management-section journal-reconciliation" aria-labelledby="journal-reconciliation-title">
+      <div class="section-heading"><div><span class="eyebrow">Private history repair</span><h2 id="journal-reconciliation-title">Reconcile Journal history</h2></div><span class="request-count">${rows.length ? rows.length.toLocaleString() : "—"}</span></div>
+      <article class="invite-panel layout-container layout-container-neutral">
+        <div><h3>Turn confirmed archive matches into private history.</h3><p>This matches an imported Discord entry to one canonical film and creates owner-private events for the current Cambo and Dean accounts. It updates their My Cinema state, leaves the shared list alone and skips anything ambiguous.</p></div>
+        <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
+      </article>
+      ${journalReconciliationError ? `<div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span><div><strong>Journal history preview failed.</strong><p>${escapeHTML(journalReconciliationError)}</p></div><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation>Try again</button></div>` : ""}
+      ${journalReconciliationRows === null ? `<div class="empty-state compact-empty"><span class="material-symbols-outlined" aria-hidden="true">manage_search</span><p>Preview the imported Journal before making any private-history changes.</p></div>` : `
+        <div class="journal-reconciliation-summary" aria-label="Journal history reconciliation summary">
+          <span><strong>${counts.READY || 0}</strong> ready</span><span><strong>${counts.ALREADY_SYNCED || 0}</strong> already synced</span><span><strong>${(counts.NEEDS_REVIEW || 0) + (counts.AMBIGUOUS_MOVIE || 0) + (counts.NO_CANONICAL_MOVIE || 0)}</strong> need review</span><span><strong>${(counts.NO_CONFIRMED_VIEWER || 0) + (counts.MISSING_TARGET_PROFILE || 0)}</strong> missing viewer/account</span>
+        </div>
+        <div class="journal-reconciliation-list">${displayedRows.length ? displayedRows.map((row) => {
+          const statusLabel = journalReconciliationStatusLabels[row.match_status] || row.match_status;
+          const statusClass = String(row.match_status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          const targetViewers = Array.isArray(row.target_viewers) && row.target_viewers.length ? row.target_viewers.join(", ") : "None recognised";
+          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Confirmed viewers: ${escapeHTML(targetViewers)}</p></div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div></article>`;
+        }).join("") : `<div class="empty-state compact-empty">No imported Journal rows were found.</div>`}</div>
+        ${rows.length > displayedRows.length ? `<p class="journal-reconciliation-more">Showing the first ${displayedRows.length} rows. The summary includes all ${rows.length.toLocaleString()} archive entries.</p>` : ""}
+      `}
+    </section>`;
+}
+
+async function refreshJournalReconciliation() {
+  if (!isCurrentAdmin() || !activeGroup?.id) return;
+  journalReconciliationBusy = true;
+  journalReconciliationError = "";
+  render();
+  try {
+    if (designPreviewMode) {
+      journalReconciliationRows = designPreviewJournalReconciliationRows();
+    } else {
+      const { data, error } = await supabase.rpc("preview_archive_history_reconciliation", { p_group_id: activeGroup.id });
+      if (error) throw error;
+      journalReconciliationRows = Array.isArray(data) ? data : [];
+    }
+  } catch (error) {
+    journalReconciliationRows = null;
+    journalReconciliationError = error.message || "The administrator preview could not be loaded.";
+  } finally {
+    journalReconciliationBusy = false;
+    render();
+  }
+}
+
+async function applyJournalReconciliation() {
+  if (!isCurrentAdmin() || !activeGroup?.id || journalReconciliationBusy) return;
+  const readyCount = (journalReconciliationRows || []).filter((row) => row.match_status === "READY").length;
+  if (!readyCount || !window.confirm(`Create private viewing history for ${readyCount} exact Journal match${readyCount === 1 ? "" : "es"}? Ambiguous entries and the shared list will be left unchanged.`)) return;
+  journalReconciliationBusy = true;
+  journalReconciliationError = "";
+  render();
+  try {
+    if (designPreviewMode) {
+      journalReconciliationRows = (journalReconciliationRows || []).map((row) => row.match_status === "READY"
+        ? { ...row, match_status: "ALREADY_SYNCED", already_synced_viewers: [...(row.target_viewers || [])], match_reason: "Private history already exists for every resolved viewer." }
+        : row);
+      showToast(`${readyCount} private film history match${readyCount === 1 ? "" : "es"} synced in preview.`);
+    } else {
+      const { data, error } = await supabase.rpc("apply_archive_history_reconciliation", { p_group_id: activeGroup.id, p_archive_entry_ids: null });
+      if (error) throw error;
+      await refreshJournalReconciliation();
+      showToast(`${Number(data?.events_created) || 0} private history event${Number(data?.events_created) === 1 ? "" : "s"} created. The shared list was unchanged.`);
+    }
+  } catch (error) {
+    journalReconciliationError = error.message || "Private Journal history could not be synced.";
+    showToast(`Journal history was not synced: ${journalReconciliationError}`);
+  } finally {
+    journalReconciliationBusy = false;
+    render();
+  }
+}
+
 function renderMembers() {
   if (!isCurrentAdmin()) return renderList();
   const accessUrl = `${window.location.origin}${window.location.pathname}`;
@@ -2935,6 +3068,7 @@ function renderMembers() {
       <article class="invite-panel layout-container layout-container-neutral"><div><span class="eyebrow">Invite a friend</span><h2>Share the private entrance.</h2><p>They create an account, request access and remain locked out until an administrator approves them here.</p></div><div class="invite-link-row"><input value="${escapeHTML(accessUrl)}" readonly aria-label="Website invite link" /><button class="secondary-button" type="button" data-copy-invite>Copy link</button></div></article>
       <section class="management-section" aria-labelledby="requests-title"><div class="section-heading"><div><span class="eyebrow">Waiting room</span><h2 id="requests-title">Access requests</h2></div><span class="request-count">${joinRequests.length}</span></div><div class="request-list">${joinRequests.length ? joinRequests.map((request) => `<article class="request-row layout-container layout-container-neutral"><div class="request-identity"><span class="member-initial">${escapeHTML(request.requested_display_name.slice(0, 1).toUpperCase())}</span><div><h3>${escapeHTML(request.requested_display_name)}</h3><p>${escapeHTML(request.requester_email)} · ${formatRequestDate(request.created_at)}</p></div></div><div class="request-actions"><button class="secondary-button compact" type="button" data-approve-request="${request.id}">Approve</button><button class="quiet-button danger" type="button" data-decline-request="${request.id}">Decline</button></div></article>`).join("") : `<div class="empty-state compact-empty">No one is waiting for access.</div>`}</div></section>
       <section class="management-section" aria-labelledby="discord-hub-title"><div class="section-heading"><div><span class="eyebrow">Discord integration</span><h2 id="discord-hub-title">Cine-Cord hub</h2></div></div><article class="invite-panel layout-container layout-container-neutral"><div><h3>Keep the server entrance in one place.</h3><p>Publish or update one Discord message with buttons for Cine-Cord, Sessions, Journal and My Cinema. This never exposes private member data.</p></div><button class="primary-button compact" type="button" data-publish-cine-cord-hub><span class="material-symbols-outlined" aria-hidden="true">send</span>Publish or update hub</button></article></section>
+      ${renderJournalReconciliationPanel()}
       <section class="management-section" aria-labelledby="approved-title"><div class="section-heading"><div><span class="eyebrow">Cine-Cord roster</span><h2 id="approved-title">Approved members</h2></div></div><div class="member-admin-list">${sortedMembers.map((member) => `<form class="member-admin-row" data-member-form data-user-id="${member.id}"><div class="member-admin-identity"><img src="${member.avatar}" alt="" /><div><strong>${escapeHTML(member.name)}</strong><span>${member.id === authUser.id ? "Your account" : "Website member"}</span></div></div><label><span>Display name</span><input name="display_name" maxlength="40" required value="${escapeHTML(member.name)}" /></label><label><span>Role</span><select name="role"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="admin" ${member.role === "admin" ? "selected" : ""}>Admin</option></select></label><div class="member-admin-actions"><button class="secondary-button compact" type="submit">Save</button>${member.id !== authUser.id ? `<button class="quiet-button danger" type="button" data-remove-member="${member.id}">Remove access</button>${String(member.name).trim().toLowerCase() === "cameron_brown00" ? `<button class="quiet-button danger" type="button" data-reassign-remove-member="${member.id}">Move shared films here and remove</button>` : ""}` : ""}</div></form>`).join("")}</div></section>
     </section>`;
 }
@@ -3647,6 +3781,9 @@ async function loadWorkspace(providerToken = null) {
   journalEditingId = null;
   journalSyncPendingId = null;
   journalFocusedEntryId = null;
+  journalReconciliationRows = null;
+  journalReconciliationBusy = false;
+  journalReconciliationError = "";
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
@@ -4385,6 +4522,14 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-copy-invite]")) {
     try { await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}`); showToast("Website access link copied."); }
     catch { showToast("Copy was blocked. Press and hold the link to copy it manually."); }
+    return;
+  }
+  if (event.target.closest("[data-refresh-journal-reconciliation]")) {
+    await refreshJournalReconciliation();
+    return;
+  }
+  if (event.target.closest("[data-apply-journal-reconciliation]")) {
+    await applyJournalReconciliation();
     return;
   }
   const publishHubButton = event.target.closest("[data-publish-cine-cord-hub]");

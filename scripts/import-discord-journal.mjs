@@ -196,33 +196,24 @@ export function planArchiveViewingHistory(archiveRows, { profiles = [], movies =
   };
 }
 
-export function parseJournalMessage(message, channel) {
-  const rawContent = String(message?.content || "").replace(/\r\n?/g, "\n");
-  const rawLines = rawContent.split("\n");
-  const lines = rawLines.map(cleanLine);
-  const headerIndex = lines.findIndex((line) => ENTRY_HEADER.test(line));
-  if (headerIndex < 0) {
-    return {
-      kind: "skipped",
-      messageId: String(message?.id || ""),
-      reason: isDivider(rawContent.trim()) ? "divider" : "not_a_journal_entry",
-    };
-  }
-
+function parseJournalEntry(message, channel, lines, headerIndex, blockEnd, entryIndex) {
+  const messageId = String(message?.id || "").trim();
   const header = lines[headerIndex].match(ENTRY_HEADER);
   const entryLabel = String(header?.[1] || "").trim();
   const entryNumberMatch = entryLabel.match(/\d+(?:\.\d+)?/);
   const entrySortNumber = entryNumberMatch ? Number(entryNumberMatch[0]) : null;
-  const viewerIndex = lines.findIndex((line, index) => index > headerIndex && VIEWERS.test(line));
-  const statusIndex = lines.findIndex((line, index) => index > headerIndex && STATUS.test(line));
+  const viewerIndex = lines.findIndex((line, index) => (
+    index > headerIndex && index < blockEnd && VIEWERS.test(line)
+  ));
+  const statusIndex = lines.findIndex((line, index) => (
+    index > headerIndex && index < blockEnd && STATUS.test(line)
+  ));
   const metadataBoundary = [viewerIndex, statusIndex]
     .filter((index) => index >= 0)
-    .reduce((smallest, index) => Math.min(smallest, index), lines.length);
+    .reduce((smallest, index) => Math.min(smallest, index), blockEnd);
   let yearIndex = -1;
   for (let index = headerIndex + 1; index < metadataBoundary; index += 1) {
-    if (YEAR.test(lines[index])) {
-      yearIndex = index;
-    }
+    if (YEAR.test(lines[index])) yearIndex = index;
   }
   const yearMatch = yearIndex >= 0 ? lines[yearIndex].match(YEAR) : null;
   const releaseYear = yearMatch ? Number(yearMatch[1]) : null;
@@ -246,7 +237,7 @@ export function parseJournalMessage(message, channel) {
   const statusMatch = statusIndex >= 0 ? lines[statusIndex].match(STATUS) : null;
   const status = normaliseStatus(statusMatch?.[1]);
   const comment = statusIndex >= 0
-    ? lines.slice(statusIndex + 1).filter((line) => line && !isDivider(line)).join("\n")
+    ? lines.slice(statusIndex + 1, blockEnd).filter((line) => line && !isDivider(line)).join("\n")
     : "";
   const watchedAt = localDateFromTimestamp(message?.created_at);
   const notes = ["watch_date_inferred_from_message_timestamp"];
@@ -259,10 +250,11 @@ export function parseJournalMessage(message, channel) {
   else if (viewerIndex < 0 || !viewerNames.length) notes.push("missing_viewers");
   if (status === "UNKNOWN") notes.push("unrecognised_status");
   if (!watchedAt) notes.push("missing_message_date");
-  if (headerIndex > 0 && lines.slice(0, headerIndex).some(Boolean)) notes.push("content_before_entry_header");
+  if (entryIndex === 1 && headerIndex > 0 && lines.slice(0, headerIndex).some(Boolean)) {
+    notes.push("content_before_entry_header");
+  }
 
   const reviewNotes = notes.filter((note) => note !== "watch_date_inferred_from_message_timestamp");
-  const messageId = String(message?.id || "").trim();
   const jumpUrl = safeHttpsUrl(message?.jump_url)
     || `https://discord.com/channels/${channel.guildId}/${channel.channelId}/${messageId}`;
   const authorName = String(message?.author?.display_name || message?.author?.name || "Unknown Discordian").trim();
@@ -272,6 +264,7 @@ export function parseJournalMessage(message, channel) {
     channelId: channel.channelId,
     record: {
       discord_message_id: messageId,
+      entry_index: entryIndex,
       discord_jump_url: jumpUrl,
       entry_label: entryLabel || "Unlabelled",
       entry_sort_number: Number.isFinite(entrySortNumber) ? entrySortNumber : null,
@@ -286,12 +279,41 @@ export function parseJournalMessage(message, channel) {
       author_avatar_url: safeHttpsUrl(message?.author?.avatar_url),
       message_created_at: message?.created_at,
       message_edited_at: message?.edited_at || null,
-      raw_content: rawContent,
+      raw_content: String(message?.content || "").replace(/\r\n?/g, "\n"),
       parser_status: reviewNotes.length ? "REVIEW" : "PARSED",
       parser_notes: notes,
       source_schema_version: Number.isInteger(message?.schema_version) ? message.schema_version : null,
     },
   };
+}
+
+export function parseJournalEntries(message, channel) {
+  const rawContent = String(message?.content || "").replace(/\r\n?/g, "\n");
+  const rawLines = rawContent.split("\n");
+  const lines = rawLines.map(cleanLine);
+  const headerIndexes = lines
+    .map((line, index) => (ENTRY_HEADER.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  if (!headerIndexes.length) {
+    return [{
+      kind: "skipped",
+      messageId: String(message?.id || ""),
+      reason: isDivider(rawContent.trim()) ? "divider" : "not_a_journal_entry",
+    }];
+  }
+
+  return headerIndexes.map((headerIndex, index) => parseJournalEntry(
+    message,
+    channel,
+    lines,
+    headerIndex,
+    headerIndexes[index + 1] ?? lines.length,
+    index + 1,
+  ));
+}
+
+export function parseJournalMessage(message, channel) {
+  return parseJournalEntries(message, channel)[0];
 }
 
 async function readJsonLines(path, onRow) {
@@ -315,7 +337,7 @@ export async function inspectDiscordJournalBackup(sourceRoot) {
   const root = resolve(sourceRoot);
   const entries = [];
   const skipped = [];
-  const seenMessageIds = new Set();
+  const seenEntryKeys = new Set();
   const channels = [];
 
   for (const channel of JOURNAL_CHANNELS) {
@@ -330,19 +352,21 @@ export async function inspectDiscordJournalBackup(sourceRoot) {
     const channelStart = entries.length;
     const skippedStart = skipped.length;
     await readJsonLines(messagesPath, (message, lineNumber) => {
-      const result = parseJournalMessage(message, channel);
-      if (result.kind === "skipped") {
-        skipped.push({ channelId: channel.channelId, lineNumber, ...result });
-        return;
+      for (const result of parseJournalEntries(message, channel)) {
+        if (result.kind === "skipped") {
+          skipped.push({ channelId: channel.channelId, lineNumber, ...result });
+          continue;
+        }
+        if (!result.record.discord_message_id) {
+          throw new Error(`${messagesPath}:${lineNumber} has no Discord message ID.`);
+        }
+        const entryKey = `${result.record.discord_message_id}:${result.record.entry_index}`;
+        if (seenEntryKeys.has(entryKey)) {
+          throw new Error(`Duplicate Discord message entry ${entryKey} in the backup.`);
+        }
+        seenEntryKeys.add(entryKey);
+        entries.push(result);
       }
-      if (!result.record.discord_message_id) {
-        throw new Error(`${messagesPath}:${lineNumber} has no Discord message ID.`);
-      }
-      if (seenMessageIds.has(result.record.discord_message_id)) {
-        throw new Error(`Duplicate Discord message ID ${result.record.discord_message_id} in the backup.`);
-      }
-      seenMessageIds.add(result.record.discord_message_id);
-      entries.push(result);
     });
 
     const channelEntries = entries.slice(channelStart);
@@ -441,7 +465,7 @@ export async function applyDiscordJournalImport(report, { supabaseUrl, secretKey
   for (const batch of chunks(rows, 200)) {
     const { error } = await supabase
       .from("journal_archive_entries")
-      .upsert(batch, { onConflict: "discord_message_id" });
+      .upsert(batch, { onConflict: "discord_message_id,entry_index" });
     if (error) throw error;
   }
 

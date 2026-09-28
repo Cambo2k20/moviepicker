@@ -1168,6 +1168,109 @@ textarea::placeholder {
   margin-top: 48px;
 }
 
+.journal-reconciliation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.journal-reconciliation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  padding: 22px 0 14px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journal-reconciliation-summary strong {
+  color: var(--purple-light);
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.journal-reconciliation-list {
+  border-top: 1px solid var(--border);
+}
+
+.journal-reconciliation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.6fr);
+  gap: 22px;
+  align-items: center;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.journal-reconciliation-row strong,
+.journal-reconciliation-row h3,
+.journal-reconciliation-row p {
+  margin: 0;
+}
+
+.journal-reconciliation-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.journal-reconciliation-row > div:first-child > strong {
+  color: var(--purple-light);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.journal-reconciliation-row h3 {
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-reconciliation-row h3 span,
+.journal-reconciliation-row p,
+.journal-reconciliation-result small,
+.journal-reconciliation-more {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.journal-reconciliation-row p,
+.journal-reconciliation-result small {
+  line-height: 1.45;
+}
+
+.journal-reconciliation-result {
+  display: grid;
+  gap: 7px;
+  justify-items: start;
+}
+
+.journal-reconciliation-result .status-pill.ready {
+  color: var(--success);
+}
+
+.journal-reconciliation-result .status-pill.already-synced {
+  color: var(--muted);
+}
+
+.journal-reconciliation-result .status-pill.no-canonical-movie,
+.journal-reconciliation-result .status-pill.ambiguous-movie,
+.journal-reconciliation-result .status-pill.needs-review,
+.journal-reconciliation-result .status-pill.missing-target-profile,
+.journal-reconciliation-result .status-pill.no-confirmed-viewer {
+  color: #f0a0b0;
+}
+
+.journal-reconciliation-more {
+  margin: 14px 0 0;
+}
+
 .section-heading {
   display: flex;
   align-items: end;
@@ -2689,6 +2792,20 @@ legend,
 
   .invite-link-row {
     grid-template-columns: 1fr;
+  }
+
+  .journal-reconciliation-actions {
+    justify-content: flex-start;
+  }
+
+  .journal-reconciliation-actions .secondary-button,
+  .journal-reconciliation-actions .primary-button {
+    width: auto;
+  }
+
+  .journal-reconciliation-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .request-row {
