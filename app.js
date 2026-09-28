@@ -176,7 +176,9 @@ let journalVisibleLimit = 60;
 let journalFocusedEntryId = null;
 let journalReconciliationRows = null;
 let journalReconciliationBusy = false;
+let journalReconciliationMatchBusy = false;
 let journalReconciliationError = "";
+let journalReconciliationCandidates = new Map();
 let journalReconciliationQuery = "";
 let journalReconciliationStatusFilter = "all";
 let journalReconciliationVisibleLimit = 24;
@@ -3203,9 +3205,13 @@ function renderJournalReconciliationCandidates(matches) {
   if (!matches.length) return `<p class="journal-reconciliation-search-note">No matching films found. Try a broader title or remove the year.</p>`;
   return matches.map((match) => `
     <button class="journal-reconciliation-candidate" type="button" data-reconciliation-select-movie="${escapeHTML(match.tmdbId)}">
-      <span><strong>${escapeHTML(match.title)}</strong><small>${match.year || "Year unknown"}</small></span>
+      <span><strong>${escapeHTML(match.title)}</strong><small>${match.year || "Year unknown"}${match.score === undefined ? "" : ` · ${Math.round(Number(match.score) * 100)}% match · ${String(match.matchBand || "REVIEW").toLocaleLowerCase()}`}</small></span>
       <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
     </button>`).join("");
+}
+
+function reconciliationCandidatesForRow(row) {
+  return journalReconciliationCandidates.get(row?.archive_entry_id) || [];
 }
 
 function renderJournalReconciliationReview(row) {
@@ -3216,6 +3222,7 @@ function renderJournalReconciliationReview(row) {
   const selectedMovieId = row.reviewed_movie_id || row.movie_id || "";
   const selectedMovieTitle = row.canonical_title || "";
   const choices = reconciliationViewerChoices();
+  const suggestedMatches = reconciliationCandidatesForRow(row);
   return `
     <details class="journal-reconciliation-review" ${row.review_decision === "APPROVED" ? "open" : ""}>
       <summary><span class="material-symbols-outlined" aria-hidden="true">rule</span>${row.review_decision === "APPROVED" ? "Edit review" : "Review this entry"}</summary>
@@ -3227,7 +3234,7 @@ function renderJournalReconciliationReview(row) {
           <button class="secondary-button compact" type="button" data-reconciliation-search-movie><span class="material-symbols-outlined" aria-hidden="true">search</span>Search</button>
         </div>
         <div class="journal-reconciliation-selected-movie" data-reconciliation-selected-movie>${selectedMovieId ? `<span class="material-symbols-outlined" aria-hidden="true">movie</span><span>Selected: <strong>${escapeHTML(selectedMovieTitle || "Canonical movie selected")}</strong></span>` : `<span class="material-symbols-outlined" aria-hidden="true">help</span><span>No canonical film selected yet.</span>`}</div>
-        <div class="journal-reconciliation-candidates" data-reconciliation-candidates aria-live="polite"></div>
+        <div class="journal-reconciliation-candidates" data-reconciliation-candidates aria-live="polite">${suggestedMatches.length ? `<span class="journal-reconciliation-candidates-label">TMDB suggestions</span>${renderJournalReconciliationCandidates(suggestedMatches)}` : ""}</div>
         <fieldset class="journal-reconciliation-viewers"><legend>Private history viewers</legend><p>Source names: ${escapeHTML((row.viewer_names || []).join(", ") || "None recorded")}</p><div>${choices.map((choice) => `<label class="journal-reconciliation-viewer"><input type="checkbox" name="viewer_key" value="${choice.key}" ${selectedViewerKeys.includes(choice.key) ? "checked" : ""} ${choice.available ? "" : "disabled"} /><span><strong>${escapeHTML(choice.label)}</strong><small>Matches ${escapeHTML(choice.source)}${choice.available ? "" : " · account not in this group"}</small></span></label>`).join("")}</div></fieldset>
         <div class="journal-reconciliation-review-actions"><button class="primary-button compact" type="submit"><span class="material-symbols-outlined" aria-hidden="true">check</span>Approve match</button><button class="quiet-button danger compact" type="button" data-reconciliation-skip>Skip this entry</button></div>
         <p class="journal-reconciliation-review-status" data-reconciliation-review-status role="status"></p>
@@ -3293,8 +3300,8 @@ function renderJournalReconciliationPanel() {
     <section class="management-section journal-reconciliation" aria-labelledby="journal-reconciliation-title">
       <div class="section-heading"><div><span class="eyebrow">Private history repair</span><h2 id="journal-reconciliation-title">Reconcile Journal history</h2></div><span class="request-count">${rows.length ? rows.length.toLocaleString() : "—"}</span></div>
       <article class="invite-panel layout-container layout-container-neutral">
-        <div><h3>Review archive matches before creating private history.</h3><p>Titles are matched across punctuation changes and release years within five years. Search each close match, confirm which current accounts watched it, and approve only what you recognise. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
-        <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
+        <div><h3>Review archive matches before creating private history.</h3><p>Exact local matches stay safe and unchanged. Find likely TMDB films for the remaining entries, compare ranked title and year suggestions, then approve only what you recognise. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
+        <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="secondary-button compact" type="button" data-discover-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || !rows.length ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>${journalReconciliationMatchBusy ? "Finding TMDB matches…" : "Find likely TMDB matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || journalReconciliationMatchBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
       </article>
       ${journalReconciliationError ? `<div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span><div><strong>Journal history preview failed.</strong><p>${escapeHTML(journalReconciliationError)}</p></div><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation>Try again</button></div>` : ""}
       ${journalReconciliationRows === null ? `<div class="empty-state compact-empty"><span class="material-symbols-outlined" aria-hidden="true">manage_search</span><p>Preview the imported Journal before making any private-history changes.</p></div>` : `
@@ -3318,6 +3325,42 @@ function renderJournalReconciliationPanel() {
     </section>`;
 }
 
+function mergeJournalReconciliationCandidates(candidates = []) {
+  const next = new Map(journalReconciliationCandidates);
+  for (const candidate of candidates) {
+    const entryId = candidate.archiveEntryId || candidate.archive_entry_id;
+    if (!entryId) continue;
+    const existing = next.get(entryId) || [];
+    const normalized = {
+      tmdbId: Number(candidate.tmdbId ?? candidate.tmdb_id),
+      title: candidate.title || "Untitled film",
+      year: candidate.year ?? candidate.release_year ?? null,
+      posterPath: candidate.posterPath ?? candidate.poster_path ?? null,
+      overview: candidate.overview || "",
+      score: candidate.score === undefined ? undefined : Number(candidate.score),
+      titleScore: candidate.titleScore === undefined ? undefined : Number(candidate.titleScore),
+      yearDelta: candidate.yearDelta ?? candidate.year_delta ?? null,
+      matchBand: candidate.matchBand || candidate.match_band || "REVIEW",
+      candidateRank: Number(candidate.candidateRank ?? candidate.candidate_rank ?? existing.length + 1),
+    };
+    if (!Number.isInteger(normalized.tmdbId) || normalized.tmdbId <= 0) continue;
+    const withoutDuplicate = existing.filter((item) => item.tmdbId !== normalized.tmdbId);
+    next.set(entryId, [...withoutDuplicate, normalized].sort((left, right) => left.candidateRank - right.candidateRank));
+  }
+  journalReconciliationCandidates = next;
+}
+
+async function loadCachedJournalReconciliationCandidates(entryIds) {
+  if (designPreviewMode || !activeGroup?.id || !entryIds.length) return;
+  const { data, error } = await supabase.rpc("get_archive_history_match_candidates", {
+    p_group_id: activeGroup.id,
+    p_archive_entry_ids: entryIds,
+  });
+  if (error) return;
+  journalReconciliationCandidates = new Map();
+  mergeJournalReconciliationCandidates(data || []);
+}
+
 async function refreshJournalReconciliation() {
   if (!isCurrentAdmin() || !activeGroup?.id) return;
   journalReconciliationBusy = true;
@@ -3326,16 +3369,61 @@ async function refreshJournalReconciliation() {
   try {
     if (designPreviewMode) {
       journalReconciliationRows = designPreviewJournalReconciliationRows();
+      journalReconciliationCandidates = new Map([
+        ["preview-archive-green-lantern", [{ tmdbId: 946310, title: "Green Lantern: Beware My Power", year: 2022, score: 1, titleScore: 1, yearDelta: 0, matchBand: "STRONG", candidateRank: 1 }]],
+      ]);
     } else {
       const { data, error } = await supabase.rpc("preview_archive_history_reconciliation", { p_group_id: activeGroup.id });
       if (error) throw error;
       journalReconciliationRows = Array.isArray(data) ? data : [];
+      await loadCachedJournalReconciliationCandidates(journalReconciliationRows.map((row) => row.archive_entry_id));
     }
   } catch (error) {
     journalReconciliationRows = null;
     journalReconciliationError = error.message || "The administrator preview could not be loaded.";
   } finally {
     journalReconciliationBusy = false;
+    render();
+  }
+}
+
+async function discoverJournalReconciliationMatches() {
+  if (!isCurrentAdmin() || !activeGroup?.id || journalReconciliationMatchBusy) return;
+  const targets = (journalReconciliationRows || [])
+    .filter((row) => ["NEEDS_REVIEW", "NO_CANONICAL_MOVIE", "AMBIGUOUS_MOVIE"].includes(row.match_status))
+    .map((row) => row.archive_entry_id)
+    .filter(Boolean);
+  if (!targets.length) {
+    showToast("There are no unresolved archive matches to search.");
+    return;
+  }
+  journalReconciliationMatchBusy = true;
+  journalReconciliationError = "";
+  render();
+  try {
+    if (designPreviewMode) {
+      showToast("Likely TMDB matches found for the unresolved entries.");
+      return;
+    }
+    const batchSize = 20;
+    let scanned = 0;
+    for (let start = 0; start < targets.length; start += batchSize) {
+      const archiveEntryIds = targets.slice(start, start + batchSize);
+      const { data, error } = await supabase.functions.invoke("match-archive-history", {
+        body: { groupId: activeGroup.id, archiveEntryIds },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      mergeJournalReconciliationCandidates(data?.candidates || []);
+      scanned += Number(data?.entriesScanned) || archiveEntryIds.length;
+      render();
+    }
+    showToast(`TMDB suggestions found for ${scanned} archive ${scanned === 1 ? "entry" : "entries"}.`);
+  } catch (error) {
+    journalReconciliationError = error.message || "TMDB archive matching failed.";
+    showToast(`TMDB matching was not completed: ${journalReconciliationError}`);
+  } finally {
+    journalReconciliationMatchBusy = false;
     render();
   }
 }
@@ -4441,7 +4529,9 @@ async function loadWorkspace(providerToken = null) {
   journalFocusedEntryId = null;
   journalReconciliationRows = null;
   journalReconciliationBusy = false;
+  journalReconciliationMatchBusy = false;
   journalReconciliationError = "";
+  journalReconciliationCandidates = new Map();
   journalReconciliationQuery = "";
   journalReconciliationStatusFilter = "all";
   journalReconciliationVisibleLimit = 24;
@@ -5327,6 +5417,10 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-refresh-journal-reconciliation]")) {
     await refreshJournalReconciliation();
+    return;
+  }
+  if (event.target.closest("[data-discover-journal-reconciliation]")) {
+    await discoverJournalReconciliationMatches();
     return;
   }
   if (event.target.closest("[data-apply-journal-reconciliation]")) {

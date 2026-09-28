@@ -298,12 +298,18 @@ test("admin Journal reconciliation previews safe private-history matches", async
   await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
 
   const panel = page.locator(".journal-reconciliation");
-  await expect(panel).toContainText("within five years");
+  await expect(panel).toContainText("Exact local matches");
   await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
   await expect(panel).toContainText("Resident Evil");
   await expect(panel).toContainText("No canonical movie");
   await expect(panel.getByRole("button", { name: "Sync 1 film", exact: true })).toBeEnabled();
   await expect(panel.locator("summary").filter({ hasText: "Review this entry" })).toHaveCount(2);
+
+  await panel.getByRole("button", { name: "Find likely TMDB matches", exact: true }).click();
+  const suggestedRow = panel.locator(".journal-reconciliation-row").filter({ hasText: "Green Lantern: Beware My Power" });
+  await suggestedRow.locator("summary").click();
+  await expect(suggestedRow).toContainText("TMDB suggestions");
+  await expect(suggestedRow).toContainText("100% match");
 
   await panel.locator("select[name='status']").selectOption("review");
   await panel.getByRole("button", { name: "Filter", exact: true }).click();
