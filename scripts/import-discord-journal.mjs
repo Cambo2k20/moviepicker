@@ -473,10 +473,25 @@ export async function applyDiscordJournalImport(report, { supabaseUrl, secretKey
   if (movieError) throw movieError;
 
   const historyPlan = planArchiveViewingHistory(archiveRows, { profiles, movies });
-  for (const batch of chunks(historyPlan.events, 200)) {
+  const existingEventKeys = new Set();
+  for (const batch of chunks([...new Set(archiveRows.map((row) => row.id))], 200)) {
+    const { data, error } = await supabase
+      .from("personal_viewing_events")
+      .select("owner_id,source_archive_entry_id")
+      .in("source_archive_entry_id", batch);
+    if (error) throw error;
+    for (const event of data || []) {
+      existingEventKeys.add(`${event.owner_id}:${event.source_archive_entry_id}`);
+    }
+  }
+
+  const newHistoryEvents = historyPlan.events.filter((event) => (
+    !existingEventKeys.has(`${event.owner_id}:${event.source_archive_entry_id}`)
+  ));
+  for (const batch of chunks(newHistoryEvents, 200)) {
     const { error } = await supabase
       .from("personal_viewing_events")
-      .upsert(batch, { onConflict: "owner_id,source_archive_entry_id" });
+      .insert(batch);
     if (error) throw error;
   }
 
@@ -485,6 +500,8 @@ export async function applyDiscordJournalImport(report, { supabaseUrl, secretKey
     linkedManagedEntries: linkedManagedEntries.length,
     totalCandidates: report.entries.length,
     viewingHistory: historyPlan.summary,
+    viewingHistoryEventsAlreadyPresent: historyPlan.events.length - newHistoryEvents.length,
+    viewingHistoryEventsCreated: newHistoryEvents.length,
     viewingHistorySkipped: historyPlan.skipped,
   };
 }
