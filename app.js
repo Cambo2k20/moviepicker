@@ -197,6 +197,7 @@ let journalTriageCategory = "SUGGESTED";
 let journalTriageVisibleLimit = 24;
 let journalTriageApprovedIds = new Set();
 let journalTriageSkippedIds = new Set();
+let journalTriageManualIds = new Set();
 let previewNextEntryNumber = 1317;
 let listQuery = "";
 let listFilter = "all";
@@ -3351,13 +3352,25 @@ function renderJournalBulkApproval() {
     </div>`;
 }
 
+function journalManualApprovalIssue(proposal) {
+  const source = (journalReconciliationRows || []).find((row) => row.archive_entry_id === proposal.archive_entry_id);
+  if (!source || source.parser_status !== "PARSED" || !source.watched_at || !["FINISHED", "DNF"].includes(source.archive_status)) return "Source entry needs individual review";
+  if (!proposal.poster_path || !proposal.movie_year || !source.release_year || Math.abs(proposal.movie_year - source.release_year) > 5) return "Poster or release year needs individual review";
+  const viewers = (source.target_viewers || []).map((name) => name.toLowerCase() === "cambo" ? "cambo" : name.toLowerCase() === "deanshelton17" ? "dean" : null);
+  if (!viewers.length || viewers.includes(null) || viewers.length !== (proposal.viewer_keys || []).length || viewers.some((key) => !proposal.viewer_keys.includes(key))) return "Viewer assignment needs individual review";
+  return "";
+}
+
 function renderJournalTriage() {
   const proposals = journalTriagePreview?.proposals || [];
   const categoryRows = proposals.filter((row) => row.category === journalTriageCategory);
   const visibleRows = categoryRows.slice(0, journalTriageVisibleLimit);
   const approvedCount = journalTriageApprovedIds.size;
   const skippedCount = journalTriageSkippedIds.size;
+  const manualCount = journalTriageManualIds.size;
   const selectedCount = approvedCount + skippedCount;
+  const visibleManual = visibleRows.filter((row) => row.category === "MANUAL" && !journalManualApprovalIssue(row));
+  const remainingManual = categoryRows.filter((row) => row.category === "MANUAL" && !journalManualApprovalIssue(row) && !journalTriageManualIds.has(row.archive_entry_id));
   const categories = [
     ["SUGGESTED", "Suggested", journalTriagePreview?.suggestedCount],
     ["NO_CANDIDATE", "No match", journalTriagePreview?.noCandidateCount],
@@ -3369,16 +3382,19 @@ function renderJournalTriage() {
       ${journalTriageError ? `<p class="journal-bulk-error" role="alert">${escapeHTML(journalTriageError)}</p>` : ""}
       ${journalTriagePreview ? `
         <div class="journal-triage-tabs" role="group" aria-label="Review category">${categories.map(([key, label, count]) => `<button type="button" data-triage-category="${key}" aria-pressed="${journalTriageCategory === key}">${escapeHTML(label)} <strong>${Number(count || 0).toLocaleString()}</strong></button>`).join("")}</div>
-        <div class="journal-bulk-select-actions"><span>${approvedCount.toLocaleString()} to approve · ${skippedCount.toLocaleString()} archive only</span><div>${journalTriageCategory === "SUGGESTED" ? `<button class="quiet-button compact" type="button" data-triage-select-visible ${visibleRows.every((row) => journalTriageApprovedIds.has(row.archive_entry_id)) ? "disabled" : ""}>Select visible suggestions</button>` : ""}<button class="quiet-button compact" type="button" data-triage-clear ${selectedCount ? "" : "disabled"}>Clear selections</button></div></div>
+        <div class="journal-bulk-select-actions"><span>${approvedCount.toLocaleString()} suggested · ${manualCount.toLocaleString()} individual · ${skippedCount.toLocaleString()} archive only</span><div>${journalTriageCategory === "SUGGESTED" ? `<button class="quiet-button compact" type="button" data-triage-select-visible ${visibleRows.every((row) => journalTriageApprovedIds.has(row.archive_entry_id)) ? "disabled" : ""}>Select visible suggestions</button>` : ""}${journalTriageCategory === "MANUAL" ? `<button class="quiet-button compact" type="button" data-triage-select-manual ${!visibleManual.length || visibleManual.every((row) => journalTriageManualIds.has(row.archive_entry_id)) || manualCount >= 100 ? "disabled" : ""}>Select visible verified matches</button><button class="quiet-button compact" type="button" data-triage-select-next ${!remainingManual.length || manualCount >= 100 ? "disabled" : ""}>Select up to 100</button>` : ""}<button class="quiet-button compact" type="button" data-triage-clear ${selectedCount + manualCount ? "" : "disabled"}>Clear selections</button></div></div>
         <div class="journal-triage-list">${visibleRows.length ? visibleRows.map((row) => {
           const canApprove = row.category === "SUGGESTED" && row.can_approve === true;
-          const selected = canApprove ? journalTriageApprovedIds.has(row.archive_entry_id) : journalTriageSkippedIds.has(row.archive_entry_id);
+          const isManual = row.category === "MANUAL";
+          const manualIssue = isManual ? journalManualApprovalIssue(row) : "";
+          const selected = isManual ? journalTriageManualIds.has(row.archive_entry_id) : canApprove ? journalTriageApprovedIds.has(row.archive_entry_id) : journalTriageSkippedIds.has(row.archive_entry_id);
           const poster = row.poster_path ? `<img src="${escapeHTML(tmdbPoster(row.poster_path, "w185"))}" alt="" loading="lazy" />` : `<span class="material-symbols-outlined" aria-hidden="true">movie</span>`;
-          return `<article class="journal-triage-row"><label><input type="checkbox" ${canApprove ? "data-triage-approve" : "data-triage-skip"} value="${escapeHTML(row.archive_entry_id)}" ${selected ? "checked" : ""} ${journalTriageBusy ? "disabled" : ""} aria-label="${canApprove ? "Approve suggested film for" : "Keep archive only for"} ${escapeHTML(row.archive_title)}" /><span class="journal-triage-poster">${poster}</span><span class="journal-triage-content"><span class="journal-triage-source">${escapeHTML(row.entry_label || "Entry")} · ${escapeHTML(row.archive_title)} ${escapeHTML(row.archive_year || "")}</span><strong>${escapeHTML(row.movie_title || (row.category === "NO_CANDIDATE" ? "No TMDB film suggested" : "Choose individually"))}${row.movie_year ? ` <small>${escapeHTML(row.movie_year)}</small>` : ""}</strong><small>${canApprove ? `TMDB ${Math.round(Number(row.match_score || 0) * 100)}/100 · ${Number(row.year_delta || 0)}-year difference` : escapeHTML(row.match_reason || "Needs individual review")} · ${escapeHTML((row.viewer_keys || []).map((key) => key === "dean" ? "Dean" : "Cambo").join(", "))}</small>${row.overview ? `<span class="journal-triage-overview">${escapeHTML(row.overview)}</span>` : ""}</span></label><button class="quiet-button compact" type="button" data-triage-open="${escapeHTML(row.archive_entry_id)}">Review individually</button></article>`;
+          const source = (journalReconciliationRows || []).find((item) => item.archive_entry_id === row.archive_entry_id);
+          return `<article class="journal-triage-row"><label><input type="checkbox" ${isManual ? "data-triage-manual" : canApprove ? "data-triage-approve" : "data-triage-skip"} value="${escapeHTML(row.archive_entry_id)}" ${selected ? "checked" : ""} ${journalTriageBusy || manualIssue ? "disabled" : ""} aria-label="${isManual ? "Approve displayed TMDB film for" : canApprove ? "Approve suggested film for" : "Keep archive only for"} ${escapeHTML(row.archive_title)}" /><span class="journal-triage-poster">${poster}</span><span class="journal-triage-content"><span class="journal-triage-source">${escapeHTML(row.entry_label || "Entry")} · ${escapeHTML(row.archive_title)} ${escapeHTML(row.archive_year || "")}</span><strong>${escapeHTML(row.movie_title || (row.category === "NO_CANDIDATE" ? "No TMDB film suggested" : "Choose individually"))}${row.movie_year ? ` <small>${escapeHTML(row.movie_year)}</small>` : ""}</strong><small>${isManual ? "TMDB candidate · " : ""}${canApprove || isManual ? `TMDB ${Math.round(Number(row.match_score || 0) * 100)}/100 · ${Number(row.year_delta || 0)}-year difference` : escapeHTML(row.match_reason || "Needs individual review")} · ${escapeHTML((row.viewer_keys || []).map((key) => key === "dean" ? "Dean" : "Cambo").join(", "))}</small>${isManual && source?.canonical_title ? `<small class="journal-triage-warning">Existing canonical match: ${escapeHTML(source.canonical_title)}. Confirm the poster before replacing this entry's match.</small>` : ""}${manualIssue ? `<small class="journal-triage-warning">${escapeHTML(manualIssue)}</small>` : ""}${row.overview ? `<span class="journal-triage-overview">${escapeHTML(row.overview)}</span>` : ""}</span></label><div class="journal-triage-actions">${isManual ? `<label><input type="checkbox" data-triage-skip value="${escapeHTML(row.archive_entry_id)}" aria-label="Keep archive only for ${escapeHTML(row.archive_title)}" ${journalTriageSkippedIds.has(row.archive_entry_id) ? "checked" : ""} ${journalTriageBusy ? "disabled" : ""} />Archive only</label>` : ""}<button class="quiet-button compact" type="button" data-triage-open="${escapeHTML(row.archive_entry_id)}">Review individually</button></div></article>`;
         }).join("") : `<p class="journal-bulk-empty">No entries in this category.</p>`}</div>
         ${visibleRows.length < categoryRows.length ? `<button class="secondary-button compact journal-triage-more" type="button" data-triage-more>Show more</button>` : ""}
-        <div class="journal-bulk-footer"><p>Approval saves the film and confirmed viewers; archive-only is reversible. Neither action creates private history. Sync is separate.</p><button class="primary-button compact" type="button" data-apply-journal-triage ${journalTriageBusy || !selectedCount || selectedCount > 100 ? "disabled" : ""}>Save ${selectedCount.toLocaleString()} decision${selectedCount === 1 ? "" : "s"}</button></div>
-        ${selectedCount > 100 ? `<p class="journal-bulk-error">Save at most 100 decisions in one batch.</p>` : ""}
+        <div class="journal-bulk-footer"><p>Approval saves the film and confirmed viewers; archive-only is reversible. Neither action creates private history. Sync is separate.</p><div class="journal-triage-footer-actions"><button class="secondary-button compact" type="button" data-apply-journal-triage ${journalTriageBusy || !selectedCount || selectedCount > 100 ? "disabled" : ""}>Save ${selectedCount.toLocaleString()} decision${selectedCount === 1 ? "" : "s"}</button>${journalTriageCategory === "MANUAL" ? `<button class="primary-button compact" type="button" data-apply-journal-manual ${journalTriageBusy || !manualCount || manualCount > 100 ? "disabled" : ""}>Approve ${manualCount.toLocaleString()} verified match${manualCount === 1 ? "" : "es"}</button>` : ""}</div></div>
+        ${selectedCount > 100 || manualCount > 100 ? `<p class="journal-bulk-error">Save at most 100 decisions in one batch.</p>` : ""}
       ` : ""}
     </div>`;
 }
@@ -3468,6 +3484,7 @@ async function refreshJournalReconciliation() {
   journalTriagePreview = null;
   journalTriageApprovedIds = new Set();
   journalTriageSkippedIds = new Set();
+  journalTriageManualIds = new Set();
   journalTriageError = "";
   render();
   try {
@@ -3507,6 +3524,7 @@ async function discoverJournalReconciliationMatches() {
   journalTriagePreview = null;
   journalTriageApprovedIds = new Set();
   journalTriageSkippedIds = new Set();
+  journalTriageManualIds = new Set();
   render();
   try {
     if (designPreviewMode) {
@@ -3606,13 +3624,14 @@ async function previewJournalTriage() {
   journalTriagePreview = null;
   journalTriageApprovedIds = new Set();
   journalTriageSkippedIds = new Set();
+  journalTriageManualIds = new Set();
   render();
   try {
     if (designPreviewMode) {
       const fixtureProposals = [
         { archive_entry_id: "preview-archive-green-lantern", entry_label: "#1346", archive_title: "Green Lantern: Beware My Power", archive_year: 2022, viewer_keys: ["dean"], tmdb_id: 946310, movie_title: "Green Lantern: Beware My Power", movie_year: 2022, match_score: 0.96, year_delta: 0, category: "SUGGESTED", can_approve: true, overview: "Green Lantern John Stewart faces an interplanetary threat." },
         { archive_entry_id: "preview-archive-showcase", entry_label: "#1344", archive_title: "Xbox Showcase", archive_year: 2025, viewer_keys: ["cambo"], category: "NO_CANDIDATE", can_approve: false, match_reason: "No canonical movie has the same title and release year." },
-        { archive_entry_id: "preview-archive-firm", entry_label: "#1343", archive_title: "The Firm", archive_year: 2007, viewer_keys: ["cambo", "dean"], tmdb_id: 12345, movie_title: "The Firm", movie_year: 2009, match_score: 0.91, year_delta: 2, category: "MANUAL", can_approve: false, match_reason: "More than one possible film was found." },
+        { archive_entry_id: "preview-archive-firm", entry_label: "#1343", archive_title: "The Firm", archive_year: 2007, viewer_keys: ["cambo", "dean"], tmdb_id: 12345, movie_title: "The Firm", movie_year: 2009, poster_path: imageAssets.journalFallback, match_score: 0.91, year_delta: 2, category: "MANUAL", can_approve: false, match_reason: "More than one possible film was found." },
       ];
       const unresolvedIds = new Set((journalReconciliationRows || [])
         .filter((row) => !row.review_decision && ["NEEDS_REVIEW", "NO_CANONICAL_MOVIE", "AMBIGUOUS_MOVIE"].includes(row.match_status))
@@ -3657,6 +3676,7 @@ async function applyJournalTriage() {
       journalTriagePreview = null;
       journalTriageApprovedIds = new Set();
       journalTriageSkippedIds = new Set();
+      journalTriageManualIds = new Set();
     } else {
       const { data, error } = await supabase.rpc("apply_archive_history_triage", {
         p_group_id: activeGroup.id,
@@ -3674,6 +3694,51 @@ async function applyJournalTriage() {
     journalTriagePreview = null;
     journalTriageApprovedIds = new Set();
     journalTriageSkippedIds = new Set();
+    journalTriageManualIds = new Set();
+  } finally {
+    journalTriageBusy = false;
+    render();
+  }
+}
+
+async function applyJournalManualApprovals() {
+  const approvedIds = [...journalTriageManualIds];
+  if (!isCurrentAdmin() || !activeGroup?.id || !journalTriagePreview || journalTriageBusy || !approvedIds.length || approvedIds.length > 100) return;
+  const selected = (journalTriagePreview.proposals || []).filter((row) => approvedIds.includes(row.archive_entry_id));
+  if (selected.length !== approvedIds.length || selected.some((row) => row.category !== "MANUAL" || journalManualApprovalIssue(row))) {
+    journalTriageError = "The selected matches need a fresh review. Refresh the queue before approving.";
+    render();
+    return;
+  }
+  const canonicalCount = selected.filter((row) => (journalReconciliationRows || []).some((source) => source.archive_entry_id === row.archive_entry_id && source.canonical_title)).length;
+  const warning = canonicalCount ? ` ${canonicalCount} already have a canonical match that may differ from the selected TMDB film.` : "";
+  if (!window.confirm(`Approve the displayed TMDB film and confirmed viewers for ${approvedIds.length} Journal entr${approvedIds.length === 1 ? "y" : "ies"}?${warning} This saves review decisions only; private history requires a separate Sync.`)) return;
+  journalTriageBusy = true;
+  journalTriageError = "";
+  render();
+  try {
+    if (designPreviewMode) {
+      journalReconciliationRows = (journalReconciliationRows || []).map((row) => {
+        const proposal = selected.find((item) => item.archive_entry_id === row.archive_entry_id);
+        return proposal ? { ...row, match_status: "READY", review_decision: "APPROVED", reviewed_viewer_keys: proposal.viewer_keys, canonical_title: proposal.movie_title } : row;
+      });
+      journalTriagePreview = null;
+      journalTriageManualIds = new Set();
+    } else {
+      const { data, error } = await supabase.rpc("apply_archive_history_manual_approvals", {
+        p_group_id: activeGroup.id,
+        p_expected_token: journalTriagePreview.token,
+        p_approved_ids: approvedIds,
+      });
+      if (error) throw error;
+      if (Number(data?.approvedCount) !== approvedIds.length) throw new Error("The saved count did not match the selection. Refresh the queue before continuing.");
+      await refreshJournalReconciliation();
+    }
+    showToast(`${approvedIds.length} verified Journal match${approvedIds.length === 1 ? "" : "es"} approved. Sync remains separate.`);
+  } catch (error) {
+    journalTriageError = error.message || "The matches could not be approved. Refresh the queue before retrying.";
+    journalTriagePreview = null;
+    journalTriageManualIds = new Set();
   } finally {
     journalTriageBusy = false;
     render();
@@ -3808,6 +3873,7 @@ async function saveJournalReconciliationReview(form, decision = "APPROVED") {
   journalTriagePreview = null;
   journalTriageApprovedIds = new Set();
   journalTriageSkippedIds = new Set();
+  journalTriageManualIds = new Set();
   form.querySelectorAll("button, input").forEach((control) => { control.disabled = true; });
   setJournalReconciliationReviewStatus(form, decision === "SKIPPED" ? "Skipping entry…" : "Saving review…");
   try {
@@ -4827,6 +4893,7 @@ async function loadWorkspace(providerToken = null) {
   journalTriageVisibleLimit = 24;
   journalTriageApprovedIds = new Set();
   journalTriageSkippedIds = new Set();
+  journalTriageManualIds = new Set();
   if (!availableGroup) return;
 
   const [selfProfileResult, selfMembershipResult, selfRequestResult, selfDiscordIdentityResult] = await Promise.all([
@@ -5722,6 +5789,10 @@ document.addEventListener("click", async (event) => {
     await applyJournalTriage();
     return;
   }
+  if (event.target.closest("[data-apply-journal-manual]")) {
+    await applyJournalManualApprovals();
+    return;
+  }
   const triageCategoryButton = event.target.closest("[data-triage-category]");
   if (triageCategoryButton) {
     journalTriageCategory = triageCategoryButton.dataset.triageCategory;
@@ -5735,9 +5806,32 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  if (event.target.closest("[data-triage-select-manual]")) {
+    const visible = (journalTriagePreview?.proposals || []).filter((row) => row.category === "MANUAL").slice(0, journalTriageVisibleLimit);
+    visible.filter((row) => !journalManualApprovalIssue(row) && !journalTriageManualIds.has(row.archive_entry_id))
+      .slice(0, Math.max(0, 100 - journalTriageManualIds.size)).forEach((row) => {
+        journalTriageManualIds.add(row.archive_entry_id);
+        journalTriageSkippedIds.delete(row.archive_entry_id);
+      });
+    render();
+    return;
+  }
+  if (event.target.closest("[data-triage-select-next]")) {
+    const manualRows = (journalTriagePreview?.proposals || []).filter((row) => row.category === "MANUAL");
+    const available = manualRows.filter((row) => !journalManualApprovalIssue(row) && !journalTriageManualIds.has(row.archive_entry_id));
+    available.slice(0, Math.max(0, 100 - journalTriageManualIds.size)).forEach((row) => {
+      journalTriageManualIds.add(row.archive_entry_id);
+      journalTriageSkippedIds.delete(row.archive_entry_id);
+    });
+    const lastSelectedPosition = manualRows.reduce((last, row, index) => journalTriageManualIds.has(row.archive_entry_id) ? index + 1 : last, 0);
+    journalTriageVisibleLimit = Math.max(journalTriageVisibleLimit, lastSelectedPosition);
+    render();
+    return;
+  }
   if (event.target.closest("[data-triage-clear]")) {
     journalTriageApprovedIds = new Set();
     journalTriageSkippedIds = new Set();
+    journalTriageManualIds = new Set();
     render();
     return;
   }
@@ -6595,13 +6689,17 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (event.target.matches("[data-triage-approve], [data-triage-skip]")) {
+  if (event.target.matches("[data-triage-approve], [data-triage-skip], [data-triage-manual]")) {
     const id = event.target.value;
-    const targetSet = event.target.matches("[data-triage-approve]") ? journalTriageApprovedIds : journalTriageSkippedIds;
-    if (event.target.checked) targetSet.add(id);
-    else targetSet.delete(id);
+    const attribute = event.target.matches("[data-triage-approve]") ? "data-triage-approve" : event.target.matches("[data-triage-manual]") ? "data-triage-manual" : "data-triage-skip";
+    const targetSet = attribute === "data-triage-approve" ? journalTriageApprovedIds : attribute === "data-triage-manual" ? journalTriageManualIds : journalTriageSkippedIds;
+    if (event.target.checked) {
+      targetSet.add(id);
+      if (attribute === "data-triage-manual") journalTriageSkippedIds.delete(id);
+      if (attribute === "data-triage-skip") journalTriageManualIds.delete(id);
+    } else targetSet.delete(id);
     render();
-    root.querySelector(`[value="${CSS.escape(id)}"][data-triage-approve], [value="${CSS.escape(id)}"][data-triage-skip]`)?.focus();
+    root.querySelector(`[value="${CSS.escape(id)}"][${attribute}]`)?.focus();
     return;
   }
   if (event.target.matches("[data-select-journal-bulk]")) {

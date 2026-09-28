@@ -1357,7 +1357,7 @@ textarea::placeholder {
   border-bottom: 1px solid var(--border-soft);
 }
 
-.journal-triage-row label {
+.journal-triage-row > label {
   display: grid;
   grid-template-columns: 18px 54px minmax(0, 1fr);
   align-items: center;
@@ -1408,6 +1408,28 @@ textarea::placeholder {
   color: var(--muted);
   font-size: 12px;
   font-weight: normal;
+}
+
+.journal-triage-warning {
+  color: var(--warning, #e9b964) !important;
+}
+
+.journal-triage-actions,
+.journal-triage-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.journal-triage-actions > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .journal-triage-overview {
@@ -3287,7 +3309,7 @@ legend,
     gap: 4px;
   }
 
-  .journal-triage-row label {
+  .journal-triage-row > label {
     grid-template-columns: 18px 48px minmax(0, 1fr);
     gap: 9px;
   }
@@ -3297,7 +3319,7 @@ legend,
     height: 72px;
   }
 
-  .journal-triage-row > button {
+  .journal-triage-actions {
     justify-self: end;
   }
 

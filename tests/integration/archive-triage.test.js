@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
   createIdentity,
@@ -45,13 +46,13 @@ test("assisted triage saves selected decisions without creating private history"
     return data.id;
   }
 
-  async function addCandidate(entryId, tmdbId, { title = "Heroic Journey", score = 0.87, titleScore = 0.9, rank = 1 } = {}) {
+  async function addCandidate(entryId, tmdbId, { title = "Heroic Journey", score = 0.87, titleScore = 0.9, rank = 1, posterPath = "/hero.jpg" } = {}) {
     const { error } = await service.from("archive_history_match_candidates").insert({
       archive_entry_id: entryId,
       tmdb_id: tmdbId,
       title,
       release_year: 2001,
-      poster_path: "/hero.jpg",
+      poster_path: posterPath,
       overview: "A journey through the stars.",
       score,
       title_score: titleScore,
@@ -145,4 +146,57 @@ test("assisted triage saves selected decisions without creating private history"
   });
   assert.equal(restoreError, null);
   assert.equal(sqlRow(`select count(*)::integer as count from public.archive_history_reconciliation_reviews where archive_entry_id = '${archiveOnly}' and decision = 'APPROVED'`).count, 1);
+
+  const missingPoster = await addEntry("Film Without Artwork");
+  await addCandidate(missingPoster, 10306, { title: "Film Without Artwork", score: 0.5, posterPath: null });
+  const { data: manualPreview, error: manualPreviewError } = await cambo.client.rpc("preview_archive_history_triage", { p_group_id: group });
+  assert.equal(manualPreviewError, null);
+  assert.equal(manualPreview.proposals.find((row) => row.archive_entry_id === ambiguous).category, "MANUAL");
+  assert.equal(manualPreview.proposals.find((row) => row.archive_entry_id === missingPoster).category, "MANUAL");
+
+  await expectRpcError(dean.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [ambiguous],
+  }), /group administrator/i);
+  await expectRpcError(outsider.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [ambiguous],
+  }), /group administrator/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [suggested],
+  }), /ineligible Journal entry/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [ambiguous, ambiguous],
+  }), /unique Journal entries/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: Array.from({ length: 101 }, () => randomUUID()),
+  }), /one to 100 unique Journal entries/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [parserReview],
+  }), /individual review/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [missingPoster],
+  }), /individual review/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [unconfirmed],
+  }), /ineligible Journal entry/i);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${ambiguous}'`).count, 0);
+
+  await addEntry("Another New Entry");
+  await expectRpcError(cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: manualPreview.token, p_approved_ids: [ambiguous],
+  }), /preview has changed/i);
+  const { data: freshPreview, error: freshError } = await cambo.client.rpc("preview_archive_history_triage", { p_group_id: group });
+  assert.equal(freshError, null);
+  const { data: manualApplied, error: manualError } = await cambo.client.rpc("apply_archive_history_manual_approvals", {
+    p_group_id: group, p_expected_token: freshPreview.token, p_approved_ids: [ambiguous],
+  });
+  assert.equal(manualError, null);
+  assert.deepEqual(manualApplied, { approvedCount: 1, eventsCreated: 0 });
+  assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${ambiguous}'`).count, 0);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.archive_history_reconciliation_reviews where archive_entry_id = '${ambiguous}' and decision = 'APPROVED' and viewer_keys = array['cambo','dean']::text[]`).count, 1);
+  const { data: manualSync, error: manualSyncError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
+    p_group_id: group, p_archive_entry_ids: [ambiguous],
+  });
+  assert.equal(manualSyncError, null);
+  assert.equal(manualSync.events_created, 2);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${ambiguous}'`).count, 2);
 });

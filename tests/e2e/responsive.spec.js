@@ -385,6 +385,33 @@ test("admin can batch triage selected entries while leaving ambiguous films for 
   await expect(panel.getByRole("button", { name: "Sync 2 films", exact: true })).toBeEnabled();
 });
 
+test("admin can approve reviewed Individual candidates without syncing private history", async ({ page }, testInfo) => {
+  await page.goto("/moviepicker/?design-preview#members");
+  const panel = page.locator(".journal-reconciliation");
+  await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
+  await panel.getByRole("button", { name: "Load review queue", exact: true }).click();
+  const queue = panel.locator(".journal-triage");
+  await queue.getByRole("button", { name: "Individual 1", exact: true }).click();
+  await expect(queue.getByRole("checkbox", { name: "Approve displayed TMDB film for The Firm" })).toBeEnabled();
+  await expect(queue.getByRole("button", { name: "Approve 0 verified matches" })).toBeDisabled();
+  await queue.getByRole("button", { name: "Select up to 100" }).click();
+  await expect(queue.getByRole("checkbox", { name: "Approve displayed TMDB film for The Firm" })).toBeChecked();
+  await expect(queue.getByRole("checkbox", { name: "Keep archive only for The Firm" })).not.toBeChecked();
+  await expect(queue.getByRole("button", { name: "Approve 1 verified match" })).toBeEnabled();
+  const overflow = await queue.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await queue.locator(".journal-triage-row").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("journal-individual-batch.png") });
+  page.once("dialog", (dialog) => dialog.accept());
+  await queue.getByRole("button", { name: "Approve 1 verified match" }).click();
+  const filters = panel.locator('[data-journal-reconciliation-filter-form]');
+  await filters.getByRole("textbox", { name: "Find an archive entry" }).fill("");
+  await filters.getByRole("combobox", { name: "Status" }).selectOption("all");
+  await filters.getByRole("button", { name: "Filter" }).click();
+  await expect(panel.locator('[data-reconciliation-entry-id="preview-archive-firm"]')).toContainText("Ready to sync");
+  await expect(panel.getByRole("button", { name: "Sync 2 films", exact: true })).toBeEnabled();
+});
+
 test("phone and tablet destination row supports keyboard movement and reveals the active route", async ({ page }, testInfo) => {
   test.skip(!["phone", "tablet"].includes(testInfo.project.name), "The two-tier footer is used on phone and tablet.");
 
