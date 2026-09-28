@@ -154,3 +154,122 @@ test("bulk approval previews only clear archive identities and keeps history pri
   assert.equal(duplicateError, null);
   assert.equal(duplicatePreview.eligibleCount, 0);
 });
+
+test("ranked bulk review approves only selected strong matches and never guesses viewers", async () => {
+  resetWorkspace();
+  const group = groupId();
+  const cambo = await createIdentity({ name: "Cambo", role: "admin" });
+  const dean = await createIdentity({ name: "deanshelton17", role: "member" });
+  const service = serviceDataClient();
+  const { data: volume, error: volumeError } = await service.from("journal_volumes").select("id").limit(1).single();
+  assert.equal(volumeError, null);
+
+  let serial = 0;
+  async function addEntry(title, viewers = ["Cameron", "Dean"]) {
+    serial += 1;
+    const messageId = `82000000000000${String(serial).padStart(4, "0")}`;
+    const { data, error } = await service.from("journal_archive_entries").insert({
+      group_id: group,
+      volume_id: volume.id,
+      discord_message_id: messageId,
+      discord_jump_url: `https://discord.com/channels/272427070779293697/713935563912118293/${messageId}`,
+      entry_label: String(2500 + serial),
+      entry_sort_number: 2500 + serial,
+      title,
+      release_year: 2001,
+      watched_at: "2026-09-20",
+      status: "FINISHED",
+      viewer_names: viewers,
+      author_display_name: "Cambo",
+      message_created_at: "2026-09-20T20:00:00Z",
+      raw_content: `- ${title}`,
+      parser_status: "PARSED",
+    }).select("id").single();
+    assert.equal(error, null);
+    return data.id;
+  }
+
+  async function addCandidate(entryId, tmdbId, title, { year = 2002, score = 0.94, titleScore = 0.96, rank = 1 } = {}) {
+    const { error } = await service.from("archive_history_match_candidates").insert({
+      archive_entry_id: entryId,
+      tmdb_id: tmdbId,
+      title,
+      release_year: year,
+      score,
+      title_score: titleScore,
+      year_delta: Math.abs(year - 2001),
+      match_band: "STRONG",
+      candidate_rank: rank,
+      search_query: title,
+    });
+    assert.equal(error, null);
+  }
+
+  const strong = await addEntry("Spider Man Homecoming");
+  await addCandidate(strong, 10201, "Spider-Man: Homecoming");
+  const exact = await addEntry("Exact Film", ["Dean"]);
+  await addCandidate(exact, 10202, "Exact Film", { year: 2001, score: 1, titleScore: 1 });
+  const ambiguous = await addEntry("Ambiguous Film");
+  await addCandidate(ambiguous, 10203, "Ambiguous Film");
+  await addCandidate(ambiguous, 10204, "Ambiguous Film Two", { score: 0.84, titleScore: 0.9, rank: 2 });
+  const lowScore = await addEntry("Low Score Film");
+  await addCandidate(lowScore, 10205, "Low Score Film", { score: 0.89 });
+  const unknownViewer = await addEntry("Unknown Viewer Film", ["Andrew"]);
+  await addCandidate(unknownViewer, 10206, "Unknown Viewer Film");
+
+  await expectRpcError(dean.client.rpc("preview_archive_history_bulk_review", { p_group_id: group }), /group administrator/i);
+  await expectRpcError(dean.client.rpc("apply_archive_history_bulk_review", {
+    p_group_id: group, p_expected_token: "invalid", p_archive_entry_ids: [strong],
+  }), /group administrator/i);
+
+  const { data: preview, error: previewError } = await cambo.client.rpc("preview_archive_history_bulk_review", { p_group_id: group });
+  assert.equal(previewError, null);
+  assert.equal(preview.eligibleCount, 2);
+  assert.equal(preview.exactCount, 1);
+  assert.equal(preview.strongCount, 1);
+  assert.deepEqual(preview.proposals.map((row) => row.archive_entry_id), [exact, strong]);
+  assert.equal(preview.proposals[1].source, "TMDB_STRONG");
+  assert.equal(Number(preview.proposals[1].match_score), 0.94);
+  assert.equal(preview.proposals[1].year_delta, 1);
+  assert.deepEqual(preview.proposals[1].viewer_keys, ["cambo", "dean"]);
+  assert.equal(sqlRow("select count(*)::integer as count from public.personal_viewing_events").count, 0);
+
+  await expectRpcError(cambo.client.rpc("apply_archive_history_bulk_review", {
+    p_group_id: group, p_expected_token: preview.token, p_archive_entry_ids: [strong, strong],
+  }), /unique Journal matches/i);
+  await expectRpcError(cambo.client.rpc("apply_archive_history_bulk_review", {
+    p_group_id: group, p_expected_token: preview.token, p_archive_entry_ids: [strong, unknownViewer],
+  }), /ineligible Journal entry/i);
+
+  const late = await addEntry("Late Film");
+  await addCandidate(late, 10207, "Late Film");
+  await expectRpcError(cambo.client.rpc("apply_archive_history_bulk_review", {
+    p_group_id: group, p_expected_token: preview.token, p_archive_entry_ids: [strong],
+  }), /preview has changed/i);
+  assert.equal(sqlRow("select count(*)::integer as count from public.archive_history_reconciliation_reviews").count, 0);
+
+  const { data: current, error: currentError } = await cambo.client.rpc("preview_archive_history_bulk_review", { p_group_id: group });
+  assert.equal(currentError, null);
+  assert.equal(current.eligibleCount, 3);
+  const { data: approved, error: approvedError } = await cambo.client.rpc("apply_archive_history_bulk_review", {
+    p_group_id: group, p_expected_token: current.token, p_archive_entry_ids: [strong],
+  });
+  assert.equal(approvedError, null);
+  assert.deepEqual(approved, { approvedCount: 1, eventsCreated: 0 });
+  assert.equal(sqlRow("select count(*)::integer as count from public.archive_history_reconciliation_reviews").count, 1);
+  assert.equal(sqlRow("select count(*)::integer as count from public.personal_viewing_events").count, 0);
+  assert.equal(sqlRow(`select count(*)::integer as count from public.archive_history_reconciliation_reviews where archive_entry_id in ('${exact}','${ambiguous}','${lowScore}','${unknownViewer}','${late}')`).count, 0);
+
+  const { data: synced, error: syncedError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
+    p_group_id: group, p_archive_entry_ids: [strong],
+  });
+  assert.equal(syncedError, null);
+  assert.equal(synced.events_created, 2);
+  const { data: camboEvents, error: camboError } = await cambo.client.from("personal_viewing_events").select("source_archive_entry_id");
+  const { data: deanEvents, error: deanError } = await dean.client.from("personal_viewing_events").select("source_archive_entry_id");
+  assert.equal(camboError, null);
+  assert.equal(deanError, null);
+  assert.deepEqual(camboEvents.map((event) => event.source_archive_entry_id), [strong]);
+  assert.deepEqual(deanEvents.map((event) => event.source_archive_entry_id), [strong]);
+  assert.equal(sqlRow("select count(*)::integer as count from public.queue_items").count, 0);
+});

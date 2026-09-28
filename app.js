@@ -186,7 +186,7 @@ let journalReconciliationVisibleLimit = 24;
 let journalReconciliationReviewBusyId = null;
 let journalBulkPreview = null;
 let journalBulkBusy = false;
-let journalBulkVisibleLimit = 8;
+let journalBulkSelectedIds = new Set();
 let journalBulkError = "";
 let previewNextEntryNumber = 1317;
 let listQuery = "";
@@ -3294,16 +3294,16 @@ function designPreviewJournalReconciliationRows() {
 
 function renderJournalBulkApproval() {
   const proposals = journalBulkPreview?.proposals || [];
-  const visible = proposals.slice(0, journalBulkVisibleLimit);
+  const selectedCount = journalBulkSelectedIds.size;
   return `
     <div class="journal-bulk-approval" aria-label="Bulk archive approval">
-      <div class="journal-bulk-heading"><div><h3>Approve clear matches in bulk</h3><p>Only exact title and release-year matches with known current viewers qualify. Uncertain entries stay in the review queue.</p></div><button class="secondary-button compact" type="button" data-preview-journal-bulk ${journalBulkBusy || journalReconciliationBusy || journalReconciliationMatchBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalBulkBusy ? "Checking…" : "Preview clear matches"}</button></div>
+      <div class="journal-bulk-heading"><div><h3>Review clear matches in bulk</h3><p>Exact and high-scoring TMDB matches for confirmed current viewers.</p></div><button class="secondary-button compact" type="button" data-preview-journal-bulk ${journalBulkBusy || journalReconciliationBusy || journalReconciliationMatchBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalBulkBusy ? "Checking…" : "Preview clear matches"}</button></div>
       ${journalBulkError ? `<p class="journal-bulk-error" role="alert">${escapeHTML(journalBulkError)}</p>` : ""}
       ${journalBulkPreview ? `
-        <div class="journal-bulk-summary" role="status"><strong>${Number(journalBulkPreview.eligibleCount || 0).toLocaleString()}</strong> clear match${Number(journalBulkPreview.eligibleCount) === 1 ? "" : "es"} <span>${Number(journalBulkPreview.tmdbCount || 0).toLocaleString()} TMDB exact · ${Number(journalBulkPreview.reusedCount || 0).toLocaleString()} from approved films</span></div>
-        ${proposals.length ? `<div class="journal-bulk-list">${visible.map((proposal) => `<div class="journal-bulk-row"><span>${escapeHTML(proposal.entry_label || "Entry")}</span><strong>${escapeHTML(proposal.archive_title || "Untitled")} <small>${escapeHTML(proposal.archive_year || "")}</small></strong><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span><strong>${escapeHTML(proposal.movie_title || "Untitled")} <small>${escapeHTML(proposal.movie_year || "")}</small></strong><span>${escapeHTML((proposal.viewer_keys || []).map((key) => key === "dean" ? "Dean" : "Cambo").join(", "))}</span></div>`).join("")}</div>
-          ${proposals.length > visible.length ? `<button class="quiet-button compact" type="button" data-more-journal-bulk>Show more matches</button>` : ""}
-          <div class="journal-bulk-footer"><p>Approval saves film and viewer decisions. Use Sync above separately to create private viewing history.</p><button class="primary-button compact" type="button" data-apply-journal-bulk ${journalBulkBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">done_all</span>Approve ${proposals.length.toLocaleString()} match${proposals.length === 1 ? "" : "es"}</button></div>` : `<p class="journal-bulk-empty">No clear matches found. The remaining entries need individual review.</p>`}
+        <div class="journal-bulk-summary" role="status"><strong>${Number(journalBulkPreview.eligibleCount || 0).toLocaleString()}</strong> clear match${Number(journalBulkPreview.eligibleCount) === 1 ? "" : "es"} <span>${Number(journalBulkPreview.reusedCount || 0).toLocaleString()} previously approved · ${Number(journalBulkPreview.exactCount || 0).toLocaleString()} exact · ${Number(journalBulkPreview.strongCount || 0).toLocaleString()} high-scoring</span></div>
+        ${proposals.length ? `<div class="journal-bulk-select-actions"><span>${selectedCount.toLocaleString()} selected</span><button class="quiet-button compact" type="button" data-select-all-journal-bulk ${journalBulkBusy || selectedCount === proposals.length ? "disabled" : ""}>Select all</button><button class="quiet-button compact" type="button" data-clear-journal-bulk ${journalBulkBusy || !selectedCount ? "disabled" : ""}>Clear</button></div>
+          <div class="journal-bulk-list">${proposals.map((proposal) => `<label class="journal-bulk-row"><input type="checkbox" data-select-journal-bulk value="${escapeHTML(proposal.archive_entry_id)}" ${journalBulkSelectedIds.has(proposal.archive_entry_id) ? "checked" : ""} ${journalBulkBusy ? "disabled" : ""} /><span class="journal-bulk-entry">${escapeHTML(proposal.entry_label || "Entry")}</span><span class="journal-bulk-film journal-bulk-archive"><strong>${escapeHTML(proposal.archive_title || "Untitled")} <small>${escapeHTML(proposal.archive_year || "")}</small></strong><small>Journal entry</small></span><span class="material-symbols-outlined journal-bulk-arrow" aria-hidden="true">arrow_forward</span><span class="journal-bulk-film journal-bulk-target"><strong>${escapeHTML(proposal.movie_title || "Untitled")} <small>${escapeHTML(proposal.movie_year || "")}</small></strong><small>${proposal.source === "EXISTING_REVIEW" ? "Previously approved film" : proposal.source === "TMDB_EXACT" ? "Exact title and year" : `TMDB score ${Math.round(Number(proposal.match_score || 0) * 100)}/100 · ${Number(proposal.year_delta || 0)}-year difference`}</small></span><span class="journal-bulk-viewers">${escapeHTML((proposal.viewer_keys || []).map((key) => key === "dean" ? "Dean" : "Cambo").join(", "))}</span></label>`).join("")}</div>
+          <div class="journal-bulk-footer"><p>Approval saves film and viewer decisions. Sync creates private viewing history separately.</p><button class="primary-button compact" type="button" data-apply-journal-bulk ${journalBulkBusy || !selectedCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">done_all</span>Approve ${selectedCount.toLocaleString()} match${selectedCount === 1 ? "" : "es"}</button></div>` : `<p class="journal-bulk-empty">No clear matches found. The remaining entries need individual review.</p>`}
       ` : ""}
     </div>`;
 }
@@ -3388,6 +3388,7 @@ async function refreshJournalReconciliation() {
   journalReconciliationBusy = true;
   journalReconciliationError = "";
   journalBulkPreview = null;
+  journalBulkSelectedIds = new Set();
   journalBulkError = "";
   render();
   try {
@@ -3455,16 +3456,16 @@ async function previewJournalBulkApproval() {
   if (!isCurrentAdmin() || !activeGroup?.id || journalBulkBusy || journalReconciliationBusy || journalReconciliationMatchBusy) return;
   journalBulkBusy = true;
   journalBulkPreview = null;
+  journalBulkSelectedIds = new Set();
   journalBulkError = "";
-  journalBulkVisibleLimit = 8;
   render();
   try {
     if (designPreviewMode) {
       const row = (journalReconciliationRows || []).find((item) => item.archive_entry_id === "preview-archive-green-lantern" && !item.review_decision);
       const proposals = row ? [{ archive_entry_id: row.archive_entry_id, entry_label: row.entry_label, archive_title: row.title, archive_year: row.release_year, tmdb_id: 946310, movie_title: row.title, movie_year: row.release_year, viewer_keys: ["dean"], source: "TMDB_EXACT" }] : [];
-      journalBulkPreview = { eligibleCount: proposals.length, tmdbCount: proposals.length, reusedCount: 0, token: "preview", proposals };
+      journalBulkPreview = { eligibleCount: proposals.length, exactCount: proposals.length, strongCount: 0, reusedCount: 0, token: "preview", proposals };
     } else {
-      const { data, error } = await supabase.rpc("preview_archive_history_bulk_approval", { p_group_id: activeGroup.id });
+      const { data, error } = await supabase.rpc("preview_archive_history_bulk_review", { p_group_id: activeGroup.id });
       if (error) throw error;
       journalBulkPreview = data;
     }
@@ -3478,7 +3479,8 @@ async function previewJournalBulkApproval() {
 
 async function applyJournalBulkApproval() {
   const preview = journalBulkPreview;
-  const count = Number(preview?.eligibleCount || 0);
+  const selectedIds = [...journalBulkSelectedIds];
+  const count = selectedIds.length;
   if (!isCurrentAdmin() || !activeGroup?.id || journalBulkBusy || journalReconciliationBusy || journalReconciliationMatchBusy || !count) return;
   if (!window.confirm(`Approve ${count} clear Journal film and viewer matches? This saves review decisions only. Private viewing history is created separately when you choose Sync.`)) return;
   journalBulkBusy = true;
@@ -3486,20 +3488,22 @@ async function applyJournalBulkApproval() {
   render();
   try {
     if (designPreviewMode) {
-      const proposal = preview.proposals[0];
-      journalReconciliationRows = (journalReconciliationRows || []).map((row) => row.archive_entry_id === proposal.archive_entry_id
-        ? { ...row, movie_id: "preview-movie-green-lantern", canonical_title: proposal.movie_title, candidate_count: 1, match_status: "READY", review_decision: "APPROVED", reviewed_movie_id: "preview-movie-green-lantern", reviewed_viewer_keys: proposal.viewer_keys, match_reason: "Manually approved canonical film and private-history viewers." }
-        : row);
+      journalReconciliationRows = (journalReconciliationRows || []).map((row) => {
+        const proposal = preview.proposals.find((item) => item.archive_entry_id === row.archive_entry_id && selectedIds.includes(item.archive_entry_id));
+        return proposal ? { ...row, movie_id: `preview-movie-${proposal.tmdb_id}`, canonical_title: proposal.movie_title, candidate_count: 1, match_status: "READY", review_decision: "APPROVED", reviewed_movie_id: `preview-movie-${proposal.tmdb_id}`, reviewed_viewer_keys: proposal.viewer_keys, match_reason: "Manually approved canonical film and private-history viewers." } : row;
+      });
     } else {
-      const { data, error } = await supabase.rpc("apply_archive_history_bulk_approval", { p_group_id: activeGroup.id, p_expected_token: preview.token });
+      const { data, error } = await supabase.rpc("apply_archive_history_bulk_review", { p_group_id: activeGroup.id, p_expected_token: preview.token, p_archive_entry_ids: selectedIds });
       if (error) throw error;
       if (Number(data?.approvedCount) !== count) throw new Error("The saved count did not match the preview. Refresh before syncing.");
       await refreshJournalReconciliation();
     }
     journalBulkPreview = null;
+    journalBulkSelectedIds = new Set();
     showToast(`${count} Journal match${count === 1 ? "" : "es"} approved. Use Sync to create private history.`);
   } catch (error) {
     journalBulkPreview = null;
+    journalBulkSelectedIds = new Set();
     journalBulkError = error.message || "Bulk approval failed. Preview again before retrying.";
   } finally {
     journalBulkBusy = false;
@@ -4625,7 +4629,7 @@ async function loadWorkspace(providerToken = null) {
   journalReconciliationReviewBusyId = null;
   journalBulkPreview = null;
   journalBulkBusy = false;
-  journalBulkVisibleLimit = 8;
+  journalBulkSelectedIds = new Set();
   journalBulkError = "";
   if (!availableGroup) return;
 
@@ -5522,8 +5526,13 @@ document.addEventListener("click", async (event) => {
     await applyJournalBulkApproval();
     return;
   }
-  if (event.target.closest("[data-more-journal-bulk]")) {
-    journalBulkVisibleLimit += 20;
+  if (event.target.closest("[data-select-all-journal-bulk]")) {
+    journalBulkSelectedIds = new Set((journalBulkPreview?.proposals || []).map((proposal) => proposal.archive_entry_id));
+    render();
+    return;
+  }
+  if (event.target.closest("[data-clear-journal-bulk]")) {
+    journalBulkSelectedIds = new Set();
     render();
     return;
   }
@@ -6353,6 +6362,13 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-select-journal-bulk]")) {
+    if (event.target.checked) journalBulkSelectedIds.add(event.target.value);
+    else journalBulkSelectedIds.delete(event.target.value);
+    render();
+    root.querySelector(`[data-select-journal-bulk][value="${CSS.escape(event.target.value)}"]`)?.focus();
+    return;
+  }
   const discordForm = event.target.closest("#discord-template-form");
   if (discordForm) { updateDiscordDraftPreview(discordForm); return; }
   if (event.target.matches("#journal-source-filter, #journal-year-filter, #journal-status-filter, #journal-viewer-filter")) {

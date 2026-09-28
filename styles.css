@@ -1237,18 +1237,28 @@ textarea::placeholder {
   font-size: 12px;
 }
 
+.journal-bulk-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .journal-bulk-list {
   border-top: 1px solid var(--border-soft);
 }
 
 .journal-bulk-row {
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) 24px minmax(0, 1fr) 100px;
+  grid-template-columns: 20px 72px minmax(0, 1fr) 20px minmax(0, 1fr) 90px;
   gap: 12px;
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid var(--border-soft);
   font-size: 13px;
+  cursor: pointer;
 }
 
 .journal-bulk-row > * {
@@ -1256,10 +1266,23 @@ textarea::placeholder {
   overflow-wrap: anywhere;
 }
 
-.journal-bulk-row > span:first-child,
-.journal-bulk-row > span:last-child,
+.journal-bulk-row .journal-bulk-entry,
+.journal-bulk-row .journal-bulk-viewers,
 .journal-bulk-row small {
   color: var(--muted);
+}
+
+.journal-bulk-row input {
+  accent-color: var(--purple-light);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.journal-bulk-film {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .journal-bulk-row .material-symbols-outlined {
@@ -1268,7 +1291,7 @@ textarea::placeholder {
 }
 
 .journal-bulk-row small {
-  white-space: nowrap;
+  font-size: 11px;
 }
 
 .journal-bulk-footer {
@@ -3130,12 +3153,29 @@ legend,
   }
 
   .journal-bulk-row {
-    grid-template-columns: 50px minmax(0, 1fr) 20px minmax(0, 1fr);
-    gap: 7px;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 5px 10px;
   }
 
-  .journal-bulk-row > span:last-child {
-    grid-column: 2 / -1;
+  .journal-bulk-row input {
+    grid-column: 1;
+    grid-row: 1 / 5;
+    align-self: start;
+  }
+
+  .journal-bulk-row .journal-bulk-entry,
+  .journal-bulk-row .journal-bulk-archive,
+  .journal-bulk-row .journal-bulk-target,
+  .journal-bulk-row .journal-bulk-viewers,
+  .journal-bulk-row .journal-bulk-arrow {
+    grid-column: 2;
+  }
+
+  .journal-bulk-row .journal-bulk-arrow {
+    width: 18px;
+    height: 18px;
+    justify-self: start;
+    transform: rotate(90deg);
   }
 
   .journal-reconciliation-row {
