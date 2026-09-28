@@ -3023,6 +3023,12 @@ function renderJournalReconciliationReview(row) {
     </details>`;
 }
 
+function reconciliationMovieSummary(row) {
+  if (!row?.canonical_title) return "";
+  const approximate = ["NEEDS_REVIEW", "AMBIGUOUS_MOVIE"].includes(row.match_status);
+  return `<p>${approximate ? "Closest match" : "Canonical film"}: ${escapeHTML(row.canonical_title)}</p>`;
+}
+
 function designPreviewJournalReconciliationRows() {
   return [
     {
@@ -3075,7 +3081,7 @@ function renderJournalReconciliationPanel() {
     <section class="management-section journal-reconciliation" aria-labelledby="journal-reconciliation-title">
       <div class="section-heading"><div><span class="eyebrow">Private history repair</span><h2 id="journal-reconciliation-title">Reconcile Journal history</h2></div><span class="request-count">${rows.length ? rows.length.toLocaleString() : "—"}</span></div>
       <article class="invite-panel layout-container layout-container-neutral">
-        <div><h3>Review archive matches before creating private history.</h3><p>Search each blocked Discord entry, choose its canonical film and confirm which current accounts watched it. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
+        <div><h3>Review archive matches before creating private history.</h3><p>Titles are matched across punctuation changes and release years within five years. Search each close match, confirm which current accounts watched it, and approve only what you recognise. The imported archive stays read-only, the shared list stays unchanged and approved matches remain idempotent.</p></div>
         <div class="journal-reconciliation-actions"><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation ${journalReconciliationBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>${journalReconciliationBusy ? "Checking…" : "Preview matches"}</button><button class="primary-button compact" type="button" data-apply-journal-reconciliation ${journalReconciliationBusy || !readyCount ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">sync</span>${journalReconciliationBusy ? "Syncing…" : `Sync ${readyCount || "eligible"} film${readyCount === 1 ? "" : "s"}`}</button></div>
       </article>
       ${journalReconciliationError ? `<div class="feature-error-state is-compact" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span><div><strong>Journal history preview failed.</strong><p>${escapeHTML(journalReconciliationError)}</p></div><button class="secondary-button compact" type="button" data-refresh-journal-reconciliation>Try again</button></div>` : ""}
@@ -3093,7 +3099,7 @@ function renderJournalReconciliationPanel() {
           const statusLabel = journalReconciliationStatusLabels[row.match_status] || row.match_status;
           const statusClass = String(row.match_status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
           const targetViewers = Array.isArray(row.target_viewers) && row.target_viewers.length ? row.target_viewers.join(", ") : "None recognised";
-          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Private-history viewers: ${escapeHTML(targetViewers)}</p>${row.canonical_title ? `<p>Canonical film: ${escapeHTML(row.canonical_title)}</p>` : ""}</div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div>${renderJournalReconciliationReview(row)}</article>`;
+          return `<article class="journal-reconciliation-row"><div><strong>${escapeHTML(row.entry_label || "Journal entry")}</strong><h3>${escapeHTML(row.title || "Untitled")}${row.release_year ? ` <span>${row.release_year}</span>` : ""}</h3><p>Private-history viewers: ${escapeHTML(targetViewers)}</p>${reconciliationMovieSummary(row)}</div><div class="journal-reconciliation-result"><span class="status-pill ${statusClass}">${escapeHTML(statusLabel)}</span><small>${escapeHTML(row.match_reason || "")}</small></div>${renderJournalReconciliationReview(row)}</article>`;
         }).join("") : `<div class="empty-state compact-empty">No imported Journal rows were found.</div>`}</div>
         ${filteredRows.length > displayedRows.length ? `<button class="secondary-button compact journal-reconciliation-more-button" type="button" data-show-more-journal-reconciliation>Show more entries</button>` : ""}
       `}

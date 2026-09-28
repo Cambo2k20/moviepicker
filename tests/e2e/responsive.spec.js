@@ -245,6 +245,7 @@ test("admin Journal reconciliation previews safe private-history matches", async
   await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
 
   const panel = page.locator(".journal-reconciliation");
+  await expect(panel).toContainText("within five years");
   await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
   await expect(panel).toContainText("Resident Evil");
   await expect(panel).toContainText("No canonical movie");
