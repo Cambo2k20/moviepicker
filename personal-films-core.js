@@ -191,3 +191,13 @@ export function getVisiblePersonalFilms(personalFilms, { query = "", filter = "a
     return new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0);
   });
 }
+
+export function getPersonalFilmsMissingDetails(personalFilms) {
+  const seen = new Set();
+  return personalFilms.filter((film) => {
+    const tmdbId = Number(film.tmdbId);
+    if (!film.movieId || !Number.isSafeInteger(tmdbId) || tmdbId <= 0 || film.runtime || film.genres?.length || seen.has(tmdbId)) return false;
+    seen.add(tmdbId);
+    return true;
+  });
+}

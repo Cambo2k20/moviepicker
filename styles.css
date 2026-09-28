@@ -8594,6 +8594,13 @@ body {
   gap: 10px;
 }
 
+.movie-details-refresh-status {
+  margin: -12px 0 24px;
+  color: var(--muted);
+  font-size: var(--type-body);
+  line-height: 1.5;
+}
+
 @media (min-width: 861px) {
   .list-view .list-toolbar {
     margin: 0 0 24px;

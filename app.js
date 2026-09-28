@@ -23,6 +23,7 @@ import {
   applyPersonalFilmPatch,
   findFilmByIdentity,
   getPublishedReviewsForMovie,
+  getPersonalFilmsMissingDetails,
   getVisiblePersonalFilms,
   getViewingEventsForMovie,
   normalisePersonalFilm,
@@ -134,6 +135,12 @@ let joinRequests = [];
 let movieList = [];
 let personalFilms = [];
 let personalFilmsLoadError = false;
+let movieDetailsRefreshBusy = false;
+let movieDetailsRefreshStopRequested = false;
+let movieDetailsRefreshProcessed = 0;
+let movieDetailsRefreshTotal = 0;
+let movieDetailsRefreshMessage = "";
+let movieDetailsRefreshRunId = 0;
 let personalViewingEvents = [];
 let personalViewingEventsLoadError = false;
 let personalReviews = [];
@@ -420,6 +427,11 @@ function loadDesignPreviewWorkspace() {
       updatedAt: "2026-08-08T20:00:00Z",
     }),
   ];
+  if (previewVariant === "metadata-backfill") {
+    personalFilms = personalFilms.map((film) => film.tmdbId === 680
+      ? { ...film, runtime: null, genres: [] }
+      : film);
+  }
   personalViewingEvents = [
     normalisePersonalViewingEvent({
       id: "preview-viewing-pulp-source",
@@ -869,7 +881,7 @@ function metadataLine(item) {
   const parts = [];
   if (item.runtime) parts.push(`${item.runtime} min`);
   if (item.genres.length) parts.push(item.genres.slice(0, 2).join(" · "));
-  return parts.join(" · ") || "Movie details pending";
+  return parts.join(" · ") || "Runtime and genres unavailable";
 }
 
 function serialiseRouletteState() {
@@ -1297,6 +1309,85 @@ async function refreshPersonalCinema({ rerender = false } = {}) {
   applyPersonalFilmsResult(personalFilmsResult);
   applyPersonalViewingEventsResult(personalViewingEventsResult);
   if (rerender && currentView === "my-films") render();
+}
+
+function updateMovieDetailsRefreshProgress() {
+  const status = document.querySelector("[data-movie-details-refresh-status]");
+  if (status) status.textContent = `Checking ${movieDetailsRefreshProcessed} of ${movieDetailsRefreshTotal} matched films…`;
+}
+
+async function refreshMissingMovieDetails() {
+  if (movieDetailsRefreshBusy || personalFilmsLoadError || !authUser || !activeGroup) return;
+  const missing = getPersonalFilmsMissingDetails(personalFilms);
+  if (!missing.length) return;
+
+  const ownerId = authUser.id;
+  const runId = ++movieDetailsRefreshRunId;
+  movieDetailsRefreshBusy = true;
+  movieDetailsRefreshStopRequested = false;
+  movieDetailsRefreshProcessed = 0;
+  movieDetailsRefreshTotal = missing.length;
+  movieDetailsRefreshMessage = "";
+  render();
+
+  let updated = 0;
+  let unavailable = 0;
+  let failed = 0;
+  let consecutiveFailures = 0;
+  let stopReason = "";
+  for (let index = 0; index < missing.length; index += 2) {
+    if (movieDetailsRefreshStopRequested || runId !== movieDetailsRefreshRunId || authUser?.id !== ownerId) break;
+    const batch = missing.slice(index, index + 2);
+    const results = await Promise.all(batch.map(async (film) => {
+      try {
+        const { movie } = await lookupMovie({ action: "details", tmdbId: Number(film.tmdbId) });
+        if (!movie || Number(movie.tmdbId) !== Number(film.tmdbId) || movie.movieId !== film.movieId) {
+          throw new Error("The matched movie identity changed. Stop and review it before retrying.");
+        }
+        return { movie, film };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : "Movie lookup failed." };
+      }
+    }));
+    if (runId !== movieDetailsRefreshRunId || authUser?.id !== ownerId) return;
+
+    for (const result of results) {
+      movieDetailsRefreshProcessed += 1;
+      if (result.error) {
+        failed += 1;
+        consecutiveFailures += 1;
+        if (/identity changed/i.test(result.error)) stopReason = result.error;
+        else if (/\b(401|403|429|503)\b/.test(result.error)) stopReason = "The lookup service is unavailable or limiting requests. Try again later.";
+      } else {
+        consecutiveFailures = 0;
+        const runtime = Number(result.movie.runtime) || null;
+        const genres = normaliseGenres(result.movie.genres);
+        if (runtime || genres.length) updated += 1;
+        else unavailable += 1;
+        personalFilms = personalFilms.map((film) => film.movieId === result.film.movieId
+          ? { ...film, runtime, genres }
+          : film);
+      }
+    }
+    updateMovieDetailsRefreshProgress();
+    if (stopReason || consecutiveFailures >= 5) {
+      if (!stopReason) stopReason = "Several lookups failed. Try again later.";
+      break;
+    }
+  }
+
+  if (designPreviewMode) persistDesignPreviewWorkspace();
+  else {
+    const result = await fetchPersonalFilms();
+    if (runId !== movieDetailsRefreshRunId || authUser?.id !== ownerId) return;
+    if (result.error) stopReason = stopReason || "Updated films could not be reloaded. Refresh the page to verify them.";
+    else applyPersonalFilmsResult(result);
+  }
+  movieDetailsRefreshBusy = false;
+  const summary = `${updated} film${updated === 1 ? "" : "s"} updated`;
+  const remainder = [unavailable ? `${unavailable} unavailable on TMDB` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
+  movieDetailsRefreshMessage = `${summary}${remainder ? ` · ${remainder}` : ""}${stopReason ? ` · ${stopReason}` : movieDetailsRefreshStopRequested ? ` · Stopped after ${movieDetailsRefreshProcessed} of ${movieDetailsRefreshTotal}` : ""}.`;
+  render();
 }
 
 async function moveSavedSessionToJournal(session) {
@@ -1730,7 +1821,8 @@ async function lookupMovie(body) {
       return { matches };
     }
     if (body?.action === "details") {
-      const film = catalog.find((candidate) => Number(candidate.tmdbId) === Number(body.tmdbId));
+      const film = movieList.find((candidate) => Number(candidate.tmdbId) === Number(body.tmdbId))
+        || catalog.find((candidate) => Number(candidate.tmdbId) === Number(body.tmdbId));
       return { movie: film ? {
         movieId: film.movieId,
         tmdbId: film.tmdbId,
@@ -2670,6 +2762,7 @@ function renderMyFilms() {
   if (selectedFilmId && !selectedFilm) selectedFilmId = null;
   if (selectedFilm) return renderFilmDetails();
   const visibleFilms = getVisiblePersonalFilms(personalFilms, { query: myFilmsQuery, filter: myFilmsFilter, sort: myFilmsSort });
+  const missingDetails = getPersonalFilmsMissingDetails(personalFilms);
   const countLabel = personalFilmsLoadError
     ? "My Cinema · Private to you"
     : `My Cinema · Private to you · ${personalFilms.length} ${personalFilms.length === 1 ? "film" : "films"}`;
@@ -2681,8 +2774,9 @@ function renderMyFilms() {
         title: "My Films",
         description: "Your private films, states, reactions and Favourites. Nothing is shared unless you deliberately suggest it to Cine-Cord.",
         className: "list-hero my-films-hero",
-        actions: personalFilmsLoadError ? "" : `<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
+        actions: personalFilmsLoadError ? "" : `${missingDetails.length || movieDetailsRefreshBusy ? `<button class="secondary-button" type="button" ${movieDetailsRefreshBusy ? `data-stop-movie-details-refresh ${movieDetailsRefreshStopRequested ? "disabled" : ""}` : "data-refresh-movie-details"}><span class="material-symbols-outlined" aria-hidden="true">${movieDetailsRefreshBusy ? "stop" : "sync"}</span>${movieDetailsRefreshBusy ? movieDetailsRefreshStopRequested ? "Stopping…" : "Stop update" : `Fill missing details · ${missingDetails.length}`}</button>` : ""}<button class="primary-button" type="button" data-open-personal-film><span class="material-symbols-outlined" aria-hidden="true">add</span>Add a film</button>`,
       })}
+      ${movieDetailsRefreshBusy || movieDetailsRefreshMessage ? `<p class="movie-details-refresh-status" role="status" data-movie-details-refresh-status>${escapeHTML(movieDetailsRefreshBusy ? `Checking ${movieDetailsRefreshProcessed} of ${movieDetailsRefreshTotal} matched films…` : movieDetailsRefreshMessage)}</p>` : ""}
       ${personalFilmsLoadError ? renderPersonalFilmsUnavailable() : `<div class="list-toolbar my-films-toolbar"><label class="search-field list-search"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="my-films-search" type="search" value="${escapeHTML(myFilmsQuery)}" placeholder="Search My Films" aria-label="Search My Films" /></label><button class="mobile-filter-toggle" type="button" data-toggle-my-films-filters aria-expanded="${myFilmsFiltersOpen}" aria-label="${myFilmsFiltersOpen ? "Hide" : "Show"} My Films filters and sort"><span class="mobile-filter-toggle-copy"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="mobile-filter-label">Filters &amp; sort</span></span><span class="mobile-filter-chevron material-symbols-outlined" aria-hidden="true">${myFilmsFiltersOpen ? "expand_less" : "expand_more"}</span></button><div class="filter-tabs my-film-filter-tabs ${myFilmsFiltersOpen ? "is-open" : ""}" aria-label="Filter My Films">${[["all", "All"], ["want", "Want to Watch"], ["watched", "Watched"], ["dnf", "Did Not Finish"], ["favourites", "Favourites"]].map(([value, label]) => `<button type="button" class="filter-tab ${myFilmsFilter === value ? "is-active" : ""}" data-my-films-filter="${value}">${label}</button>`).join("")}</div><div class="list-filter-controls my-film-sort-control ${myFilmsFiltersOpen ? "is-open" : ""}"><label class="compact-select"><span class="sr-only">Sort My Films</span><select id="my-films-sort" aria-label="Sort My Films"><option value="updated" ${myFilmsSort === "updated" ? "selected" : ""}>Recently updated</option><option value="added" ${myFilmsSort === "added" ? "selected" : ""}>Recently added</option><option value="title" ${myFilmsSort === "title" ? "selected" : ""}>Title A–Z</option></select></label></div></div>
       <div class="poster-grid personal-poster-grid" aria-live="polite">${visibleFilms.length ? visibleFilms.map(renderPersonalFilmCard).join("") : `<div class="empty-state list-empty"><span class="material-symbols-outlined" aria-hidden="true">theaters</span><h2>${personalFilms.length ? "No films match that view." : "My Cinema is empty."}</h2><p>${personalFilms.length ? "Try another search or filter." : "Add something you want to watch, or rate a film you have already seen."}</p><button class="secondary-button" type="button" data-open-personal-film>Add a film</button></div>`}</div>`}
     </section>`;
@@ -4843,6 +4937,10 @@ async function loadWorkspace(providerToken = null) {
   movieList = [];
   personalFilms = [];
   personalFilmsLoadError = false;
+  movieDetailsRefreshRunId += 1;
+  movieDetailsRefreshBusy = false;
+  movieDetailsRefreshStopRequested = false;
+  movieDetailsRefreshMessage = "";
   personalViewingEvents = [];
   personalViewingEventsLoadError = false;
   personalReviews = [];
@@ -5119,6 +5217,10 @@ async function syncSession(session) {
   movieList = [];
   personalFilms = [];
   personalFilmsLoadError = false;
+  movieDetailsRefreshRunId += 1;
+  movieDetailsRefreshBusy = false;
+  movieDetailsRefreshStopRequested = false;
+  movieDetailsRefreshMessage = "";
   personalViewingEvents = [];
   personalViewingEventsLoadError = false;
   personalReviews = [];
@@ -5953,6 +6055,12 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-open-film]")) { openFilmModal(); return; }
   if (event.target.closest("[data-open-personal-film]")) { openFilmModal(null, "personal"); return; }
+  if (event.target.closest("[data-refresh-movie-details]")) { await refreshMissingMovieDetails(); return; }
+  if (event.target.closest("[data-stop-movie-details-refresh]")) {
+    movieDetailsRefreshStopRequested = true;
+    render();
+    return;
+  }
   if (event.target.closest("[data-close-film]") || event.target === filmModal) { closeFilmModal(); return; }
   if (event.target.closest("[data-open-party]")) { openPartyModal(); return; }
   if (event.target.closest("[data-close-modal]") || event.target === partyModal) { closePartyModal(); return; }
