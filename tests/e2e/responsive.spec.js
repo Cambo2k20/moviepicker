@@ -330,7 +330,14 @@ test("admin can dry-run and approve clear Journal matches before a separate Sync
   const batch = panel.locator(".journal-bulk-approval");
   await expect(batch.locator(".journal-bulk-summary")).toContainText("1 clear match");
   await expect(batch.locator(".journal-bulk-row")).toContainText("Green Lantern: Beware My Power");
+  const overflow = await batch.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBe(0);
+  await expect(batch.getByRole("button", { name: "Approve 0 matches", exact: true })).toBeDisabled();
+  await batch.getByRole("checkbox").check();
   await expect(batch.getByRole("button", { name: "Approve 1 match", exact: true })).toBeEnabled();
+  await batch.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(batch.getByRole("button", { name: "Approve 0 matches", exact: true })).toBeDisabled();
+  await batch.getByRole("button", { name: "Select all", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await batch.getByRole("button", { name: "Approve 1 match", exact: true }).click();
 
