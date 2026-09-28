@@ -32,6 +32,7 @@ export function canonicalMovieRecord(movie, refreshedAt = new Date().toISOString
     ? runtimeValue
     : null;
   const posterPath = optionalText(movie?.poster_path, 300);
+  const backdropPath = optionalText(movie?.backdrop_path, 300);
 
   return {
     tmdb_id: tmdbId,
@@ -41,6 +42,7 @@ export function canonicalMovieRecord(movie, refreshedAt = new Date().toISOString
     release_year: releaseDate ? Number(releaseDate.slice(0, 4)) : null,
     original_language: optionalText(movie?.original_language, 12),
     poster_path: posterPath?.startsWith("/") ? posterPath : null,
+    backdrop_path: backdropPath?.startsWith("/") ? backdropPath : null,
     runtime_minutes: runtime,
     genres: genreNames(movie?.genres),
     overview: optionalText(movie?.overview, 4000),
@@ -55,6 +57,7 @@ export function browserMovieDetails(record, movieId) {
     title: record.title,
     year: record.release_year,
     posterPath: record.poster_path,
+    backdropPath: record.backdrop_path,
     runtime: record.runtime_minutes,
     genres: record.genres,
     overview: record.overview || "",

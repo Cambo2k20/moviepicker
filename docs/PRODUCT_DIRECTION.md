@@ -120,7 +120,7 @@ Profiles directory.
 | My Cinema state, rating, review and lists | Owner only | None |
 | Viewing events and personal viewing history | Owner only | None |
 | Discover answers, feedback and inferred taste | Owner only | None |
-| Top Four | Approved group after the member saves it to their profile | Profile only |
+| Top Five | Approved group after the member saves it to their profile | Profile only |
 | Published rating or review | Approved group after explicit publication | Film detail and later profile |
 | Featured list | Approved group after explicit publication | Profile only |
 | Suggest for Cine-Cord | Explicit shared action | Uses shared-list rules |
@@ -174,10 +174,12 @@ Deliberately curated profile content may include:
 
 - Verified avatar and display name
 - Optional short introduction
-- Top Four
+- Top Five
 - Featured personal lists
 - Individually shared Favourite films
 - Individually shared ratings and short reviews
+- Deliberately published aggregate statistics
+- Optional recent-watch and genre-count snapshots copied only when the member publishes
 
 Owner-only content includes:
 
@@ -186,6 +188,12 @@ Owner-only content includes:
 - Private notes
 - Discover answers, feedback and inferred taste
 - Ratings and reviews not explicitly published
+
+> Amended 2026-09-28 — A member may deliberately publish four aggregate
+> statistics plus optional recent-watch and genre-count snapshots. These are
+> copied from eligible private records at publication time and do not grant
+> readers access to the source tables. Hidden viewing events are excluded.
+> Later private changes remain private until the member republishes.
 
 An optional private note is a personal memory aid that can never be published.
 It is distinct from the optional review, which may be deliberately shared.
@@ -223,7 +231,7 @@ Rules:
 - Rewatches are separate events and do not require new ratings.
 - Ratings and reviews stay private unless deliberately published.
 - Private ratings may train that member's Discover recommendations.
-- Top Four is curated, never automatically selected from ratings.
+- Top Five is curated, never automatically selected from ratings.
 
 ### Decision 003A — Rating interaction and artwork
 
@@ -305,7 +313,7 @@ Later private edits do not reach the profile automatically. The owner sees
 Unpublished changes and chooses Update Profile Version to replace the
 snapshot. Removing the feature deletes the publication immediately. Published
 lists never expose private ratings, reviews, notes or dates and never add films
-to Cine-Cord. Top Four is not a custom list.
+to Cine-Cord. Top Five is not a custom list.
 
 ### Decision 006 — My Cinema structure
 
@@ -313,13 +321,13 @@ Status: Approved direction
 
 My Cinema contains Overview, My Films and My Lists.
 
-Overview is a personal cinema shelf with Top Four editing, short Want to Watch
+Overview is a personal cinema shelf with Top Five editing, short Want to Watch
 and Recently Watched rows, Favourites, recent or featured lists and, after ten
 rated films, a restrained Taste Snapshot. Below that threshold it asks for
 more ratings rather than inventing confidence.
 
-Top Four editing is private until the member chooses Save to Profile. Saving is
-the explicit publication action: it updates the four group-visible slots
+Top Five editing is private until the member chooses Save to Profile. Saving is
+the explicit publication action: it updates the five group-visible slots
 together. Unsaved drafts are invisible, and clearing a slot becomes visible
 only after saving.
 
@@ -365,10 +373,12 @@ than becoming a fourth private-data tab.
 Status: Amended approved direction, 27 September 2026
 
 Profiles may contain verified identity, an optional introduction of at most
-160 characters, an ordered Top Four, published list snapshots, and individually published
-Favourite films, ratings and short reviews.
+160 characters, an ordered Top Five, a Top Five-derived hero banner, four
+aggregate viewing statistics, opt-in recent-watch and genre-count snapshots,
+published list snapshots, and individually published Favourite films, ratings
+and short reviews.
 
-Top Four is manually selected and ordered. It is independent from ratings and
+Top Five is manually selected and ordered. It is independent from ratings and
 Favourite status. Selecting films does not publish a draft; Save to Profile is
 the explicit publication act. Published reactions use language and artwork,
 such as Really liked it, rather than only 4/5.
@@ -397,12 +407,21 @@ corresponding publication so deleted personal content cannot remain visible.
 Edit Profile provides an exact preview and every item clearly says Private or
 Shown on profile.
 
-Cine-Cord gains a Member Profiles page with avatar, display name, Top Four
+Recent watches and genre counts are explicit publication snapshots, not an
+automatic activity feed. Publishing copies at most five visible viewing events
+and the top three genre counts from visible finished events. Hidden events are
+never copied. The four statistics are films watched, watched sessions attended,
+average current rating and completion rate. None of these values updates until
+the member publishes again.
+
+Cine-Cord gains a Member Profiles page with avatar, display name, Top Five
 preview and View Profile. Member names and avatars elsewhere may link to it.
 Admin — Members remains separate.
 
 Profiles exclude followers, friend requests, likes, comments, direct messages,
-automatic activity feeds, automatic taste labels and competitive rankings.
+live or automatic activity feeds, inferred taste labels and competitive
+rankings. A published genre count is raw aggregate data, not an inferred taste
+label.
 
 ### Decision 008 — Discover
 
@@ -417,7 +436,7 @@ Discover has three entry modes:
 All produce one five-film Discovery Deck.
 
 For You uses private history with different signal strengths. Loved it,
-Favourites and Top Four are strongest positives. Really liked it is positive.
+Favourites and Top Five are strongest positives. Really liked it is positive.
 It was okay is weak or neutral. Not for me and Didn’t like it are negative.
 Did Not Finish without a rating is a weak negative engagement signal. An
 explicit rating always outranks DNF for taste: a positive rating remains
@@ -506,7 +525,7 @@ Status: Amended approved direction, 27 September 2026
 | Category | Examples | Visibility |
 | --- | --- | --- |
 | Private personal | States, ratings, reviews, notes, lists, viewing events, history, Favourites and Discover feedback | Owner |
-| Curated profile | Top Four, featured lists, published reactions and reviews | Approved group |
+| Curated profile | Top Five, featured lists, published reactions and reviews | Approved group |
 | Shared group | Cine-Cord list, votes, sessions, Journal and viewers | Group |
 
 > Amended 2026-09-27 — Private notes are deferred from the current release plan.
@@ -718,14 +737,17 @@ frontend requests them.
 
 #### Phase 4 — Curated profiles
 
-Status: Not started
+Status: In progress locally
 
-- Editor and exact preview
-- Top Four, featured lists and published reactions or reviews
+- Dedicated private editor and cinematic group-visible profile
+- Ordered Top Five, Top Five-derived hero banner and rating snapshots
+- Four aggregate viewing statistics
+- Opt-in recent-watch and genre-count snapshots
+- Featured lists and additional published reactions remain later slices
 - Spoiler handling
 - Group-only Member Profiles directory
 - Dedicated multi-member publication security tests
-- A removed publisher's profile, Top Four, lists and reviews disappear
+- A removed publisher's profile, Top Five, lists and reviews disappear
   immediately for another approved member and reappear only after reapproval
   and a valid publication state
 
@@ -756,7 +778,7 @@ Final table names may differ, but preserve these concepts:
 - **Personal list:** owner, title, description and deliberate order plus
   whether a separate publication currently exists.
 - **List item:** film membership and deliberate position.
-- **Publication:** an explicit snapshot of the exact rating, review, Top Four or
+- **Publication:** an explicit snapshot of the exact rating, review, Top Five or
   list deliberately exposed on film details or a profile.
 - **Discovery feedback:** private persistent signals such as Not Interested.
 - **Discovery session:** active-session-only mood and constraints that are not

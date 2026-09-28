@@ -15,6 +15,7 @@ test("TMDB details become a bounded canonical database record", () => {
     release_date: "1979-05-25",
     original_language: "en",
     poster_path: "/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg",
+    backdrop_path: "/alien-backdrop.jpg",
     runtime: 117,
     genres: [{ id: 27, name: "Horror" }, { id: 878, name: "Science Fiction" }, { name: "Horror" }],
     overview: "The crew of the Nostromo encounters a deadly lifeform.",
@@ -28,6 +29,7 @@ test("TMDB details become a bounded canonical database record", () => {
     release_year: 1979,
     original_language: "en",
     poster_path: "/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg",
+    backdrop_path: "/alien-backdrop.jpg",
     runtime_minutes: 117,
     genres: ["Horror", "Science Fiction"],
     overview: "The crew of the Nostromo encounters a deadly lifeform.",
@@ -50,6 +52,7 @@ test("invalid optional TMDB fields are removed without inventing identity", () =
   assert.equal(record.release_date, null);
   assert.equal(record.release_year, null);
   assert.equal(record.poster_path, null);
+  assert.equal(record.backdrop_path, null);
   assert.equal(record.runtime_minutes, null);
   assert.deepEqual(record.genres, []);
   assert.equal(record.overview, null);
@@ -73,6 +76,7 @@ test("the browser receives the canonical UUID but no server credential", () => {
     title: "The Matrix",
     year: 1999,
     posterPath: null,
+    backdropPath: null,
     runtime: 136,
     genres: ["Action"],
     overview: "",

@@ -27,6 +27,11 @@ function posterUrl(path) {
   return path.startsWith("http") ? path : `https://image.tmdb.org/t/p/w500${path}`;
 }
 
+function backdropUrl(path) {
+  if (!path) return null;
+  return path.startsWith("http") ? path : "https://image.tmdb.org/t/p/w1280" + path;
+}
+
 export function normalisePersonalFilm(row) {
   const movie = movieRecord(row);
   return {
@@ -43,6 +48,8 @@ export function normalisePersonalFilm(row) {
     tmdbId: movie.tmdb_id ?? row.tmdbId ?? null,
     posterPath: movie.poster_path ?? row.posterPath ?? null,
     posterUrl: posterUrl(movie.poster_path ?? row.posterPath ?? row.posterUrl ?? null),
+    backdropPath: movie.backdrop_path ?? row.backdropPath ?? null,
+    backdropUrl: backdropUrl(movie.backdrop_path ?? row.backdropPath ?? row.backdropUrl ?? null),
     runtime: Number(movie.runtime_minutes ?? row.runtime) || null,
     genres: Array.isArray(movie.genres ?? row.genres) ? movie.genres ?? row.genres : [],
     overview: movie.overview ?? row.overview ?? "",

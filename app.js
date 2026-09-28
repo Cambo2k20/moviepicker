@@ -111,9 +111,18 @@ const sessionIdentitySource = document.querySelector("#session-identity-source")
 const discordProfileRefresh = document.querySelector("#discord-profile-refresh");
 
 const legacyViewMap = { home: "list", queue: "list", tonight: "pick", wrapped: "stats" };
-const initialHash = window.location.hash.replace("#", "");
 
-let currentView = legacyViewMap[initialHash] || initialHash || "list";
+function routeFromHash(rawHash = window.location.hash) {
+  const value = String(rawHash || "").replace(/^#/, "");
+  if (value.startsWith("profile/")) {
+    return { view: "profile", profileId: decodeURIComponent(value.slice("profile/".length)) };
+  }
+  return { view: legacyViewMap[value] || value || "list", profileId: null };
+}
+
+const initialRoute = routeFromHash();
+let currentView = initialRoute.view;
+let selectedProfileId = initialRoute.profileId;
 let authUser = null;
 let currentProfile = null;
 let availableGroup = null;
@@ -130,6 +139,11 @@ let personalReviews = [];
 let publishedReviews = [];
 let personalReviewsLoadError = false;
 let publishedReviewsLoadError = false;
+let memberProfiles = [];
+let memberProfilesLoadError = false;
+let memberProfileDraft = emptyMemberProfileDraft();
+let memberProfileBusy = false;
+let memberProfileDraftSaved = false;
 let reviewEditorOpen = false;
 let reviewPendingAction = "";
 let reviewLiveMessage = "";
@@ -223,6 +237,8 @@ function persistDesignPreviewWorkspace() {
       personalViewingEvents,
       personalReviews,
       publishedReviews,
+      memberProfiles,
+      memberProfileDraft,
       watchState: movieList.map(({ id, watched, watchCount, lastWatchedOn, votes, votedByMe }) => ({ id, watched, watchCount, lastWatchedOn, votes, votedByMe })),
     }));
   } catch { /* a full or blocked store must not break the preview */ }
@@ -247,6 +263,8 @@ function restoreDesignPreviewWorkspace() {
   if (Array.isArray(saved.personalViewingEvents)) personalViewingEvents = saved.personalViewingEvents.map(normalisePersonalViewingEvent);
   if (Array.isArray(saved.personalReviews)) personalReviews = saved.personalReviews.map(normalisePersonalReview);
   if (Array.isArray(saved.publishedReviews)) publishedReviews = saved.publishedReviews.map(normalisePublishedReview);
+  if (Array.isArray(saved.memberProfiles)) memberProfiles = saved.memberProfiles.map(normaliseMemberProfile);
+  if (saved.memberProfileDraft) memberProfileDraft = normaliseMemberProfileDraft(saved.memberProfileDraft);
   activeSession = saved.activeSession || null;
   sessionHistory = Array.isArray(saved.sessionHistory) ? saved.sessionHistory : [];
   journalSessionId = null;
@@ -304,10 +322,23 @@ function loadDesignPreviewWorkspace() {
     { id: "preview-inception", title: "Inception", year: 2010, posterUrl: "https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", runtime: 148, genres: ["Action", "Science Fiction", "Thriller"], overview: "A skilled extractor is offered a chance to erase his past crimes by planting an idea in another person's mind.", createdAt: "2026-07-24T20:00:00Z", suggestedBy: "Cameron", suggestedById: "preview-cameron", votes: 3, votedByMe: false, watched: false, tmdbId: 27205 },
     { id: "preview-martian", title: "The Martian", year: 2015, posterUrl: "https://image.tmdb.org/t/p/w500/5BHuvQ6p9kfc091Z8RiFNhCwL4b.jpg", runtime: 144, genres: ["Adventure", "Drama", "Science Fiction"], overview: "An astronaut stranded on Mars must rely on ingenuity and determination while Earth works to bring him home.", createdAt: "2026-08-20T20:00:00Z", suggestedBy: "Kieran", suggestedById: "preview-kieran", votes: 1, votedByMe: false, watched: false, tmdbId: 286217 },
   ];
+  const previewBackdropsByTmdb = {
+    129: "/Ab8mkHmkYADjU7wQiOkia9BzGvS.jpg",
+    348: "/AmR3JG1VQVxU8TfAvljUhfSFUOx.jpg",
+    550: "/hZkgoQYus5vegHoetLkCJzb17zJ.jpg",
+    603: "/icmmSD4vTTDKOq2vvdulafOGw93.jpg",
+    680: "/suaEOtk1N1sgg2MTM7oZd2cfVp3.jpg",
+    771: "/5jkE2SzR5uR2egEb1rRhF22JyWN.jpg",
+    27205: "/s3TBrRGB1iav7gFOCNx3H31MoES.jpg",
+    157336: "/xJHokMbljvjADYdit5fK5VQsXEG.jpg",
+    286217: "/sy6DvAu72kjoseZEjocnm2ZZ09i.jpg",
+  };
   movieList.find((item) => item.id === "preview-alien").suggestedByAvatar = `${knownAvatars.dean}?source=discord-server-profile`;
   for (const item of movieList) {
     item.movieId = `preview-movie-${item.tmdbId}`;
     item.watchCount = 0;
+    item.backdropPath = previewBackdropsByTmdb[item.tmdbId] || null;
+    item.backdropUrl = item.backdropPath ? tmdbPoster(item.backdropPath, "w1280") : null;
   }
   personalFilms = [
     normalisePersonalFilm({
@@ -359,6 +390,17 @@ function loadDesignPreviewWorkspace() {
       isFavourite: false,
       createdAt: "2026-07-04T20:00:00Z",
       updatedAt: "2026-08-12T20:00:00Z",
+    }),
+    normalisePersonalFilm({
+      ...movieList.find((item) => item.tmdbId === 27205),
+      id: "preview-personal-inception",
+      ownerId: previewIdentity.id,
+      movieId: "preview-movie-27205",
+      state: "WATCHED",
+      rating: 3,
+      isFavourite: false,
+      createdAt: "2026-07-24T20:00:00Z",
+      updatedAt: "2026-08-08T20:00:00Z",
     }),
   ];
   personalViewingEvents = [
@@ -430,8 +472,56 @@ function loadDesignPreviewWorkspace() {
       updatedAt: "2026-08-23T18:00:00Z",
     }),
   ];
-  isLoading = false;
+  const previewProfileFilms = [
+    { ownerId: "preview-cameron", tmdbIds: [680, 603, 129, 27205, 348], introduction: "Five films I would defend in court.", bannerTmdbId: 603, memberSince: "2025-11-02T20:00:00Z", stats: [184, 72, 4.1, 96], recentTmdbIds: [680, 129, 27205], genres: [["Drama", 54], ["Science Fiction", 42], ["Crime", 31]], ratings: [4, 4, 5, 3, null] },
+    { ownerId: "preview-dean", tmdbIds: [348, 157336, 680, 550, 286217], introduction: "Big swings, strange worlds and the occasional perfect crime.", bannerTmdbId: 348, memberSince: "2025-11-06T20:00:00Z", stats: [221, 89, 3.8, 91], recentTmdbIds: [348, 286217, 680], genres: [["Science Fiction", 61], ["Drama", 49], ["Horror", 37]], ratings: [5, 4, 4, 3, 4] },
+    { ownerId: "preview-kieran", tmdbIds: [771, 286217, 603, 129, 348], introduction: "Comfort films with a little danger around the edges.", bannerTmdbId: 771, memberSince: "2025-11-18T20:00:00Z", stats: [143, 64, 4.0, 98], recentTmdbIds: [771, 129, 603], genres: [["Comedy", 38], ["Family", 34], ["Science Fiction", 29]], ratings: [5, 4, 4, 5, 3] },
+    { ownerId: "preview-andrew", tmdbIds: [157336, 550, 27205, 680, 771], introduction: "Give me a great premise and enough runtime to get lost in it.", bannerTmdbId: 157336, memberSince: "2025-12-03T20:00:00Z", stats: [207, 83, 3.9, 94], recentTmdbIds: [157336, 27205, 550], genres: [["Drama", 58], ["Science Fiction", 47], ["Thriller", 35]], ratings: [5, 4, 4, 3, 4] },
+    { ownerId: "preview-ross", tmdbIds: [550, 348, 603, 286217, 157336], introduction: "A small collection of films that refuse to behave.", bannerTmdbId: 550, memberSince: "2026-01-11T20:00:00Z", stats: [126, 51, 3.7, 88], recentTmdbIds: [550, 348, 286217], genres: [["Drama", 41], ["Science Fiction", 33], ["Action", 27]], ratings: [4, 5, 4, 3, 4] },
+  ];
+  const previewMoviesByTmdb = new Map(movieList.map((film) => [Number(film.tmdbId), film]));
+  memberProfiles = previewProfileFilms.map((definition) => {
+    const banner = previewMoviesByTmdb.get(definition.bannerTmdbId);
+    return normaliseMemberProfile({
+    owner_id: definition.ownerId,
+    display_name: members.find((member) => member.id === definition.ownerId)?.name,
+    avatar_url: members.find((member) => member.id === definition.ownerId)?.avatar,
+    introduction: definition.introduction,
+    member_since: definition.memberSince,
+    published_at: "2026-08-24T20:00:00.000Z",
+    banner_movie_id: banner?.movieId,
+    banner_title: banner?.title,
+    banner_backdrop_path: banner?.backdropPath,
+    banner_poster_path: banner?.posterUrl,
+    films_watched_count: definition.stats[0],
+    sessions_attended_count: definition.stats[1],
+    average_rating: definition.stats[2],
+    completion_rate: definition.stats[3],
+    recent_watches: definition.recentTmdbIds.map((tmdbId, index) => {
+      const film = previewMoviesByTmdb.get(tmdbId);
+      return { position: index + 1, movie_id: film?.movieId, title: film?.title, release_year: film?.year, tmdb_id: film?.tmdbId, poster_url: film?.posterUrl, watched_on: ["2026-08-24", "2026-08-17", "2026-08-09"][index], outcome: index === 2 && definition.ownerId === "preview-ross" ? "DID_NOT_FINISH" : "FINISHED", rating: definition.ratings[index], session_label: index === 0 ? "Queue Roulette" : null };
+    }),
+    genre_breakdown: definition.genres.map(([genre, watchCount], index) => ({ position: index + 1, genre, watch_count: watchCount })),
+    films: definition.tmdbIds.map((tmdbId, index) => {
+      const film = previewMoviesByTmdb.get(tmdbId);
+      return { slot: index + 1, movie_id: film?.movieId, title: film?.title, release_year: film?.year, tmdb_id: film?.tmdbId, poster_url: film?.posterUrl, rating: definition.ratings[index] };
+    }),
+  });
+  });
+  const currentPreviewProfile = memberProfiles.find((profile) => profile.ownerId === previewIdentity.id) || memberProfiles[0];
+  memberProfileDraft = {
+    introduction: currentPreviewProfile?.introduction || "",
+    movieIds: currentPreviewProfile?.films.map((film) => film.movieId).filter(Boolean) || [],
+    bannerMovieId: currentPreviewProfile?.bannerMovieId || null,
+    includeRecentWatches: Boolean(currentPreviewProfile?.recentWatches.length),
+    includeGenreBreakdown: Boolean(currentPreviewProfile?.genreBreakdown.length),
+  };
+  memberProfileDraftSaved = false;
   restoreDesignPreviewWorkspace();
+  const previewRoute = routeFromHash();
+  currentView = previewRoute.view;
+  selectedProfileId = previewRoute.profileId;
+  isLoading = false;
   personalFilmsLoadError = designPreviewPersonalFilmsError;
   if (personalFilmsLoadError) personalFilms = [];
   personalViewingEventsLoadError = designPreviewViewingHistoryError;
@@ -622,6 +712,126 @@ function normaliseGenres(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (typeof value === "string") return value.split(",").map((genre) => genre.trim()).filter(Boolean);
   return [];
+}
+
+function normaliseMemberProfileFilm(row) {
+  const posterPath = row.poster_path || row.posterPath || null;
+  return {
+    slot: Number(row.slot) || 0,
+    movieId: row.movie_id || row.movieId || null,
+    title: row.title || "Untitled film",
+    year: row.release_year ?? row.year ?? null,
+    tmdbId: row.tmdb_id ?? row.tmdbId ?? null,
+    posterPath,
+    posterUrl: row.poster_url || (posterPath ? tmdbPoster(posterPath) : null),
+    rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
+  };
+}
+
+function normaliseMemberProfileRecentWatch(row) {
+  const posterPath = row.poster_path || row.posterPath || null;
+  return {
+    position: Number(row.position) || 0,
+    movieId: row.movie_id || row.movieId || null,
+    title: row.title || "Untitled film",
+    year: row.release_year ?? row.year ?? null,
+    tmdbId: row.tmdb_id ?? row.tmdbId ?? null,
+    posterPath,
+    posterUrl: row.poster_url || (posterPath ? tmdbPoster(posterPath) : null),
+    watchedOn: row.watched_on ?? row.watchedOn ?? null,
+    outcome: row.outcome || "FINISHED",
+    rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
+    sessionLabel: row.session_label || row.sessionLabel || null,
+  };
+}
+
+function normaliseMemberProfileGenre(row) {
+  return {
+    position: Number(row.position) || 0,
+    genre: String(row.genre || "Other"),
+    watchCount: Math.max(0, Number(row.watch_count ?? row.watchCount) || 0),
+  };
+}
+
+function normaliseMemberProfile(row) {
+  const films = Array.isArray(row.films)
+    ? row.films.map(normaliseMemberProfileFilm).sort((left, right) => left.slot - right.slot)
+    : [];
+  const recentWatches = Array.isArray(row.recent_watches ?? row.recentWatches)
+    ? (row.recent_watches ?? row.recentWatches).map(normaliseMemberProfileRecentWatch).sort((left, right) => left.position - right.position)
+    : [];
+  const genreBreakdown = Array.isArray(row.genre_breakdown ?? row.genreBreakdown)
+    ? (row.genre_breakdown ?? row.genreBreakdown).map(normaliseMemberProfileGenre).sort((left, right) => left.position - right.position)
+    : [];
+  const bannerBackdropPath = row.banner_backdrop_path || row.bannerBackdropPath || null;
+  const bannerPosterPath = row.banner_poster_path || row.bannerPosterPath || null;
+  return {
+    ownerId: row.owner_id || row.ownerId || null,
+    displayName: row.display_name || row.displayName || "Discordian",
+    avatarUrl: row.avatar_url || row.avatarUrl || null,
+    introduction: String(row.introduction || ""),
+    memberSince: row.member_since || row.memberSince || null,
+    publishedAt: row.published_at || row.publishedAt || null,
+    bannerMovieId: row.banner_movie_id || row.bannerMovieId || null,
+    bannerTitle: row.banner_title || row.bannerTitle || null,
+    bannerBackdropPath,
+    bannerBackdropUrl: row.banner_backdrop_url || row.bannerBackdropUrl || (bannerBackdropPath ? tmdbPoster(bannerBackdropPath, "w1280") : null),
+    bannerPosterPath,
+    bannerPosterUrl: row.banner_poster_url || row.bannerPosterUrl || (bannerPosterPath ? tmdbPoster(bannerPosterPath) : null),
+    filmsWatchedCount: Math.max(0, Number(row.films_watched_count ?? row.filmsWatchedCount) || 0),
+    sessionsAttendedCount: Math.max(0, Number(row.sessions_attended_count ?? row.sessionsAttendedCount) || 0),
+    averageRating: row.average_rating === null || row.average_rating === undefined
+      ? (row.averageRating === null || row.averageRating === undefined ? null : Number(row.averageRating))
+      : Number(row.average_rating),
+    completionRate: row.completion_rate === null || row.completion_rate === undefined
+      ? (row.completionRate === null || row.completionRate === undefined ? null : Number(row.completionRate))
+      : Number(row.completion_rate),
+    recentWatches,
+    genreBreakdown,
+    films,
+  };
+}
+
+function aggregateMemberProfileRows(rows) {
+  const profiles = new Map();
+  for (const row of rows || []) {
+    const ownerId = row.owner_id || row.ownerId;
+    if (!ownerId) continue;
+    const profile = profiles.get(ownerId) || normaliseMemberProfile({ ...row, films: [] });
+    profile.films.push(normaliseMemberProfileFilm(row));
+    profile.films.sort((left, right) => left.slot - right.slot);
+    profiles.set(ownerId, profile);
+  }
+  return [...profiles.values()];
+}
+
+function emptyMemberProfileDraft() {
+  return {
+    introduction: "",
+    movieIds: [],
+    bannerMovieId: null,
+    includeRecentWatches: false,
+    includeGenreBreakdown: false,
+  };
+}
+
+function normaliseMemberProfileDraft(row) {
+  const films = Array.isArray(row?.films)
+    ? row.films
+    : Array.isArray(row?.member_profile_draft_films)
+      ? row.member_profile_draft_films
+      : [];
+  return {
+    introduction: String(row?.introduction || ""),
+    movieIds: films
+      .map((film) => ({ slot: Number(film.slot) || 0, movieId: film.movie_id || film.movieId }))
+      .filter((film) => film.movieId)
+      .sort((left, right) => left.slot - right.slot)
+      .map((film) => film.movieId),
+    bannerMovieId: row?.banner_movie_id || row?.bannerMovieId || null,
+    includeRecentWatches: Boolean(row?.include_recent_watches ?? row?.includeRecentWatches),
+    includeGenreBreakdown: Boolean(row?.include_genre_breakdown ?? row?.includeGenreBreakdown),
+  };
 }
 
 function filmPoster(item) {
@@ -1482,6 +1692,7 @@ function metadataPayload(movie) {
     release_year: movie.year,
     tmdb_id: movie.tmdbId,
     poster_path: movie.posterPath,
+    backdrop_path: movie.backdropPath,
     runtime_minutes: movie.runtime,
     genres: movie.genres,
     overview: movie.overview,
@@ -1509,6 +1720,7 @@ async function lookupMovie(body) {
         title: film.title,
         year: film.year,
         posterPath: film.posterPath || film.posterUrl,
+        backdropPath: film.backdropPath || film.backdropUrl,
         runtime: film.runtime,
         genres: film.genres,
         overview: film.overview,
@@ -1530,7 +1742,7 @@ async function lookupMovie(body) {
   return data;
 }
 
-const PERSONAL_FILM_SELECT = "id,owner_id,movie_id,state,rating,is_favourite,created_at,updated_at,movies(id,tmdb_id,title,release_year,poster_path,runtime_minutes,genres,overview,metadata_updated_at)";
+const PERSONAL_FILM_SELECT = "id,owner_id,movie_id,state,rating,is_favourite,created_at,updated_at,movies(id,tmdb_id,title,release_year,poster_path,backdrop_path,runtime_minutes,genres,overview,metadata_updated_at)";
 const PERSONAL_VIEWING_EVENT_SELECT = "id,owner_id,movie_id,outcome,watched_on,source_journal_entry_id,is_hidden,created_at,updated_at";
 const PERSONAL_REVIEW_SELECT = "id,owner_id,movie_id,body,contains_spoilers,created_at,updated_at";
 const PUBLISHED_REVIEW_SELECT = "review_id,owner_id,movie_id,body,contains_spoilers,rating,published_at,updated_at";
@@ -3287,6 +3499,195 @@ function renderMembers() {
     </section>`;
 }
 
+function memberProfileForId(profileId) {
+  return memberProfiles.find((profile) => profile.ownerId === profileId) || null;
+}
+
+function memberForId(profileId) {
+  return members.find((member) => member.id === profileId) || null;
+}
+
+function profileMovieForId(movieId) {
+  return personalFilms.find((film) => film.movieId === movieId)
+    || movieList.find((film) => film.movieId === movieId)
+    || null;
+}
+
+function renderProfilePoster(film, { compact = false } = {}) {
+  const poster = film.posterUrl || (film.posterPath ? tmdbPoster(film.posterPath) : null);
+  return `<span class="member-profile-poster ${compact ? "is-compact" : ""} ${poster ? "" : "is-placeholder"}"><img src="${escapeHTML(poster || imageAssets.journalFallback)}" alt="${escapeHTML(film.title)} poster" loading="lazy" /><span class="member-profile-poster-slot">${film.slot || ""}</span></span>`;
+}
+
+function renderProfileRating(rating) {
+  if (!Number.isFinite(Number(rating))) return "";
+  const score = Number(rating);
+  const label = reactionForValue(score)?.label || `${score} out of 5`;
+  return `<span class="member-profile-rating" aria-label="${escapeHTML(label)}"><span class="material-symbols-outlined" aria-hidden="true">star</span>${score}/5</span>`;
+}
+
+function memberProfileBanner(profile) {
+  return profile?.bannerBackdropUrl
+    || profile?.bannerPosterUrl
+    || profile?.films?.find((film) => film.movieId === profile.bannerMovieId)?.posterUrl
+    || profile?.films?.[0]?.posterUrl
+    || imageAssets.journalFallback;
+}
+
+function buildPreviewMemberProfilePublication({ introduction, movieIds, bannerMovieId, includeRecentWatches, includeGenreBreakdown }) {
+  const member = memberForId(authUser.id);
+  const current = memberProfileForId(authUser.id);
+  const visibleEvents = personalViewingEvents
+    .filter((event) => event.ownerId === authUser.id && !event.isHidden)
+    .sort((left, right) => String(right.watchedOn || right.createdAt || "").localeCompare(String(left.watchedOn || left.createdAt || "")));
+  const watchedMovieIds = new Set([
+    ...personalFilms.filter((film) => film.ownerId === authUser.id && film.state === "WATCHED").map((film) => film.movieId),
+    ...visibleEvents.filter((event) => event.outcome === "FINISHED").map((event) => event.movieId),
+  ]);
+  const ratings = personalFilms.map((film) => Number(film.rating)).filter(Number.isFinite);
+  const finishedCount = visibleEvents.filter((event) => event.outcome === "FINISHED").length;
+  const films = movieIds.map((movieId, index) => {
+    const film = profileMovieForId(movieId);
+    const personal = personalFilms.find((candidate) => candidate.movieId === movieId);
+    return { slot: index + 1, movie_id: movieId, title: film?.title || "Untitled film", release_year: film?.year || null, tmdb_id: film?.tmdbId || null, poster_url: film?.posterUrl || null, rating: personal?.rating ?? null };
+  });
+  const banner = profileMovieForId(bannerMovieId) || profileMovieForId(movieIds[0]);
+  const genreCounts = new Map();
+  for (const event of visibleEvents.filter((candidate) => candidate.outcome === "FINISHED")) {
+    const film = profileMovieForId(event.movieId);
+    for (const genre of film?.genres || []) genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1);
+  }
+  const recentWatches = includeRecentWatches ? visibleEvents.slice(0, 5).map((event, index) => {
+    const film = profileMovieForId(event.movieId);
+    const personal = personalFilms.find((candidate) => candidate.movieId === event.movieId);
+    const sourceSession = sessionHistory.find((session) => session.journalEntry?.id === event.sourceJournalEntryId);
+    return { position: index + 1, movie_id: event.movieId, title: film?.title || "Untitled film", release_year: film?.year || null, tmdb_id: film?.tmdbId || null, poster_url: film?.posterUrl || null, watched_on: event.watchedOn, outcome: event.outcome, rating: personal?.rating ?? null, session_label: sourceSession ? sessionModeLabel(sourceSession) : null };
+  }) : [];
+  const genreBreakdown = includeGenreBreakdown
+    ? [...genreCounts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 3).map(([genre, watchCount], index) => ({ position: index + 1, genre, watch_count: watchCount }))
+    : [];
+  return normaliseMemberProfile({
+    owner_id: authUser.id,
+    display_name: member?.name || currentProfile?.displayName,
+    avatar_url: member?.avatar || currentProfile?.discordServerAvatar,
+    introduction,
+    member_since: current?.memberSince || new Date().toISOString(),
+    published_at: new Date().toISOString(),
+    banner_movie_id: banner?.movieId || null,
+    banner_title: banner?.title || null,
+    banner_backdrop_path: banner?.backdropPath || banner?.backdropUrl || null,
+    banner_poster_path: banner?.posterPath || banner?.posterUrl || null,
+    films_watched_count: watchedMovieIds.size,
+    sessions_attended_count: sessionHistory.filter((session) => session.status === "WATCHED" && session.participantIds?.includes(authUser.id)).length,
+    average_rating: ratings.length ? ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length : null,
+    completion_rate: visibleEvents.length ? 100 * finishedCount / visibleEvents.length : null,
+    recent_watches: recentWatches,
+    genre_breakdown: genreBreakdown,
+    films,
+  });
+}
+
+function renderMemberProfileCard(member) {
+  const profile = memberProfileForId(member.id);
+  const canEdit = member.id === authUser?.id;
+  const films = profile?.films || [];
+  return `
+    <article class="member-profile-card layout-container ${profile ? "is-published" : "is-unpublished"}">
+      <header class="member-profile-card-header"><img src="${escapeHTML(member.avatar || avatarForName(member.name))}" alt="" /><div><span class="eyebrow">${profile ? "Published profile" : "Not published"}</span><h2>${escapeHTML(member.name)}</h2></div></header>
+      ${profile ? `<p class="member-profile-card-intro">${escapeHTML(profile.introduction || "No introduction yet.")}</p><div class="member-profile-poster-strip">${films.slice(0, 5).map((film) => renderProfilePoster(film, { compact: true })).join("")}</div><p class="member-profile-card-films">${films.map((film) => escapeHTML(film.title)).join(" · ")}</p>` : `<div class="member-profile-unpublished"><span class="material-symbols-outlined" aria-hidden="true">person_outline</span><p>${canEdit ? "Choose your introduction and Top Five to publish your profile." : "This member has not published a profile yet."}</p></div>`}
+      <footer class="member-profile-card-actions">${profile ? `<button class="secondary-button compact" type="button" data-view="profile" data-profile-id="${escapeHTML(member.id)}"><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>View profile</button>` : ""}${canEdit ? `<button class="${profile ? "quiet-button" : "primary-button"} compact" type="button" data-edit-member-profile><span class="material-symbols-outlined" aria-hidden="true">edit</span>${profile ? "Edit yours" : "Create yours"}</button>` : ""}</footer>
+    </article>`;
+}
+
+function renderMemberProfiles() {
+  const sortedMembers = [...members].sort((left, right) => left.name.localeCompare(right.name));
+  return `
+    <section class="page-view member-profiles-view" aria-labelledby="member-profiles-title">
+      ${renderPageHeader({
+        id: "member-profiles-title",
+        eyebrow: `Cine-Cord · ${memberProfiles.length} published`,
+        title: "Member Profiles",
+        description: "A curated window into the people you watch with. Only approved Cine-Cord members can see a published profile.",
+        actions: `<button class="primary-button" type="button" data-edit-member-profile><span class="material-symbols-outlined" aria-hidden="true">edit</span>${memberProfileForId(authUser?.id) ? "Edit my profile" : "Create my profile"}</button>`,
+      })}
+      ${memberProfilesLoadError ? `<div class="feature-error-state" role="alert"><span class="material-symbols-outlined" aria-hidden="true">cloud_off</span><div><strong>Member Profiles couldn’t load.</strong><p>The shared Cine-Cord pages are still available.</p></div><button class="secondary-button" type="button" data-retry-member-profiles>Try again</button></div>` : `<div class="member-profile-grid">${sortedMembers.length ? sortedMembers.map(renderMemberProfileCard).join("") : `<div class="empty-state"><span class="material-symbols-outlined" aria-hidden="true">groups</span><h2>No approved members yet.</h2><p>Profiles will appear here once your Cine-Cord group has members.</p></div>`}</div>`}
+    </section>`;
+}
+
+function renderMemberProfileEditor(profile) {
+  if (personalFilmsLoadError) return `${renderPageHeader({ id: "member-profile-editor-title", eyebrow: "Private draft", title: "Edit Profile", description: "Your private My Cinema could not be loaded, so the Top Five editor is unavailable." })}${renderPersonalFilmsUnavailable()}`;
+  const selectedIds = memberProfileDraft.movieIds || [];
+  const films = [...personalFilms].sort((left, right) => left.title.localeCompare(right.title));
+  const published = Boolean(profile);
+  const selectedBanner = profileMovieForId(memberProfileDraft.bannerMovieId) || profileMovieForId(selectedIds[0]);
+  return `
+    <section class="member-profile-editor layout-container layout-container-private" aria-labelledby="member-profile-editor-title">
+      <header class="member-profile-editor-header"><div><span class="eyebrow">Private draft</span><h2 id="member-profile-editor-title">Shape your cinema profile</h2><p>Your Discord name and avatar stay verified. Everything below changes for the group only when you publish.</p></div><span class="profile-draft-state">${memberProfileDraftSaved ? "Draft saved" : "Draft in progress"}</span></header>
+      <form class="member-profile-form" data-member-profile-form>
+        <label><span>Introduction <small>160 characters · optional</small></span><textarea name="introduction" maxlength="160" rows="3" placeholder="What kind of films pull you in?">${escapeHTML(memberProfileDraft.introduction)}</textarea></label>
+        <fieldset><legend>Top Five <small>Order matters</small></legend><div class="member-profile-slot-list">${Array.from({ length: 5 }, (_, index) => {
+          const selected = selectedIds[index] || "";
+          return `<label class="member-profile-slot"><span>${index + 1}</span><select name="movie_${index + 1}" aria-label="Top Five slot ${index + 1}"><option value="">No film selected</option>${films.map((film) => `<option value="${escapeHTML(film.movieId)}" ${film.movieId === selected ? "selected" : ""}>${escapeHTML(film.title)}${film.year ? ` (${film.year})` : ""}</option>`).join("")}</select></label>`;
+        }).join("")}</div></fieldset>
+        <fieldset class="member-profile-banner-fieldset"><legend>Hero banner <small>Choose one of your Top Five</small></legend><div class="member-profile-banner-editor"><div class="member-profile-banner-preview">${selectedBanner ? `<img src="${escapeHTML(selectedBanner.backdropUrl || selectedBanner.posterUrl || imageAssets.journalFallback)}" alt="" data-profile-banner-preview-image /><span data-profile-banner-preview-title>${escapeHTML(selectedBanner.title)}</span>` : `<span class="material-symbols-outlined" aria-hidden="true">panorama</span><span data-profile-banner-preview-title>Select a Top Five film</span>`}</div><label><span>Banner film</span><select name="banner_movie_id" data-profile-banner-select><option value="">Use the first Top Five film</option>${films.map((film) => `<option value="${escapeHTML(film.movieId)}" ${film.movieId === memberProfileDraft.bannerMovieId ? "selected" : ""}>${escapeHTML(film.title)}${film.year ? ` (${film.year})` : ""}</option>`).join("")}</select></label></div></fieldset>
+        <fieldset class="member-profile-publication-fieldset"><legend>Published profile sections <small>You control these snapshots</small></legend><label class="member-profile-publication-option"><input type="checkbox" name="include_recent_watches" ${memberProfileDraft.includeRecentWatches ? "checked" : ""} /><span><strong>Recent watches</strong><small>Publish up to five visible viewing-history events. Hidden events are never copied.</small></span></label><label class="member-profile-publication-option"><input type="checkbox" name="include_genre_breakdown" ${memberProfileDraft.includeGenreBreakdown ? "checked" : ""} /><span><strong>Genre breakdown</strong><small>Publish the top three genre counts calculated from visible finished events.</small></span></label></fieldset>
+        <div class="member-profile-form-actions"><button class="secondary-button" type="submit" name="profile_action" value="draft" ${memberProfileBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">save</span>${memberProfileBusy ? "Saving…" : "Save private draft"}</button><button class="primary-button" type="submit" name="profile_action" value="publish" ${memberProfileBusy ? "disabled" : ""}><span class="material-symbols-outlined" aria-hidden="true">public</span>${published ? "Update published profile" : "Publish profile"}</button>${published ? `<button class="quiet-button danger" type="button" data-unpublish-member-profile ${memberProfileBusy ? "disabled" : ""}>Unpublish</button>` : ""}<button class="quiet-button" type="button" data-view="${published ? "profile" : "profiles"}" ${published ? `data-profile-id="${escapeHTML(authUser.id)}"` : ""}>Cancel</button></div>
+        <small class="member-profile-form-note">Publishing replaces the previous group-visible snapshot. Your full My Cinema and private viewing history remain private.</small>
+      </form>
+    </section>`;
+}
+
+function renderMemberProfileEditPage() {
+  const profile = memberProfileForId(authUser?.id);
+  return `<section class="page-view member-profile-edit-page" aria-labelledby="profile-edit-page-title">
+    ${renderPageHeader({ id: "profile-edit-page-title", eyebrow: "Member Profiles · Private editor", title: "Edit Profile", description: "Curate what the Discordians can see. Saving a draft publishes nothing.", actions: `<button class="secondary-button" type="button" data-view="${profile ? "profile" : "profiles"}" ${profile ? `data-profile-id="${escapeHTML(authUser.id)}"` : ""}><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>${profile ? "Back to profile" : "All profiles"}</button>` })}
+    ${renderMemberProfileEditor(profile)}
+  </section>`;
+}
+
+function renderMemberProfileRecentWatch(watch) {
+  const outcome = watch.outcome === "DID_NOT_FINISH" ? "Did not finish" : "Finished";
+  return `<article class="member-profile-recent-watch"><img src="${escapeHTML(watch.posterUrl || imageAssets.journalFallback)}" alt="${escapeHTML(watch.title)} poster" loading="lazy" /><div><span class="member-profile-watch-date">${escapeHTML(formatSavedDate(watch.watchedOn))}</span><h3>${escapeHTML(watch.title)}${watch.year ? ` <small>${escapeHTML(watch.year)}</small>` : ""}</h3><p>${escapeHTML(watch.sessionLabel || "Private watch")} &middot; ${escapeHTML(outcome)}</p>${renderProfileRating(watch.rating)}</div></article>`;
+}
+
+function renderMemberProfileDetail() {
+  const profile = memberProfileForId(selectedProfileId);
+  const member = memberForId(selectedProfileId);
+  const isOwner = selectedProfileId === authUser?.id;
+  if (!profile && !isOwner) return renderMemberProfiles();
+  if (!profile) {
+    return `<section class="page-view member-profile-detail" aria-labelledby="member-profile-title">${renderPageHeader({ id: "member-profile-title", eyebrow: "Member Profiles", title: "Your profile is private", description: "Choose a Top Five and publish a profile when you are ready.", actions: `<button class="secondary-button" type="button" data-view="profiles"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>All profiles</button><button class="primary-button" type="button" data-edit-member-profile><span class="material-symbols-outlined" aria-hidden="true">edit</span>Create profile</button>` })}</section>`;
+  }
+  const displayName = profile.displayName || member?.name || currentProfile?.displayName || "Discordian";
+  const avatar = profile.avatarUrl || member?.avatar || avatarForName(displayName);
+  const reviews = publishedReviews.filter((review) => review.ownerId === selectedProfileId).sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+  const maxGenreCount = Math.max(1, ...profile.genreBreakdown.map((genre) => genre.watchCount));
+  return `
+    <section class="page-view member-profile-detail" aria-labelledby="member-profile-title">
+      <section class="member-profile-hero">
+        <img class="member-profile-hero-backdrop" src="${escapeHTML(memberProfileBanner(profile))}" alt="" />
+        <div class="member-profile-hero-shade" aria-hidden="true"></div>
+        <div class="member-profile-hero-toolbar"><button class="secondary-button compact" type="button" data-view="profiles"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>All profiles</button>${isOwner ? `<button class="primary-button compact" type="button" data-edit-member-profile><span class="material-symbols-outlined" aria-hidden="true">edit</span>Edit profile</button>` : ""}</div>
+        <div class="member-profile-hero-identity"><img class="member-profile-avatar" src="${escapeHTML(avatar)}" alt="" /><div><span class="eyebrow">Verified Discordian</span><h1 id="member-profile-title">${escapeHTML(displayName)}</h1><p>${escapeHTML(profile.introduction || "No introduction published yet.")}</p><div class="member-profile-meta"><span>Member since ${escapeHTML(formatAddedDate(profile.memberSince))}</span><span>Updated ${escapeHTML(formatAddedDate(profile.publishedAt))}</span></div></div></div>
+      </section>
+      <section class="member-profile-stats" aria-label="Published member statistics">
+        <div><strong>${profile.filmsWatchedCount.toLocaleString("en-GB")}</strong><span>Films watched</span></div>
+        <div><strong>${profile.sessionsAttendedCount.toLocaleString("en-GB")}</strong><span>Sessions attended</span></div>
+        <div><strong>${Number.isFinite(profile.averageRating) ? profile.averageRating.toFixed(1) : "—"}</strong><span>Average rating</span></div>
+        <div><strong>${Number.isFinite(profile.completionRate) ? `${Math.round(profile.completionRate)}%` : "—"}</strong><span>Completion rate</span></div>
+      </section>
+      <div class="member-profile-content-grid">
+        <main class="member-profile-main-column">
+          <section class="member-profile-section" aria-labelledby="top-five-title"><header class="section-heading"><div><span class="eyebrow">Curated selection</span><h2 id="top-five-title">Top Five</h2></div><small>${profile.films.length}/5</small></header><div class="member-profile-top-five">${profile.films.map((film) => `<article class="member-profile-featured-film">${renderProfilePoster(film)}<div><strong>${escapeHTML(film.title)}</strong><span>${film.year || "Year unknown"}</span>${renderProfileRating(film.rating)}</div></article>`).join("")}</div></section>
+          <section class="member-profile-section" aria-labelledby="recent-watches-title"><header class="section-heading"><div><span class="eyebrow">Published snapshot</span><h2 id="recent-watches-title">Recent watches</h2></div><small>${profile.recentWatches.length}</small></header>${profile.recentWatches.length ? `<div class="member-profile-recent-list">${profile.recentWatches.map(renderMemberProfileRecentWatch).join("")}</div>` : `<div class="member-profile-empty"><span class="material-symbols-outlined" aria-hidden="true">history</span><div><strong>No recent watches published.</strong><p>This member has kept their viewing timeline private.</p></div></div>`}</section>
+        </main>
+        <aside class="member-profile-side-column">
+          <section class="member-profile-section" aria-labelledby="profile-genres-title"><header class="section-heading"><div><span class="eyebrow">Finished films</span><h2 id="profile-genres-title">Genre breakdown</h2></div></header>${profile.genreBreakdown.length ? `<div class="member-profile-genres">${profile.genreBreakdown.map((genre) => `<div class="member-profile-genre"><div><strong>${escapeHTML(genre.genre)}</strong><span>${genre.watchCount}</span></div><span class="member-profile-genre-track"><span style="width:${Math.max(8, Math.round(100 * genre.watchCount / maxGenreCount))}%"></span></span></div>`).join("")}</div>` : `<div class="member-profile-empty"><span class="material-symbols-outlined" aria-hidden="true">bar_chart</span><div><strong>No genre counts published.</strong><p>This profile keeps its taste breakdown private.</p></div></div>`}</section>
+          <section class="member-profile-section" aria-labelledby="profile-reviews-title"><header class="section-heading"><div><span class="eyebrow">Explicitly published</span><h2 id="profile-reviews-title">Reviews</h2></div><small>${reviews.length}</small></header>${reviews.length ? `<div class="published-review-list member-profile-review-list">${reviews.map(renderPublishedReview).join("")}</div>` : `<div class="member-profile-empty"><span class="material-symbols-outlined" aria-hidden="true">reviews</span><div><strong>No published reviews yet.</strong><p>Private reviews appear only after their author publishes them.</p></div></div>`}</section>
+        </aside>
+      </div>
+    </section>`;
+}
+
 function navigationAreaForView(view) {
   if (view === "members") return "admin";
   if (view === "my-films") return "my-cinema";
@@ -3401,7 +3802,7 @@ function render() {
     updateShellState();
     return;
   }
-  const renderers = { list: renderList, "my-films": renderMyFilms, pick: renderPick, sessions: renderSessions, journal: renderJournal, stats: renderStats, members: renderMembers };
+  const renderers = { list: renderList, "my-films": renderMyFilms, pick: renderPick, sessions: renderSessions, journal: renderJournal, stats: renderStats, members: renderMembers, profiles: renderMemberProfiles, profile: renderMemberProfileDetail, "profile-edit": renderMemberProfileEditPage };
   if (!renderers[currentView] || (currentView === "members" && !isCurrentAdmin())) currentView = "list";
   root.innerHTML = renderers[currentView]();
   updateShellState();
@@ -3410,10 +3811,11 @@ function render() {
   if (currentView === "journal") bindJournalSearch();
 }
 
-function navigate(view) {
+function navigate(view, profileId = null) {
   if (!authUser || !activeGroup) return;
   if (view === "members" && !isCurrentAdmin()) return;
   currentView = legacyViewMap[view] || view;
+  selectedProfileId = currentView === "profile" ? profileId : null;
   selectedFilmId = null;
   reactionEditorExpanded = false;
   reactionLiveMessage = "";
@@ -3421,7 +3823,9 @@ function navigate(view) {
   viewingEventPendingId = null;
   viewingEventLiveMessage = "";
   if (currentView !== "journal") journalFocusedEntryId = null;
-  window.location.hash = currentView;
+  window.location.hash = currentView === "profile" && selectedProfileId
+    ? `profile/${encodeURIComponent(selectedProfileId)}`
+    : currentView;
   render();
   if (currentView === "my-films") refreshPersonalCinema({ rerender: true }).catch(() => {});
   root.focus({ preventScroll: true });
@@ -3896,6 +4300,28 @@ async function fetchPublishedReviews() {
   );
 }
 
+async function fetchMemberProfiles(groupId) {
+  return settleOptionalQuery(
+    supabase.rpc("get_member_profiles", { p_group_id: groupId }),
+    (rows) => aggregateMemberProfileRows(rows),
+  );
+}
+
+async function fetchMemberProfileDraft(groupId) {
+  try {
+    const result = await supabase
+      .from("member_profile_drafts")
+      .select("group_id,owner_id,introduction,banner_movie_id,include_recent_watches,include_genre_breakdown,member_profile_draft_films(slot,movie_id)")
+      .eq("group_id", groupId)
+      .eq("owner_id", authUser.id)
+      .maybeSingle();
+    if (result.error) return { data: null, error: result.error };
+    return { data: result.data ? normaliseMemberProfileDraft(result.data) : null, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
 function applyPersonalFilmsResult(result) {
   personalFilms = result.data;
   personalFilmsLoadError = Boolean(result.error);
@@ -3918,6 +4344,18 @@ function applyPublishedReviewsResult(result) {
   publishedReviews = result.data;
   publishedReviewsLoadError = Boolean(result.error);
   if (result.error) console.warn("Published reviews could not be loaded.", result.error);
+}
+
+function applyMemberProfilesResult(result) {
+  memberProfiles = result.data || [];
+  memberProfilesLoadError = Boolean(result.error);
+  if (result.error) console.warn("Member Profiles could not be loaded.", result.error);
+}
+
+function applyMemberProfileDraftResult(result) {
+  memberProfileDraft = result.data || emptyMemberProfileDraft();
+  memberProfileDraftSaved = Boolean(result.data);
+  if (result.error) console.warn("Member Profile draft could not be loaded.", result.error);
 }
 
 async function retryPersonalFilms() {
@@ -3977,6 +4415,12 @@ async function loadWorkspace(providerToken = null) {
   publishedReviews = [];
   personalReviewsLoadError = false;
   publishedReviewsLoadError = false;
+  memberProfiles = [];
+  memberProfilesLoadError = false;
+  memberProfileDraft = emptyMemberProfileDraft();
+  memberProfileDraftSaved = false;
+  memberProfileBusy = false;
+  selectedProfileId = null;
   reviewEditorOpen = false;
   reviewPendingAction = "";
   reviewLiveMessage = "";
@@ -4029,6 +4473,8 @@ async function loadWorkspace(providerToken = null) {
   const personalViewingEventsPromise = fetchPersonalViewingEvents();
   const personalReviewsPromise = fetchPersonalReviews();
   const publishedReviewsPromise = fetchPublishedReviews();
+  const memberProfilesPromise = fetchMemberProfiles(activeGroup.id);
+  const memberProfileDraftPromise = fetchMemberProfileDraft(activeGroup.id);
   const [profilesResult, membershipsResult, identitiesResult, queueResult, votesResult, requestsResult, currentSessionResult, watchedSessionsResult, participantsResult, watchedResult, journalResult, entryViewersResult, publicationsResult, catalogRows] = await Promise.all([
     supabase.from("profiles").select("id,display_name"),
     supabase.from("group_memberships").select("user_id,role").eq("group_id", activeGroup.id),
@@ -4051,6 +4497,8 @@ async function loadWorkspace(providerToken = null) {
   applyPersonalViewingEventsResult(await personalViewingEventsPromise);
   applyPersonalReviewsResult(await personalReviewsPromise);
   applyPublishedReviewsResult(await publishedReviewsPromise);
+  applyMemberProfilesResult(await memberProfilesPromise);
+  applyMemberProfileDraftResult(await memberProfileDraftPromise);
 
   const profileMap = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
   const discordIdentityMap = new Map((identitiesResult.data || []).map((identity) => [identity.profile_id, identity]));
@@ -4250,6 +4698,7 @@ async function syncSession(session) {
   discordProfileSyncError = "";
   discordProfileSyncNotice = "";
   selectedFilmId = null;
+  selectedProfileId = null;
   clearJournalDraftSaveTimer();
   render();
   if (authUser) {
@@ -4319,7 +4768,89 @@ document.addEventListener("focusout", (event) => {
   else restoreReactionLabel(control);
 });
 
+document.addEventListener("change", (event) => {
+  const bannerSelect = event.target.closest?.("[data-profile-banner-select]");
+  if (!bannerSelect) return;
+  const form = bannerSelect.closest("[data-member-profile-form]");
+  const fallbackMovieId = String(new FormData(form).get("movie_1") || "");
+  const selected = profileMovieForId(String(bannerSelect.value || fallbackMovieId));
+  const preview = form.querySelector(".member-profile-banner-preview");
+  if (!preview) return;
+  preview.innerHTML = selected
+    ? `<img src="${escapeHTML(selected.backdropUrl || selected.posterUrl || imageAssets.journalFallback)}" alt="" data-profile-banner-preview-image /><span data-profile-banner-preview-title>${escapeHTML(selected.title)}</span>`
+    : `<span class="material-symbols-outlined" aria-hidden="true">panorama</span><span data-profile-banner-preview-title>Select a Top Five film</span>`;
+});
+
 document.addEventListener("submit", async (event) => {
+  const memberProfileEditor = event.target.closest("[data-member-profile-form]");
+  if (memberProfileEditor) {
+    event.preventDefault();
+    if (!memberProfileEditor.reportValidity() || memberProfileBusy) return;
+    const form = new FormData(memberProfileEditor);
+    const movieIds = Array.from({ length: 5 }, (_, index) => String(form.get(`movie_${index + 1}`) || "")).filter(Boolean);
+    if (new Set(movieIds).size !== movieIds.length) {
+      showToast("Choose each Top Five film only once.");
+      return;
+    }
+    const action = event.submitter?.value === "publish" ? "publish" : "draft";
+    if (action === "publish" && movieIds.length === 0) {
+      showToast("Choose at least one Top Five film before publishing.");
+      return;
+    }
+    const requestedBannerMovieId = String(form.get("banner_movie_id") || "");
+    const bannerMovieId = requestedBannerMovieId || movieIds[0] || null;
+    if (bannerMovieId && !movieIds.includes(bannerMovieId)) {
+      showToast("Choose a banner film that is also in your Top Five.");
+      return;
+    }
+    const includeRecentWatches = form.has("include_recent_watches");
+    const includeGenreBreakdown = form.has("include_genre_breakdown");
+    memberProfileBusy = true;
+    render();
+    try {
+      const introduction = String(form.get("introduction") || "").trim();
+      const nextDraft = { introduction, movieIds, bannerMovieId, includeRecentWatches, includeGenreBreakdown };
+      if (designPreviewMode) {
+        memberProfileDraft = nextDraft;
+        memberProfileDraftSaved = true;
+        if (action === "publish") {
+          const nextProfile = buildPreviewMemberProfilePublication(nextDraft);
+          memberProfiles = [...memberProfiles.filter((profile) => profile.ownerId !== authUser.id), nextProfile];
+        }
+        persistDesignPreviewWorkspace();
+      } else {
+        const { error: draftError } = await supabase.rpc("save_member_profile_draft", {
+          p_group_id: activeGroup.id,
+          p_introduction: introduction,
+          p_movie_ids: movieIds,
+          p_banner_movie_id: bannerMovieId,
+          p_include_recent_watches: includeRecentWatches,
+          p_include_genre_breakdown: includeGenreBreakdown,
+        });
+        if (draftError) throw draftError;
+        memberProfileDraft = nextDraft;
+        memberProfileDraftSaved = true;
+        if (action === "publish") {
+          const { error: publishError } = await supabase.rpc("publish_member_profile", { p_group_id: activeGroup.id });
+          if (publishError) throw publishError;
+          applyMemberProfilesResult(await fetchMemberProfiles(activeGroup.id));
+        }
+      }
+      memberProfileBusy = false;
+      if (action === "publish") {
+        navigate("profile", authUser.id);
+      } else {
+        render();
+      }
+      showToast(action === "publish" ? "Your profile is now visible to approved Cine-Cord members." : "Your profile draft was saved privately.");
+    } catch (error) {
+      memberProfileBusy = false;
+      render();
+      showToast(`Your profile was not ${action === "publish" ? "published" : "saved"}: ${error.message}`);
+    }
+    return;
+  }
+
   const reviewEditor = event.target.closest("[data-personal-review-form]");
   if (reviewEditor) {
     event.preventDefault();
@@ -4584,8 +5115,44 @@ document.addEventListener("submit", async (event) => {
 document.addEventListener("click", async (event) => {
   const areaButton = event.target.closest("[data-nav-area-toggle]");
   if (areaButton && !areaButton.disabled) { navigate(areaButton.dataset.defaultView); return; }
+  const editMemberProfile = event.target.closest("[data-edit-member-profile]");
+  if (editMemberProfile) {
+    navigate("profile-edit");
+    return;
+  }
+  const unpublishMemberProfile = event.target.closest("[data-unpublish-member-profile]");
+  if (unpublishMemberProfile) {
+    if (!window.confirm("Unpublish your profile? Your private draft will be kept.")) return;
+    memberProfileBusy = true;
+    render();
+    try {
+      if (designPreviewMode) {
+        memberProfiles = memberProfiles.filter((profile) => profile.ownerId !== authUser.id);
+      } else {
+        const { error } = await supabase.rpc("unpublish_member_profile", { p_group_id: activeGroup.id });
+        if (error) throw error;
+        applyMemberProfilesResult(await fetchMemberProfiles(activeGroup.id));
+      }
+      memberProfileBusy = false;
+      if (designPreviewMode) persistDesignPreviewWorkspace();
+      render();
+      showToast("Your profile is private again. The draft is still saved.");
+    } catch (error) {
+      memberProfileBusy = false;
+      render();
+      showToast(`The profile was not unpublished: ${error.message}`);
+    }
+    return;
+  }
+  const retryMemberProfiles = event.target.closest("[data-retry-member-profiles]");
+  if (retryMemberProfiles) {
+    if (designPreviewMode) return;
+    applyMemberProfilesResult(await fetchMemberProfiles(activeGroup.id));
+    render();
+    return;
+  }
   const viewButton = event.target.closest("[data-view]");
-  if (viewButton) { navigate(viewButton.dataset.view); return; }
+  if (viewButton) { navigate(viewButton.dataset.view, viewButton.dataset.profileId || null); return; }
   if (event.target.closest("[data-toggle-auth-mode]")) { authMode = authMode === "signin" ? "signup" : "signin"; render(); return; }
   const discordButton = event.target.closest("[data-auth-discord]");
   if (discordButton) {
@@ -5701,16 +6268,20 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("hashchange", () => {
-  const requestedView = window.location.hash.replace("#", "");
-  const nextView = legacyViewMap[requestedView] || requestedView;
+  const route = routeFromHash();
+  const nextView = route.view;
   if (nextView && nextView !== currentView && authUser && activeGroup) {
     currentView = nextView;
+    selectedProfileId = route.profileId;
     selectedFilmId = null;
     reactionEditorExpanded = false;
     viewingEventEditorId = null;
     viewingEventPendingId = null;
     viewingEventLiveMessage = "";
     if (currentView !== "journal") journalFocusedEntryId = null;
+    render();
+  } else if (nextView === "profile" && authUser && activeGroup) {
+    selectedProfileId = route.profileId;
     render();
   }
 });

@@ -39,6 +39,7 @@ test("normalises a private row with its canonical movie metadata", () => {
       title: "Pulp Fiction",
       release_year: 1994,
       poster_path: "/poster.jpg",
+      backdrop_path: "/backdrop.jpg",
       runtime_minutes: 154,
       genres: ["Crime", "Drama"],
       overview: "Four interwoven stories.",
@@ -47,6 +48,7 @@ test("normalises a private row with its canonical movie metadata", () => {
 
   assert.equal(film.movieId, "movie-1");
   assert.equal(film.posterUrl, "https://image.tmdb.org/t/p/w500/poster.jpg");
+  assert.equal(film.backdropUrl, "https://image.tmdb.org/t/p/w1280/backdrop.jpg");
   assert.equal(film.rating, 4);
   assert.equal(film.isFavourite, true);
 });
