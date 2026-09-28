@@ -22,6 +22,23 @@ test("a My Cinema failure stays isolated from the shared workspace", async ({ pa
   await expect(page.getByRole("heading", { name: "My Cinema is empty." })).toHaveCount(0);
 });
 
+test("My Films can fill missing metadata without changing private state", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview=metadata-backfill#my-films");
+
+  const film = page.getByRole("button", { name: "View details for Pulp Fiction" });
+  const refreshButton = page.getByRole("button", { name: "Fill missing details · 1" });
+  await expect(film).toContainText("Runtime and genres unavailable");
+  await expect(refreshButton).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await refreshButton.click();
+  await expect(film).toContainText("154 min · Crime · Drama");
+  await expect(film).toContainText("Watched");
+  await expect(page.locator(".personal-poster-card").filter({ has: film }).getByText("Really liked it")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Fill missing details/ })).toHaveCount(0);
+  await page.reload();
+  await expect(film).toContainText("154 min · Crime · Drama");
+});
+
 test("large desktop library keeps poster artwork prominent as space grows", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "The responsive desktop grid is covered once.");
 

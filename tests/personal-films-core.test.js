@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyPersonalFilmPatch,
   filmsShareIdentity,
+  getPersonalFilmsMissingDetails,
   getVisiblePersonalFilms,
   getPublishedReviewsForMovie,
   getViewingEventsForMovie,
@@ -96,6 +97,19 @@ test("private filters and reactions keep the approved wording", () => {
   assert.deepEqual(getVisiblePersonalFilms(films, { query: "horror" }).map(({ id }) => id), ["2"]);
   assert.equal(personalStateLabel("DID_NOT_FINISH"), "Did Not Finish");
   assert.equal(reactionForValue(4).label, "Really liked it");
+});
+
+test("metadata refresh only selects distinct matched films missing runtime and genres", () => {
+  const missing = { ...movie, movieId: "movie-1", tmdbId: 680, runtime: null, genres: [] };
+  const films = [
+    missing,
+    { ...missing, id: "duplicate" },
+    { ...missing, movieId: "movie-2", tmdbId: 550, runtime: 139 },
+    { ...missing, movieId: "movie-3", tmdbId: 348, genres: ["Horror"] },
+    { ...missing, movieId: "movie-4", tmdbId: null },
+    { ...missing, movieId: "movie-5", tmdbId: 129 },
+  ];
+  assert.deepEqual(getPersonalFilmsMissingDetails(films).map((film) => film.movieId), ["movie-1", "movie-5"]);
 });
 
 test("personal viewing events normalise and sort repeated history without mixing films", () => {
