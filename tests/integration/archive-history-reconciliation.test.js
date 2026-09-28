@@ -20,9 +20,12 @@ let dean;
 let outsider;
 let alien;
 let matrix;
+let grandAdventure;
 let readyEntryId;
 let dnfEntryId;
 let queueItemId;
+let fuzzyEntryId;
+let punctuationEntryId;
 let manualReviewEntryId;
 let skippedReviewEntryId;
 
@@ -66,6 +69,7 @@ test("an administrator can preview and idempotently reconcile exact archive matc
     .insert([
       { tmdb_id: 348, title: "Alien", release_year: 1979 },
       { tmdb_id: 603, title: "The Matrix", release_year: 1999 },
+      { tmdb_id: 1003, title: "The Grand Adventure", release_year: 2010 },
       { tmdb_id: 1001, title: "Twin", release_year: 2000 },
       { tmdb_id: 1002, title: "Twin", release_year: 2000 },
     ])
@@ -73,6 +77,7 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   assert.equal(movieError, null);
   alien = movies.find((movie) => Number(movie.tmdb_id) === 348);
   matrix = movies.find((movie) => Number(movie.tmdb_id) === 603);
+  grandAdventure = movies.find((movie) => Number(movie.tmdb_id) === 1003);
 
   readyEntryId = archiveEntry({
     messageId: "700000000000000001",
@@ -93,6 +98,8 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   archiveEntry({ messageId: "700000000000000004", label: "1398", title: "Twin", year: 2000, viewers: ["Dean"] });
   archiveEntry({ messageId: "700000000000000005", label: "1397", title: "Alien", year: 1979, viewers: [], parserStatus: "REVIEW" });
   archiveEntry({ messageId: "700000000000000006", label: "1396", title: "Alien", year: 1979, viewers: ["Andrew"] });
+  fuzzyEntryId = archiveEntry({ messageId: "700000000000000009", label: "1393", title: "The Grand Adventur", year: 2012, viewers: ["Dean"] });
+  punctuationEntryId = archiveEntry({ messageId: "700000000000000010", label: "1392", title: "The Matrix!", year: 2001, viewers: ["Dean"] });
 
   const { data: queueItem, error: queueError } = await cambo.client
     .from("queue_items")
@@ -118,6 +125,17 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   assert.equal(statusByTitle.get("Twin:2000:1398"), "AMBIGUOUS_MOVIE");
   assert.equal(statusByTitle.get("Alien:1979:1397"), "NO_CONFIRMED_VIEWER");
   assert.equal(statusByTitle.get("Alien:1979:1396"), "NO_CONFIRMED_VIEWER");
+  const fuzzyTitleRow = preview.find((row) => row.entry_label === "1393");
+  assert.equal(fuzzyTitleRow.match_status, "NEEDS_REVIEW");
+  assert.equal(fuzzyTitleRow.movie_id, grandAdventure.id);
+  assert.equal(fuzzyTitleRow.canonical_title, "The Grand Adventure");
+  assert.equal(fuzzyTitleRow.candidate_count, 1);
+  assert.match(fuzzyTitleRow.match_reason, /within five years/i);
+  const punctuationRow = preview.find((row) => row.entry_label === "1392");
+  assert.equal(punctuationRow.match_status, "NEEDS_REVIEW");
+  assert.equal(punctuationRow.movie_id, matrix.id);
+  assert.equal(punctuationRow.canonical_title, "The Matrix");
+  assert.match(punctuationRow.match_reason, /within five years/i);
 
   const { data: firstApply, error: firstApplyError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
     p_group_id: group,
@@ -157,6 +175,33 @@ test("an administrator can preview and idempotently reconcile exact archive matc
 
   assert.deepEqual(sqlRow(`select watched from public.queue_items where id = '${queueItemId}'`), { watched: false });
 
+  const { error: fuzzyReviewError } = await cambo.client.rpc("save_archive_history_reconciliation_review", {
+    p_group_id: group,
+    p_archive_entry_id: fuzzyEntryId,
+    p_movie_id: grandAdventure.id,
+    p_viewer_keys: ["dean"],
+    p_decision: "APPROVED",
+  });
+  assert.equal(fuzzyReviewError, null);
+
+  const { data: fuzzyApply, error: fuzzyApplyError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
+    p_group_id: group,
+    p_archive_entry_ids: [fuzzyEntryId],
+  });
+  assert.equal(fuzzyApplyError, null);
+  assert.deepEqual(fuzzyApply, {
+    entries_applied: 1,
+    events_created: 1,
+    events_already_present: 0,
+    events_total: 1,
+  });
+  assert.deepEqual(sqlRow(`
+    select owner_id, movie_id, outcome, source_archive_entry_id
+    from public.personal_viewing_events
+    where source_archive_entry_id = '${fuzzyEntryId}'
+  `), { owner_id: dean.id, movie_id: grandAdventure.id, outcome: "FINISHED", source_archive_entry_id: fuzzyEntryId });
+  assert.equal(sqlRow(`select count(*)::integer as count from public.personal_viewing_events where source_archive_entry_id = '${punctuationEntryId}'`).count, 0);
+
   const { data: secondApply, error: secondApplyError } = await cambo.client.rpc("apply_archive_history_reconciliation", {
     p_group_id: group,
     p_archive_entry_ids: null,
@@ -173,6 +218,7 @@ test("an administrator can preview and idempotently reconcile exact archive matc
   assert.equal(finalPreviewError, null);
   assert.equal(finalPreview.find((row) => row.archive_entry_id === readyEntryId).match_status, "ALREADY_SYNCED");
   assert.equal(finalPreview.find((row) => row.archive_entry_id === dnfEntryId).match_status, "ALREADY_SYNCED");
+  assert.equal(finalPreview.find((row) => row.archive_entry_id === fuzzyEntryId).match_status, "ALREADY_SYNCED");
 
   manualReviewEntryId = archiveEntry({ messageId: "700000000000000007", label: "1395", title: "Unknown Discord title", year: 2001, viewers: ["Andrew"] });
   skippedReviewEntryId = archiveEntry({ messageId: "700000000000000008", label: "1394", title: "Another unknown title", year: 2002, viewers: ["Dean"] });
