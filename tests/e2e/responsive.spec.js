@@ -240,6 +240,17 @@ test("area navigation keeps future sections truthful and available routes workin
   await expect(cineCordArea).toHaveClass(/is-open/);
 });
 
+test("admin Journal reconciliation previews safe private-history matches", async ({ page }) => {
+  await page.goto("/moviepicker/?design-preview#members");
+  await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
+
+  const panel = page.locator(".journal-reconciliation");
+  await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
+  await expect(panel).toContainText("Resident Evil");
+  await expect(panel).toContainText("No canonical movie");
+  await expect(panel.getByRole("button", { name: "Sync 1 film", exact: true })).toBeEnabled();
+});
+
 test("phone and tablet destination row supports keyboard movement and reveals the active route", async ({ page }, testInfo) => {
   test.skip(!["phone", "tablet"].includes(testInfo.project.name), "The two-tier footer is used on phone and tablet.");
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   JOURNAL_CHANNELS,
+  parseJournalEntries,
   parseJournalMessage,
   planArchiveViewingHistory,
   resolveHistoricalViewerTargets,
@@ -40,6 +41,7 @@ test("parses a normal historical Journal message", () => {
 
   assert.equal(result.kind, "entry");
   assert.equal(result.record.entry_label, "1");
+  assert.equal(result.record.entry_index, 1);
   assert.equal(result.record.entry_sort_number, 1);
   assert.equal(result.record.title, "Belzebuth");
   assert.equal(result.record.release_year, 2017);
@@ -48,6 +50,31 @@ test("parses a normal historical Journal message", () => {
   assert.equal(result.record.comment, "Two cops try to track down the devil");
   assert.equal(result.record.watched_at, "2020-05-24");
   assert.equal(result.record.parser_status, "PARSED");
+});
+
+test("splits multiple Journal entries stored in one Discord message", () => {
+  const results = parseJournalEntries(message([
+    "- Entry #1347",
+    "- Colony",
+    "- 2026",
+    "- Viewers: Andrew, Dean",
+    "- Status: Finished",
+    "- The Koreans know how to make a crazy zombie movie.",
+    "- Entry #1348",
+    "- John Wick: Chapter 4",
+    "- 2023",
+    "- Viewers: Andrew, Cameron, Dean",
+    "- Status: Finished",
+    "- John Wick",
+  ].join("\n")), channel);
+
+  assert.equal(results.length, 2);
+  assert.deepEqual(results.map((result) => result.record.entry_index), [1, 2]);
+  assert.deepEqual(results.map((result) => result.record.entry_label), ["1347", "1348"]);
+  assert.deepEqual(results.map((result) => result.record.title), ["Colony", "John Wick: Chapter 4"]);
+  assert.equal(results[0].record.comment, "The Koreans know how to make a crazy zombie movie.");
+  assert.equal(results[1].record.comment, "John Wick");
+  assert.deepEqual(results.map((result) => result.record.parser_status), ["PARSED", "PARSED"]);
 });
 
 test("preserves decimal and annotated labels without treating them as global IDs", () => {
