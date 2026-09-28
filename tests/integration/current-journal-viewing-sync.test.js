@@ -126,6 +126,84 @@ test("a verified current viewer and canonical movie create one private source ev
   assert.deepEqual(personalFilm, { rating: 5, is_favourite: true });
 });
 
+test("a confirmed archive viewer can receive a private history event", async () => {
+  const volumeId = sqlRow(`
+    select id
+    from public.journal_volumes
+    where discord_channel_id = '713935563912118293'
+  `).id;
+  runSql(`
+    insert into public.journal_archive_entries (
+      group_id, volume_id, discord_message_id, discord_jump_url,
+      entry_label, entry_sort_number, title, release_year, watched_at,
+      status, viewer_names, author_display_name, message_created_at, raw_content
+    ) values (
+      '${group}', '${volumeId}', '999999999999999999',
+      'https://discord.com/channels/272427070779293697/713935563912118293/999999999999999999',
+      '13', 13, 'Alien', 1979, '2020-06-02', 'FINISHED',
+      array['Cameron', 'Dean', 'Andrew'], 'Cameron', '2020-06-02T20:00:00Z',
+      '- Entry #13'
+    );
+  `);
+  const confirmedArchiveId = sqlRow(`
+    select id
+    from public.journal_archive_entries
+    where discord_message_id = '999999999999999999'
+  `).id;
+
+  runSql(`
+    insert into public.personal_viewing_events (
+      owner_id, movie_id, outcome, watched_on, source_archive_entry_id
+    ) values
+      ('${owner.id}', '${alien.id}', 'FINISHED', '2020-06-02', '${confirmedArchiveId}'),
+      ('${otherMember.id}', '${alien.id}', 'FINISHED', '2020-06-02', '${confirmedArchiveId}');
+  `);
+
+  assert.deepEqual(sqlRows(`
+    select owner_id, movie_id, outcome, watched_on, source_archive_entry_id, is_hidden
+    from public.personal_viewing_events
+    where source_archive_entry_id = '${confirmedArchiveId}'
+    order by owner_id
+  `), [
+    {
+      owner_id: owner.id,
+      movie_id: alien.id,
+      outcome: "FINISHED",
+      watched_on: "2020-06-02",
+      source_archive_entry_id: confirmedArchiveId,
+      is_hidden: false,
+    },
+    {
+      owner_id: otherMember.id,
+      movie_id: alien.id,
+      outcome: "FINISHED",
+      watched_on: "2020-06-02",
+      source_archive_entry_id: confirmedArchiveId,
+      is_hidden: false,
+    },
+  ].sort((left, right) => left.owner_id.localeCompare(right.owner_id)));
+
+  assert.equal(sqlRow(`
+    select state
+    from public.personal_films
+    where owner_id = '${otherMember.id}' and movie_id = '${alien.id}'
+  `).state, "WATCHED");
+
+  const { data: ownerRows, error: ownerError } = await owner.client
+    .from("personal_viewing_events")
+    .select("owner_id,source_archive_entry_id")
+    .eq("source_archive_entry_id", confirmedArchiveId);
+  assert.equal(ownerError, null);
+  assert.deepEqual(ownerRows, [{ owner_id: owner.id, source_archive_entry_id: confirmedArchiveId }]);
+
+  runSql(`delete from public.journal_archive_entries where id = '${confirmedArchiveId}';`);
+  assert.equal(sqlRow(`
+    select count(*)::integer as count
+    from public.personal_viewing_events
+    where source_archive_entry_id = '${confirmedArchiveId}'
+  `).count, 0);
+});
+
 test("Journal edits update source facts after viewer replacement without losing a private hidden choice", async () => {
   const { data: hidden, error: hideError } = await owner.client
     .from("personal_viewing_events")

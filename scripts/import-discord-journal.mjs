@@ -28,6 +28,19 @@ export const JOURNAL_CHANNELS = Object.freeze([
   },
 ]);
 
+export const HISTORICAL_VIEWER_TARGETS = Object.freeze([
+  Object.freeze({
+    key: "cambo",
+    profileName: "Cambo",
+    aliases: Object.freeze(["cambo", "camebo", "cameron"]),
+  }),
+  Object.freeze({
+    key: "dean",
+    profileName: "deanshelton17",
+    aliases: Object.freeze(["dean"]),
+  }),
+]);
+
 const DIVIDER = /^[-—–_=*]{8,}$/u;
 const ENTRY_HEADER = /^Entry\s*#\s*(.+)$/i;
 const YEAR = /^(18\d{2}|19\d{2}|20\d{2}|21\d{2}|2200)(?:\s*(?:[-–,/]|and\b|\().*)?$/i;
@@ -71,6 +84,116 @@ function splitViewerNames(value) {
     .split(/,|\s+&\s+/)
     .map((name) => name.trim())
     .filter(Boolean);
+}
+
+function viewerTokens(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+}
+
+export function resolveHistoricalViewerTargets(viewerNames) {
+  const tokens = (Array.isArray(viewerNames) ? viewerNames : [viewerNames])
+    .flatMap(viewerTokens);
+  const tokenSet = new Set(tokens);
+  return HISTORICAL_VIEWER_TARGETS
+    .filter((target) => target.aliases.some((alias) => tokenSet.has(alias)))
+    .map((target) => target.key);
+}
+
+function normaliseMovieTitle(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function movieKey(title, releaseYear) {
+  return `${normaliseMovieTitle(title)}:${Number(releaseYear)}`;
+}
+
+export function planArchiveViewingHistory(archiveRows, { profiles = [], movies = [] } = {}) {
+  const profilesByTarget = new Map();
+  const missingProfiles = [];
+  for (const target of HISTORICAL_VIEWER_TARGETS) {
+    const matches = profiles.filter((profile) => (
+      String(profile.display_name || "").trim().toLowerCase() === target.profileName.toLowerCase()
+    ));
+    if (matches.length === 1) profilesByTarget.set(target.key, matches[0].id);
+    else missingProfiles.push({ target: target.key, profileName: target.profileName, matches: matches.length });
+  }
+
+  const moviesByKey = new Map();
+  for (const movie of movies) {
+    for (const title of [movie.title, movie.original_title]) {
+      if (!title || !movie.release_year) continue;
+      const key = movieKey(title, movie.release_year);
+      const matches = moviesByKey.get(key) || [];
+      if (!matches.some((match) => match.id === movie.id)) matches.push(movie);
+      moviesByKey.set(key, matches);
+    }
+  }
+
+  const events = [];
+  const skipped = [];
+  const matchedArchiveIds = new Set();
+  for (const row of archiveRows) {
+    const targets = resolveHistoricalViewerTargets(row.viewer_names);
+    if (!targets.length) continue;
+    const movieMatches = row.release_year
+      ? (moviesByKey.get(movieKey(row.title, row.release_year)) || [])
+      : [];
+    const reason = !row.release_year
+      ? "missing_release_year"
+      : row.status === "UNKNOWN"
+        ? "unrecognised_status"
+        : movieMatches.length === 0
+          ? "no_unique_canonical_movie"
+          : movieMatches.length > 1
+            ? "ambiguous_canonical_movie"
+            : null;
+    if (reason) {
+      skipped.push({ archiveEntryId: row.id, title: row.title, releaseYear: row.release_year, reason });
+      continue;
+    }
+
+    const movie = movieMatches[0];
+    let addedForRow = false;
+    for (const target of targets) {
+      const ownerId = profilesByTarget.get(target);
+      if (!ownerId) {
+        skipped.push({ archiveEntryId: row.id, title: row.title, releaseYear: row.release_year, target, reason: "missing_target_profile" });
+        continue;
+      }
+      events.push({
+        owner_id: ownerId,
+        movie_id: movie.id,
+        outcome: row.status === "DNF" ? "DID_NOT_FINISH" : "FINISHED",
+        watched_on: row.watched_at,
+        source_archive_entry_id: row.id,
+      });
+      addedForRow = true;
+    }
+    if (addedForRow) matchedArchiveIds.add(row.id);
+  }
+
+  return {
+    events,
+    skipped,
+    missingProfiles,
+    summary: {
+      archiveRows: archiveRows.length,
+      archiveRowsWithEvents: matchedArchiveIds.size,
+      events: events.length,
+      skipped: skipped.length,
+      missingProfiles,
+    },
+  };
 }
 
 export function parseJournalMessage(message, channel) {
@@ -322,10 +445,47 @@ export async function applyDiscordJournalImport(report, { supabaseUrl, secretKey
     if (error) throw error;
   }
 
+  const archiveRows = [];
+  for (const batch of chunks(report.entries.map((entry) => entry.record.discord_message_id), 200)) {
+    const { data, error } = await supabase
+      .from("journal_archive_entries")
+      .select("id,discord_message_id,title,release_year,watched_at,status,viewer_names")
+      .in("discord_message_id", batch);
+    if (error) throw error;
+    archiveRows.push(...(data || []));
+  }
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from("group_memberships")
+    .select("user_id")
+    .eq("group_id", group);
+  if (membershipError) throw membershipError;
+  const memberIds = (memberships || []).map((membership) => membership.user_id);
+  const { data: profiles, error: profileError } = memberIds.length
+    ? await supabase.from("profiles").select("id,display_name").in("id", memberIds)
+    : { data: [], error: null };
+  if (profileError) throw profileError;
+
+  const { data: movies, error: movieError } = await supabase
+    .from("movies")
+    .select("id,title,original_title,release_year")
+    .limit(10000);
+  if (movieError) throw movieError;
+
+  const historyPlan = planArchiveViewingHistory(archiveRows, { profiles, movies });
+  for (const batch of chunks(historyPlan.events, 200)) {
+    const { error } = await supabase
+      .from("personal_viewing_events")
+      .upsert(batch, { onConflict: "owner_id,source_archive_entry_id" });
+    if (error) throw error;
+  }
+
   return {
     imported: rows.length,
     linkedManagedEntries: linkedManagedEntries.length,
     totalCandidates: report.entries.length,
+    viewingHistory: historyPlan.summary,
+    viewingHistorySkipped: historyPlan.skipped,
   };
 }
 
