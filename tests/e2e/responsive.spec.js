@@ -303,7 +303,7 @@ test("admin Journal reconciliation previews safe private-history matches", async
   await expect(panel).toContainText("Resident Evil");
   await expect(panel).toContainText("No canonical movie");
   await expect(panel.getByRole("button", { name: "Sync 1 film", exact: true })).toBeEnabled();
-  await expect(panel.locator("summary").filter({ hasText: "Review this entry" })).toHaveCount(2);
+  await expect(panel.locator("summary").filter({ hasText: "Review this entry" })).toHaveCount(4);
 
   await panel.getByRole("button", { name: "Find likely TMDB matches", exact: true }).click();
   const suggestedRow = panel.locator(".journal-reconciliation-row").filter({ hasText: "Green Lantern: Beware My Power" });
@@ -343,6 +343,45 @@ test("admin can dry-run and approve clear Journal matches before a separate Sync
 
   const row = panel.locator(".journal-reconciliation-row").filter({ hasText: "Green Lantern: Beware My Power" });
   await expect(row).toContainText("Ready to sync");
+  await expect(panel.getByRole("button", { name: "Sync 2 films", exact: true })).toBeEnabled();
+});
+
+test("admin can batch triage selected entries while leaving ambiguous films for individual review", async ({ page }, testInfo) => {
+  await page.goto("/moviepicker/?design-preview#members");
+  const panel = page.locator(".journal-reconciliation");
+  await panel.getByRole("button", { name: "Preview matches", exact: true }).click();
+  await panel.getByRole("button", { name: "Load review queue", exact: true }).click();
+
+  const queue = panel.locator(".journal-triage");
+  await expect(queue.getByRole("button", { name: "Suggested 1", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(queue.locator(".journal-triage-row")).toHaveCount(1);
+  await expect(queue).toContainText("Green Lantern: Beware My Power");
+  const overflow = await queue.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await queue.locator(".journal-triage-row").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("journal-triage.png") });
+  await expect(queue.getByRole("button", { name: "Save 0 decisions", exact: true })).toBeDisabled();
+  await queue.getByRole("button", { name: "Select visible suggestions", exact: true }).click();
+  await expect(queue.getByRole("button", { name: "Save 1 decision", exact: true })).toBeEnabled();
+
+  await queue.getByRole("button", { name: "No match 1", exact: true }).click();
+  await expect(queue).toContainText("Xbox Showcase");
+  await queue.getByRole("checkbox", { name: "Keep archive only for Xbox Showcase" }).check();
+  await expect(queue.getByRole("button", { name: "Save 2 decisions", exact: true })).toBeEnabled();
+  await queue.getByRole("button", { name: "Individual 1", exact: true }).click();
+  await expect(queue).toContainText("The Firm");
+  await expect(queue.getByRole("checkbox", { name: "Keep archive only for The Firm" })).not.toBeChecked();
+  await queue.getByRole("button", { name: "Review individually" }).click();
+  await expect(panel.locator('[data-reconciliation-entry-id="preview-archive-firm"] .journal-reconciliation-review')).toHaveAttribute("open", "");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await queue.getByRole("button", { name: "Save 2 decisions", exact: true }).click();
+  const filters = panel.locator('[data-journal-reconciliation-filter-form]');
+  await filters.getByRole("textbox", { name: "Find an archive entry" }).fill("");
+  await filters.getByRole("combobox", { name: "Status" }).selectOption("all");
+  await filters.getByRole("button", { name: "Filter" }).click();
+  await expect(panel.locator('[data-reconciliation-entry-id="preview-archive-green-lantern"]')).toContainText("Ready to sync");
+  await expect(panel.locator('[data-reconciliation-entry-id="preview-archive-showcase"]')).toContainText("Skipped");
   await expect(panel.getByRole("button", { name: "Sync 2 films", exact: true })).toBeEnabled();
 });
 

@@ -138,43 +138,48 @@ Deno.serve(async (req: Request) => {
     const allCandidates: Record<string, unknown>[] = [];
     let candidatesStored = 0;
 
-    for (const entry of entries) {
-      const candidates = await candidatesForEntry(entry, token);
-      await restRows(
-        base,
-        `archive_history_match_candidates?archive_entry_id=eq.${encodeURIComponent(entry.id)}`,
-        secretKey,
-        { method: "DELETE", headers: { Prefer: "return=minimal" } },
-      );
-      if (candidates.length) {
-        const rows = candidates.map((candidate) => ({
-          archive_entry_id: entry.id,
-          tmdb_id: candidate.tmdbId,
-          title: candidate.title,
-          release_year: candidate.year,
-          poster_path: candidate.posterPath,
-          overview: candidate.overview,
-          score: candidate.score,
-          title_score: candidate.titleScore,
-          year_delta: candidate.yearDelta,
-          match_band: candidate.matchBand,
-          candidate_rank: candidate.candidateRank,
-          search_query: String(entry.title || "").slice(0, 200),
-          source: "TMDB",
-        }));
-        const response = await fetch(`${base}/rest/v1/archive_history_match_candidates?on_conflict=archive_entry_id,tmdb_id`, {
-          method: "POST",
-          headers: {
-            ...supabaseHeaders(secretKey, authorizationForSupabaseKey(secretKey)),
-            "Content-Type": "application/json",
-            Prefer: "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify(rows),
-        });
-        if (!response.ok) throw new Error(`Could not cache archive match candidates (${response.status}).`);
-        candidatesStored += rows.length;
-        allCandidates.push(...candidates.map((candidate) => ({
-          archiveEntryId: entry.id,
+    for (let start = 0; start < entries.length; start += 3) {
+      const results = await Promise.all(entries.slice(start, start + 3).map(async (entry) => {
+        const candidates = await candidatesForEntry(entry, token);
+        await restRows(
+          base,
+          `archive_history_match_candidates?archive_entry_id=eq.${encodeURIComponent(entry.id)}`,
+          secretKey,
+          { method: "DELETE", headers: { Prefer: "return=minimal" } },
+        );
+        if (candidates.length) {
+          const rows = candidates.map((candidate) => ({
+            archive_entry_id: entry.id,
+            tmdb_id: candidate.tmdbId,
+            title: candidate.title,
+            release_year: candidate.year,
+            poster_path: candidate.posterPath,
+            overview: candidate.overview,
+            score: candidate.score,
+            title_score: candidate.titleScore,
+            year_delta: candidate.yearDelta,
+            match_band: candidate.matchBand,
+            candidate_rank: candidate.candidateRank,
+            search_query: String(entry.title || "").slice(0, 200),
+            source: "TMDB",
+          }));
+          const response = await fetch(`${base}/rest/v1/archive_history_match_candidates?on_conflict=archive_entry_id,tmdb_id`, {
+            method: "POST",
+            headers: {
+              ...supabaseHeaders(secretKey, authorizationForSupabaseKey(secretKey)),
+              "Content-Type": "application/json",
+              Prefer: "resolution=merge-duplicates,return=minimal",
+            },
+            body: JSON.stringify(rows),
+          });
+          if (!response.ok) throw new Error(`Could not cache archive match candidates (${response.status}).`);
+        }
+        return { entryId: entry.id, candidates };
+      }));
+      for (const result of results) {
+        candidatesStored += result.candidates.length;
+        allCandidates.push(...result.candidates.map((candidate) => ({
+          archiveEntryId: result.entryId,
           ...candidate,
         })));
       }
