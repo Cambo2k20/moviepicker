@@ -140,6 +140,9 @@ Deno.serve(async (req: Request) => {
     const payload = hubPayload();
     const metadata = await webhookMetadata(webhook);
     const messageUrl = existing?.discord_message_id ? discordWebhookMessageUrl(webhook, existing.discord_message_id) : null;
+    const executeUrl = new URL(webhook);
+    executeUrl.searchParams.set("with_components", "true");
+    if (messageUrl) messageUrl.searchParams.set("with_components", "true");
     const attemptStartedAt = new Date().toISOString();
     const reserved = await write(supabaseUrl, "discord_hub_publications?on_conflict=group_id", serviceKey, "POST", {
       group_id: groupId,
@@ -154,14 +157,26 @@ Deno.serve(async (req: Request) => {
     if (!reserved.response.ok) return respond({ error: "The Cine-Cord hub is already being updated or could not reserve an update." }, 409);
 
     let discordResponse;
+    let updatedExisting = Boolean(messageUrl);
     if (messageUrl) {
       discordResponse = await fetch(messageUrl, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      // A recreated or rotated webhook can no longer edit the old message.
+      // Repair the hub by creating one new message instead of leaving Admin
+      // with an opaque Discord failure.
+      if (discordResponse.status === 404) {
+        updatedExisting = false;
+        discordResponse = await fetch(executeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
     } else {
-      discordResponse = await fetch(webhook, {
+      discordResponse = await fetch(executeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -172,7 +187,7 @@ Deno.serve(async (req: Request) => {
       await write(supabaseUrl, `discord_hub_publications?group_id=eq.${encodeURIComponent(groupId)}`, serviceKey, "PATCH", { status: "FAILED", last_error: errorMessage }).catch(() => null);
       return respond({ error: errorMessage }, discordResponse.status === 429 ? 429 : 502);
     }
-    const message = messageUrl ? existing : await discordResponse.json().catch(() => null);
+    const message = updatedExisting ? existing : await discordResponse.json().catch(() => null);
     const messageId = String(existing?.discord_message_id || message?.id || "").trim();
     const channelId = String(existing?.discord_channel_id || message?.channel_id || metadata?.channelId || "").trim();
     const guildId = String(existing?.discord_guild_id || message?.guild_id || metadata?.guildId || DISCORDIANS_GUILD_ID).trim();
@@ -193,7 +208,7 @@ Deno.serve(async (req: Request) => {
       last_error: null,
     }, "resolution=merge-duplicates,return=representation");
     if (!saved.response.ok) return respond({ error: "Discord was updated, but the hub record could not be saved." }, 502);
-    return respond({ messageUrl: `https://discord.com/channels/${encodeURIComponent(guildId)}/${encodeURIComponent(channelId)}/${encodeURIComponent(messageId)}`, updated: Boolean(messageUrl) });
+    return respond({ messageUrl: `https://discord.com/channels/${encodeURIComponent(guildId)}/${encodeURIComponent(channelId)}/${encodeURIComponent(messageId)}`, updated: updatedExisting });
   } catch (error) {
     return respond({ error: error instanceof Error ? error.message : "The Cine-Cord hub could not be published." }, 500);
   }
